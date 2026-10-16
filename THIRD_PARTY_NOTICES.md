@@ -48,3 +48,11 @@ The complete upstream license is bundled in the APK at `assets/LICENSE-Readium.t
 AndroidX/Jetpack Compose, Kotlin/coroutines, OkHttp, Gson and the Gradle wrapper are independently obtained dependencies. Their exact versions belong to Gradle manifests. The Apache-2.0 license text is bundled at `assets/LICENSE-Apache-2.0.txt`. Jsoup uses the MIT license; its code is supplied transitively or through the build dependency, not copied from another app.
 
 The new Margin implementation is licensed under Apache-2.0; dependency and dictionary licenses remain their own.
+
+## Online word recordings
+
+Word-audio actions query the [Wikimedia Commons Action API](https://commons.wikimedia.org/w/api.php) for actual audio files and their per-file metadata. Downloaded audio is held in bounded memory for playback, not bundled under Margin's Apache license. Commons hosts individual contributions under different licenses; there is no blanket license for every recording.
+
+The app displays the selected file's creator, source page and license, including links. Public-domain files remain identified as public domain; Creative Commons files retain their specific license and creator attribution. Source metadata must support playback; unknown licensing or unavailable attribution is not replaced with a commercial dictionary recording.
+
+Examples of verified source files: [UK hello](https://commons.wikimedia.org/w/index.php?curid=9021983), Association Shtooka and Judith Franck, [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/); [US hello](https://commons.wikimedia.org/w/index.php?curid=268421), Dvortygirl, public domain. These are provenance examples, not a guarantee that every word has both accents. No Cambridge, Oxford or Eudic content is copied or claimed as licensed.

@@ -10,5 +10,12 @@
 - **Dictionary lookup**: an explicit offline lexical lookup. It does not claim to interpret the current sentence.
 - **Quick Explain**: opening an explanation from a new selection without an additional Explain action.
 - **Pronunciation**: audible reading of a selected term, phrase or example. IPA is written phonetic notation, not audio.
+- **Recorded pronunciation**: an existing audio recording of a word. Distinct from synthesized speech and written IPA.
+- **System speech**: synthesized reading of text using the phone's configured speech engine.
+- **Preferred accent**: the desired English pronunciation variety. It does not describe the accent of every available recording or voice.
 - **Reading time**: measured active foreground reading duration. It is not vocabulary mastery or estimated time remaining.
-- **Model configuration**: the reader's chosen provider endpoint, model and credentials for AI explanations.
+- **Model configuration**: the settings used to request explanations from a model provider.
+- **Temperature**: model sampling randomness. Not response speed or reasoning mode.
+- **Model profile**: a named, saved model configuration.
+- **Active profile**: the model profile selected for new explanation requests.
+- **Chapter page position**: the currently visible page and total pages for the current chapter under current layout. Not a durable reading position or a fixed whole-book page count.

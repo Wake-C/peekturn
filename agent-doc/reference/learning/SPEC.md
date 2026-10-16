@@ -1,0 +1,23 @@
+# Learning requirements
+
+## Selection context
+
+Exact selected word or phrase is the target. Use Readium selection locator text.before/highlight/after and available book/chapter titles. Trim before to its last 30 whitespace-delimited words and after to its first 30; each source snippet remains limited by what Readium provides (approximately 200 characters per side in the inspected implementation). Sixty surrounding words is a ceiling, not a guaranteed minimum. No full-paragraph reconstruction, chapter parsing, or text search for another occurrence of the word. Missing context is allowed and must not be invented.
+
+Normal selection opens actions Explain, Dictionary, Copy. Quick Explain is a global persisted preference, default off: a newly established selection starts one request. Handle adjustment must not create repeated automatic requests. Adjust selection closes/cancels the popup while preserving the source selection for adjustment; explicit Explain submits the changed phrase. Popup close clears selection. Navigation clears lookup and cancels work.
+
+## AI explanation
+
+Readers can save named OpenAI-compatible model profiles containing base URL, model identifier, API key and temperature, then switch the active profile without re-entering credentials. Temperature is a finite number from 0 to 2, default 0.3, sent on both connection tests and explanations. It controls randomness, not response speed; provider/model support varies. There is no separate reasoning switch or request override. Invalid drafts cannot be saved or tested. Create/edit/delete/select are local configuration operations, not automatic provider failover. Existing configurations migrate without losing keys. Keys remain Android Keystore-encrypted per profile, absent from generic settings JSON, logs and backups. Missing credentials do not prevent reading or offline dictionary lookup.
+
+App-owned instructions request: term, partOfSpeech, ukIpa, usIpa, meaning, context, examples (one or two full strings). Easy English appropriate to an ordinary eighth-grade reader; contextual meaning, not a dictionary dump. Selection remains the target; normalize only direct word forms; phrases stay phrases. Source text and titles are user data, not system instructions. No custom-prompt editor.
+
+Request schema-constrained structured output when supported. JSON mode is a compatibility option inside the client, not a promise that any provider supports strict schemas. Validate response fields; no regex guessing of a different answer. Support streamed content and progressive complete fields, keep reasoning separate, and never expose raw JSON or incomplete example text as playable content. Refusal, empty answer, malformed output, HTTP errors, EOF without terminal completion, and token truncation are errors. Keep useful validated partial content labelled incomplete. Retry is explicit and uses latest saved configuration with the original context. Dismiss/leave/new selection cancels the request and ignores old callbacks. Do not add automatic charge-incurring retry loops.
+
+The explanation popup leads with meaning, then generated contextual meaning and one or two natural examples. It does not display the original book snippet, an “In your book” excerpt, or contextual book material in the dictionary view. A compact fixed header contains the selection, preferred IPA/part of speech and term speaker. Tab controls and footer use limited space, leaving an adequately sized answer area; larger bounds may overlap source text when a tiny side popup would distract through excessive scrolling. Long/error/partial responses remain scrollable; close/adjust remain reachable. Each full example has a speaker.
+
+Successful explanations are reused from bounded reader-session memory for identical selection, before/after context, book/chapter and active profile/configuration. Switching between AI and Dictionary preserves the result and ongoing same-lookup AI work instead of repeating a model request. Explicit Retry bypasses a cached result; failures are not successful cache entries. New contexts or profile changes cannot receive stale answers, and leaving the reader ends session work. This cache is not vocabulary history or permanent book data.
+
+## Dictionary
+
+Bundle a real offline English dictionary with verified upstream attribution. Lookup runs off the UI thread; normalize whitespace/case. Show available phonetic/part-of-speech/meaning fields. Missing entries and unsupported queries have honest states. Dictionary is a secondary explicit action, never a silent substitute for an AI response. Asset and first-use extraction must work without network.
