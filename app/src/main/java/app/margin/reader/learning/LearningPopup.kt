@@ -1,13 +1,18 @@
 package app.margin.reader.learning
 
-import android.graphics.RectF
 import android.app.Activity
 import android.content.ContextWrapper
+import android.graphics.RectF
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
@@ -16,10 +21,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
@@ -30,17 +38,17 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.margin.reader.data.OfflineDictionary
 import app.margin.reader.model.*
 import app.margin.reader.speech.PronunciationPlayer
+import app.margin.reader.ui.RecordingAttribution
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.collect
 import kotlin.math.roundToInt
 
-/** Focus ink-blue surface, warm text and quiet native press feedback; no scrim or entrance motion. */
+/** Quiet native ink-and-paper utility: meaning first, compact controls, no scrim or entrance motion. */
 @Composable
 fun LearningPopup(
     context: LookupContext,
     anchor: RectF?,
     settings: AppSettings,
-    client: ExplanationClient,
+    session: LearningSession,
     dictionary: OfflineDictionary,
     speech: PronunciationPlayer,
     initialDictionary: Boolean = false,
@@ -48,12 +56,14 @@ fun LearningPopup(
     onAdjust: () -> Unit
 ) {
     var dictionaryTab by remember(context) { mutableStateOf(initialDictionary) }
-    var retry by remember(context) { mutableIntStateOf(0) }
-    var answer by remember(context) { mutableStateOf(Explanation()) }
-    var complete by remember(context) { mutableStateOf(false) }
-    var loading by remember(context) { mutableStateOf(false) }
-    var error by remember(context) { mutableStateOf<String?>(null) }
+    var dictionaryRetry by remember(context) { mutableIntStateOf(0) }
     var entry by remember(context) { mutableStateOf<DictionaryEntry?>(null) }
+    var dictionaryLoading by remember(context) { mutableStateOf(false) }
+    var dictionaryError by remember(context) { mutableStateOf<String?>(null) }
+    // Once Explain has been opened, changing tabs never interrupts its request.
+    var explanationRequested by remember(context) { mutableStateOf(!initialDictionary) }
+    val explanation by session.state.collectAsState()
+    val answer = explanation.answer
     val latestSettings by rememberUpdatedState(settings)
     val playback by speech.state.collectAsState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -63,43 +73,39 @@ fun LearningPopup(
             (current as? ContextWrapper)?.baseContext?.takeUnless { it === current }
         }.filterIsInstance<Activity>().firstOrNull()
     }
+    DisposableEffect(session, context) {
+        onDispose { session.dismiss(context) }
+    }
     DisposableEffect(speech, lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) speech.stop() }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer); speech.stop() }
     }
     LaunchedEffect(context) {
-        if (latestSettings.autoPronounce) speech.speak(context.selection, latestSettings.accent)
+        if (latestSettings.autoPronounce) speech.speakWord(context.selection, latestSettings.accent)
     }
-    LaunchedEffect(context, dictionaryTab, retry) {
-        loading = true; error = null
+    LaunchedEffect(context, explanationRequested, settings.activeProfileId, settings.model) {
+        if (explanationRequested) session.open(context, settings.activeProfileId, settings.model)
+    }
+    LaunchedEffect(context, dictionaryTab, dictionaryRetry) {
+        if (!dictionaryTab || entry != null && dictionaryRetry == 0) return@LaunchedEffect
+        dictionaryLoading = true
+        dictionaryError = null
         try {
-            if (dictionaryTab) {
-                entry = null
-                entry = dictionary.lookup(context.selection)
-            } else {
-                answer = Explanation(); complete = false
-                client.explain(latestSettings.model, context).collect { event ->
-                    when (event) {
-                        is ExplanationEvent.Content -> answer = event.answer
-                        is ExplanationEvent.Complete -> { answer = event.answer; complete = true; loading = false }
-                        is ExplanationEvent.Failure -> { error = event.message; loading = false }
-                    }
-                }
-            }
+            entry = dictionary.lookup(context.selection)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { error = if (dictionaryTab) "The offline dictionary could not be opened. Try again." else "The explanation could not be loaded. Try again." }
-        finally { loading = false }
+        catch (_: Exception) { dictionaryError = "The offline dictionary could not be opened. Try again." }
+        finally { dictionaryLoading = false }
     }
     val density = LocalDensity.current
     val inset = with(density) { 12.dp.roundToPx() }
-    // 72dp term + two 48dp action rows + padding/dividers, leaving a useful body viewport.
-    val minimumHeight = with(density) { 260.dp.roundToPx() }
+    val minimumHeight = with(density) { 420.dp.roundToPx() }
     val bounds = anchor?.let { PopupSelectionBounds(it.left.roundToInt(), it.top.roundToInt(), it.right.roundToInt(), it.bottom.roundToInt()) }
     val position = remember(bounds, inset, minimumHeight) {
         object : PopupPositionProvider {
             override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
-                val geometry = learningPopupGeometry(windowSize.width, windowSize.height, popupContentSize.width, popupContentSize.height, bounds, inset, minimumHeight)
+                val geometry = learningPopupGeometry(windowSize.width, windowSize.height,
+                    popupContentSize.width, popupContentSize.height, bounds, inset, minimumHeight)
                 return IntOffset(geometry.x, geometry.y)
             }
         }
@@ -109,13 +115,14 @@ fun LearningPopup(
     val geometry = with(density) {
         val windowWidth = windowSize.width.takeIf { it > 0 } ?: configuration.screenWidthDp.dp.roundToPx()
         val windowHeight = windowSize.height.takeIf { it > 0 } ?: configuration.screenHeightDp.dp.roundToPx()
-        learningPopupGeometry(windowWidth, windowHeight, 420.dp.roundToPx(), 520.dp.roundToPx(),
+        learningPopupGeometry(windowWidth, windowHeight, 440.dp.roundToPx(), (windowHeight * .82f).roundToInt(),
             bounds, inset, minimumHeight)
     }
     val width = with(density) { geometry.width.toDp() }
     val height = with(density) { geometry.height.toDp() }
     fun close() { speech.stop(); onDismiss() }
-    Popup(popupPositionProvider = position, onDismissRequest = { close() }, properties = PopupProperties(focusable = true, clippingEnabled = true)) {
+    Popup(popupPositionProvider = position, onDismissRequest = { close() },
+        properties = PopupProperties(focusable = true, clippingEnabled = true)) {
         Surface(modifier = Modifier.width(width).heightIn(max = height).pointerInput(activity) {
             awaitPointerEventScope {
                 while (true) {
@@ -123,64 +130,95 @@ fun LearningPopup(
                     if (event.changes.any { it.pressed && !it.previousPressed }) activity?.onUserInteraction()
                 }
             }
-        }, shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), tonalElevation = 4.dp) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(context.selection, style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.weight(1f).heightIn(max = 72.dp).verticalScroll(rememberScrollState()))
-                    Text(latestSettings.accent, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    SpeakButton(context.selection, latestSettings.accent, speech, playback.text, playback.playing)
+        }, shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), tonalElevation = 0.dp) {
+            val accent = latestSettings.accent
+            val phonetic = if (dictionaryTab) entry?.phonetic.orEmpty() else if (accent == "UK") answer.ukIpa else answer.usIpa
+            val partOfSpeech = if (dictionaryTab) entry?.partOfSpeech.orEmpty() else answer.partOfSpeech
+            val loading = if (dictionaryTab) dictionaryLoading else explanation.loading
+            val error = if (dictionaryTab) dictionaryError else explanation.error
+            Column {
+                Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(context.selection, modifier = Modifier.weight(1f).heightIn(max = height * .2f)
+                        .verticalScroll(rememberScrollState()), fontSize = 20.sp, lineHeight = 25.sp,
+                        fontFamily = FontFamily.Serif)
+                    SpeakButton(context.selection, speech, playback.text, playback.playing) {
+                        speech.speakWord(context.selection, accent)
+                    }
+                    IconButton(onClick = { close() }, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close explanation", modifier = Modifier.size(19.dp))
+                    }
                 }
-                Row {
-                    TextButton(onClick = { dictionaryTab = false }, enabled = dictionaryTab) { Text("Explain") }
-                    TextButton(onClick = { dictionaryTab = true }, enabled = !dictionaryTab) { Text("Dictionary") }
+                val details = listOf(phonetic.takeIf { it.isNotBlank() }, partOfSpeech.takeIf { it.isNotBlank() })
+                    .filterNotNull().joinToString(" · ")
+                if (details.isNotEmpty()) Text(details, modifier = Modifier.padding(horizontal = 14.dp),
+                    fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth().selectableGroup()) {
+                    LookupTab("Explain", !dictionaryTab, Modifier.weight(1f)) {
+                        explanationRequested = true; dictionaryTab = false
+                    }
+                    LookupTab("Dictionary", dictionaryTab, Modifier.weight(1f)) { dictionaryTab = true }
                 }
                 HorizontalDivider()
-                Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (loading) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Text(if (dictionaryTab) "Looking up offline…" else "Explaining…", style = MaterialTheme.typography.labelLarge)
-                        }
-                    }
-                    if (dictionaryTab) {
-                        entry?.let { value ->
-                            Text(value.word, style = MaterialTheme.typography.titleMedium)
-                            if (value.phonetic.isNotBlank()) Text(value.phonetic)
-                            if (value.partOfSpeech.isNotBlank()) Text(value.partOfSpeech, color = MaterialTheme.colorScheme.primary)
-                            Text(value.meaning)
-                        }
-                        if (!loading && entry == null && error == null) Text("No offline entry for this selection. Try a single word or use Explain.")
-                    } else {
-                        if (!complete && answer != Explanation()) Text("Incomplete answer", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                        if (answer.term.isNotBlank()) Text(answer.term, style = MaterialTheme.typography.titleMedium)
-                        if (answer.partOfSpeech.isNotBlank()) Text(answer.partOfSpeech, color = MaterialTheme.colorScheme.primary)
-                        if (answer.usIpa.isNotBlank()) Text("US ${answer.usIpa}")
-                        if (answer.ukIpa.isNotBlank()) Text("UK ${answer.ukIpa}")
-                        if (answer.meaning.isNotBlank()) Text(answer.meaning)
-                        if (answer.context.isNotBlank()) {
-                            Text("In this passage", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                            Text(answer.context)
-                        }
-                        answer.examples.forEach { example ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(example, modifier = Modifier.weight(1f))
-                                SpeakButton(example, latestSettings.accent, speech, playback.text, playback.playing)
+                key(context, dictionaryTab) {
+                    Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())
+                        .padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        val meaning = if (dictionaryTab) entry?.meaning.orEmpty() else answer.meaning
+                        if (meaning.isNotBlank()) Text(meaning, fontFamily = FontFamily.Serif,
+                            fontSize = 17.sp, lineHeight = 23.sp)
+                        if (!dictionaryTab) {
+                            if (answer.context.isNotBlank()) Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text("Context", fontSize = 12.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.primary)
+                                Text(answer.context, fontSize = 15.sp, lineHeight = 21.sp)
+                            }
+                            if (answer.examples.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("Examples", fontSize = 12.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.primary)
+                                answer.examples.forEach { example ->
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(example, modifier = Modifier.weight(1f), fontSize = 14.sp, lineHeight = 20.sp)
+                                        SpeakButton(example, speech, playback.text, playback.playing) {
+                                            speech.speakExample(example, accent)
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
-                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    playback.error?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
-                        TextButton(onClick = speech::openSystemSettings) { Text("Speech settings") }
+                        if (loading) Row(verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Text(if (dictionaryTab) "Looking up…" else "Explaining…", fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (dictionaryTab && !loading && entry == null && error == null) {
+                            Text("No offline entry for this selection.", fontSize = 15.sp)
+                        }
+                        error?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
+                            TextButton(onClick = {
+                                if (dictionaryTab) dictionaryRetry++
+                                else session.retry(context, latestSettings.activeProfileId, latestSettings.model)
+                            }, enabled = !loading) { Text("Retry") }
+                        }
+                        playback.notice?.let {
+                            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 17.sp)
+                        }
+                        playback.credit?.let { RecordingAttribution(it) }
+                        playback.error?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
+                            TextButton(onClick = speech::openSystemSettings) { Text("Speech settings") }
+                        }
                     }
                 }
                 HorizontalDivider()
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = { speech.stop(); onAdjust() }) { Text("Adjust") }
-                    TextButton(onClick = { retry++ }, enabled = !loading) { Text("Retry") }
-                    TextButton(onClick = { close() }) { Text("Close") }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { speech.stop(); onAdjust() }, modifier = Modifier.weight(1f)) {
+                        Text("Adjust", fontSize = 13.sp, maxLines = 1)
+                    }
+                    TextButton(onClick = { close() }, modifier = Modifier.weight(1f)) {
+                        Text("Close", fontSize = 13.sp, maxLines = 1)
+                    }
                 }
             }
         }
@@ -188,9 +226,24 @@ fun LearningPopup(
 }
 
 @Composable
-private fun SpeakButton(text: String, accent: String, speech: PronunciationPlayer, playingText: String, playing: Boolean) {
+private fun LookupTab(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Column(modifier.selectable(selected = selected, role = Role.Tab, onClick = onClick)
+        .heightIn(min = 44.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center) {
+        Box(Modifier.weight(1f, fill = false).padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+            Text(label, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Box(Modifier.fillMaxWidth().height(2.dp).background(
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface))
+    }
+}
+
+@Composable
+private fun SpeakButton(text: String, speech: PronunciationPlayer, playingText: String, playing: Boolean, onSpeak: () -> Unit) {
     val active = playing && playingText == text
-    IconButton(onClick = { if (active) speech.stop() else speech.speak(text, accent) }) {
-        Icon(if (active) Icons.Default.Stop else Icons.Default.VolumeUp, contentDescription = if (active) "Stop pronunciation" else "Speak $accent")
+    IconButton(onClick = { if (active) speech.stop() else onSpeak() }, modifier = Modifier.size(44.dp)) {
+        Icon(if (active) Icons.Default.Stop else Icons.Default.VolumeUp,
+            contentDescription = if (active) "Stop pronunciation" else "Pronounce", modifier = Modifier.size(19.dp))
     }
 }

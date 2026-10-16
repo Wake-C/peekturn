@@ -4,28 +4,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PopupGeometryTest {
-    @Test fun growingAnswerStaysBesideSelectionWhenASideFitsControlsAndBody() {
-        val selections = listOf(
-            PopupSelectionBounds(90, 180, 180, 220),
-            PopupSelectionBounds(90, 250, 180, 290),
-            PopupSelectionBounds(90, 350, 180, 390)
-        )
-        selections.forEach { selection ->
-            val availableAbove = selection.top - 24
-            val availableBelow = 720 - selection.bottom - 24
-            assertTrue("Fixture must leave room for controls and a useful scroll body", maxOf(availableAbove, availableBelow) >= 260)
-            val partial = learningPopupGeometry(360, 720, 336, 120, selection, 12)
-            val grown = learningPopupGeometry(360, 720, 336, 520, selection, 12)
-            listOf(partial, grown).forEach { popup ->
-                assertTrue(popup.x >= 12 && popup.x + popup.width <= 348)
-                assertTrue(popup.y >= 12 && popup.y + popup.height <= 708)
-                assertTrue("Answer must not cover the selected range: selection=$selection popup=$popup",
-                    popup.y + popup.height <= selection.top - 12 || popup.y >= selection.bottom + 12)
-            }
-            assertEquals("Streaming growth must not move the popup across the selection",
-                partial.y >= selection.bottom, grown.y >= selection.bottom)
-            assertTrue("Keep controls and a useful scroll body visible", grown.height >= 260)
-        }
+    @Test fun shortSidesYieldUsefulBoundedOverlayInsteadOfNeedlessScrolling() {
+        val selection = PopupSelectionBounds(90, 350, 180, 390)
+        val popup = learningPopupGeometry(360, 720, 336, 590, selection, 12, 420)
+        assertEquals(590, popup.height)
+        assertEquals(65, popup.y)
+        assertTrue(popup.y < selection.top && popup.y + popup.height > selection.bottom)
+    }
+
+    @Test fun generousSideKeepsAnswerBesideSelection() {
+        val selection = PopupSelectionBounds(90, 90, 180, 130)
+        val popup = learningPopupGeometry(360, 900, 336, 700, selection, 12, 420)
+        assertEquals(700, popup.height)
+        assertTrue(popup.y >= selection.bottom + 12)
+    }
+
+    @Test fun loadingUsesNaturalHeightRatherThanAnEmptyFixedPanel() {
+        val selection = PopupSelectionBounds(90, 350, 180, 390)
+        val popup = learningPopupGeometry(360, 720, 336, 190, selection, 12, 420)
+        assertEquals(190, popup.height)
+        assertEquals((720 - 190) / 2, popup.y)
     }
 
     @Test fun noSelectionAndShortWindowsRemainWithinViewport() {

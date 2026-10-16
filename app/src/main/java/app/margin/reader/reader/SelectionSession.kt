@@ -13,6 +13,17 @@ internal class SelectionSession {
 
     fun isCurrent(token: Long): Boolean = token == generation
 
+    fun paddingAction(
+        token: Long,
+        hasSelection: Boolean,
+        gestureInput: Long = 0L,
+        currentInput: Long = 0L
+    ): ReaderPaddingAction = when {
+        !isCurrent(token) || gestureInput != currentInput -> ReaderPaddingAction.Ignore
+        hasSelection -> ReaderPaddingAction.ClearSelection
+        else -> ReaderPaddingAction.Navigate
+    }
+
     fun consumeQuick(token: Long): Boolean {
         if (!isCurrent(token) || quickConsumed) return false
         quickConsumed = true
@@ -31,3 +42,5 @@ internal class SelectionSession {
         quickConsumed = false
     }
 }
+
+internal enum class ReaderPaddingAction { Ignore, ClearSelection, Navigate }

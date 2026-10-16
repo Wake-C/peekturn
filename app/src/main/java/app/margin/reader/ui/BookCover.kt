@@ -13,6 +13,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,23 +46,32 @@ internal fun BookCover(book: Book, modifier: Modifier = Modifier) {
             }
         }
     }
-    val frame = modifier.aspectRatio(2f / 3f).border(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    val frame = modifier.aspectRatio(2f / 3f)
+        .background(MaterialTheme.colorScheme.surfaceVariant)
+        .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        .semantics { contentDescription = "Cover of ${book.title}" }
     if (cover != null) {
-        Image(cover!!, contentDescription = "Cover of ${book.title}", modifier = frame, contentScale = ContentScale.Crop)
+        Image(cover!!, contentDescription = null, modifier = frame, contentScale = ContentScale.Fit)
     } else {
-        BoxWithConstraints(frame.background(MaterialTheme.colorScheme.surfaceVariant)) {
+        BoxWithConstraints(frame) {
             val compact = maxWidth < 100.dp
+            val initial = remember(book.title) {
+                book.title.trim().let {
+                    if (it.isEmpty()) "M" else String(Character.toChars(it.codePointAt(0))).uppercase()
+                }
+            }
             Column(
                 Modifier.fillMaxSize().padding(if (compact) 6.dp else 12.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(book.title, fontFamily = FontFamily.Serif,
-                    fontSize = if (compact) 12.sp else 22.sp, lineHeight = if (compact) 14.sp else 26.sp,
-                    color = FocusColors.Text, maxLines = if (compact) 4 else 5, overflow = TextOverflow.Ellipsis)
+                Text(initial, modifier = Modifier.weight(1f), fontFamily = FontFamily.Serif,
+                    fontSize = if (compact) 24.sp else 52.sp, lineHeight = if (compact) 28.sp else 60.sp,
+                    color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Clip)
+                Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 8.dp)) {
-                    Box(Modifier.width(if (compact) 16.dp else 24.dp).height(1.dp).background(FocusColors.Accent))
+                    Box(Modifier.width(if (compact) 16.dp else 24.dp).height(1.dp).background(MaterialTheme.colorScheme.primary))
                     if (!compact) Text(book.author.ifBlank { "Unknown author" }, style = MaterialTheme.typography.bodySmall,
-                        color = FocusColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

@@ -4,7 +4,9 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
 import java.util.Locale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -21,34 +23,203 @@ class VoiceSelectionTest {
         features: Set<String> = emptySet()
     ) = Voice(name, locale, quality, Voice.LATENCY_NORMAL, network, features)
 
-    @Test fun offlineVoiceIsPreferredOverHigherQualityNetworkVoice() {
-        val offline = voice("offline", quality = Voice.QUALITY_LOW)
-        val network = voice("network", network = true, quality = Voice.QUALITY_VERY_HIGH)
-        assertEquals(offline, chooseVoice(setOf(network, offline), Locale.US))
+    /** A substituted accent may speak, but the state must say so instead of claiming the request. */
+    private fun assertSubstitutedEnglish(availability: SpeechAvailability) {
+        assertTrue("Usable English must speak instead of failing: $availability", availability is SpeechAvailability.Available)
+        assertNotNull("A substituted accent needs a notice", (availability as SpeechAvailability.Available).notice)
     }
 
-    @Test fun otherAccentIsNeverAnImplicitFallback() {
-        assertNull(chooseVoice(setOf(voice("us")), Locale.UK))
-        assertNull(chooseVoice(setOf(voice("english", locale = Locale.ENGLISH)), Locale.US))
+    @Test fun offlineEnglishVoiceIsPreferredOverHigherQualityNetworkVoice() {
+        val offline = voice("offline", quality = Voice.QUALITY_LOW)
+        val network = voice("network", network = true, quality = Voice.QUALITY_VERY_HIGH)
+        assertEquals(offline, englishVoices(setOf(network, offline), Locale.US).first())
+    }
+
+    @Test fun requestedAccentComesBeforeTheOtherInstalledEnglishCountry() {
+        val us = voice("us")
+        val uk = voice("uk", locale = Locale.UK)
+        assertEquals(listOf(uk, us), englishVoices(setOf(us, uk), Locale.UK))
+        assertEquals(listOf(us, uk), englishVoices(setOf(us, uk), Locale.US))
+    }
+
+    @Test fun oppositeCountryEnglishStaysUsableAndUnsupportedAccentNamesAreRejected() {
+        val us = voice("us")
+        assertEquals(listOf(us), englishVoices(setOf(us), Locale.UK))
         assertEquals(Locale.US, speechLocale("US"))
         assertEquals(Locale.UK, speechLocale("UK"))
         assertNull(speechLocale("AU"))
+        assertNull(speechLocale(""))
     }
 
     @Test fun advertisedButUninstalledVoiceIsNotPlayable() {
         val missing = voice("missing", features = setOf(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED))
-        assertNull(chooseVoice(setOf(missing), Locale.US))
+        assertTrue(englishVoices(setOf(missing), Locale.US).isEmpty())
+    }
+
+    @Test fun nonEnglishVoicesAreNeverCandidates() {
+        assertTrue(englishVoices(setOf(voice("chinese", locale = Locale.CHINESE)), Locale.US).isEmpty())
+        assertTrue(englishVoices(setOf(voice("french", locale = Locale.FRENCH)), Locale.UK).isEmpty())
+        assertTrue(englishVoices(setOf(voice("english-generic", locale = Locale.ENGLISH)), Locale.US).isNotEmpty())
     }
 
     @Test fun matchingNetworkVoiceIsUsableWhenNoOfflineVoiceIsInstalled() {
         val network = voice("network", network = true)
-        assertEquals(network, chooseVoice(setOf(network), Locale.US))
+        assertEquals(listOf(network), englishVoices(setOf(network), Locale.US))
     }
 
     @Test fun stableNameBreaksEquivalentVoiceTies() {
         val first = voice("a")
         val second = voice("b")
-        assertEquals(first, chooseVoice(setOf(second, first), Locale.US))
-        assertEquals(first, chooseVoice(setOf(first, second), Locale.US))
+        assertEquals(first, englishVoices(setOf(second, first), Locale.US).first())
+        assertEquals(first, englishVoices(setOf(first, second), Locale.US).first())
+    }
+
+    @Test fun emptyOemEnumerationUsesLanguageAvailabilityAndReportsGenericEnglishHonestly() {
+        val result = configureSpeech(
+            Locale.US, { emptySet() }, { error("No voice was enumerated") },
+            { locale -> assertEquals(Locale.US, locale); TextToSpeech.LANG_AVAILABLE },
+            { voice("system", locale = Locale.ENGLISH) }
+        )
+        assertSubstitutedEnglish(result)
+    }
+
+    @Test fun rejectedExactVoiceFallsBackToCountryAvailability() {
+        val exact = voice("installed")
+        val result = configureSpeech(
+            Locale.US, { setOf(exact) }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_COUNTRY_AVAILABLE }, { exact }
+        )
+        assertEquals(SpeechAvailability.Available(), result)
+    }
+
+    @Test fun acceptedExactVoiceDoesNotNeedLanguageFallback() {
+        val exact = voice("installed")
+        assertEquals(SpeechAvailability.Available(), configureSpeech(
+            Locale.US, { setOf(exact) }, { TextToSpeech.SUCCESS },
+            { error("Installed exact voice already selected") }, { exact }
+        ))
+    }
+
+    /** A UK preference with only US English installed must still speak, honestly labelled. */
+    @Test fun ukRequestWithOnlyInstalledUsEnglishStillSpeaksWithNotice() {
+        val installedUs = voice("installed-us", locale = Locale.US)
+        val result = configureSpeech(
+            Locale.UK, { setOf(installedUs) }, { TextToSpeech.SUCCESS },
+            { TextToSpeech.LANG_NOT_SUPPORTED }, { installedUs }
+        )
+        assertSubstitutedEnglish(result)
+    }
+
+    @Test fun languageApiOppositeCountryEnglishIsUsedWithNotice() {
+        assertSubstitutedEnglish(configureSpeech(
+            Locale.US, { emptySet() }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_AVAILABLE }, { voice("opaque", locale = Locale.UK) }
+        ))
+        assertSubstitutedEnglish(configureSpeech(
+            Locale.UK, { emptySet() }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_COUNTRY_AVAILABLE }, { voice("opaque", locale = Locale.US) }
+        ))
+    }
+
+    @Test fun acceptedVoiceWithAnActualOtherCountryStillSpeaksWithNotice() {
+        val exact = voice("requested")
+        assertSubstitutedEnglish(configureSpeech(
+            Locale.US, { setOf(exact) }, { TextToSpeech.SUCCESS },
+            { error("Exact selection succeeded") }, { voice("actual", locale = Locale.UK) }
+        ))
+    }
+
+    /** A reported voice with no country must stay unconfirmed instead of inheriting the request. */
+    @Test fun selectedVoiceWithAGenericActualCountryStillNeedsANotice() {
+        val exact = voice("requested", locale = Locale.UK)
+        assertSubstitutedEnglish(configureSpeech(
+            Locale.UK, { setOf(exact) }, { TextToSpeech.SUCCESS },
+            { error("Exact selection succeeded") }, { voice("generic", locale = Locale.ENGLISH) }
+        ))
+    }
+
+    @Test fun genericCountryLabelsAndScriptsUseLocaleFieldsNotVoiceNames() {
+        val british = Locale.Builder().setLanguage("en").setScript("Latn").setRegion("GB").build()
+        val exact = voice("not-an-accent-label", locale = british)
+        assertEquals(SpeechAvailability.Available(), configureSpeech(
+            Locale.UK, { setOf(exact) }, { TextToSpeech.SUCCESS },
+            { error("Already selected") }, { exact }
+        ))
+    }
+
+    @Test fun missingDataAndUnsupportedLocaleRemainDistinct() {
+        assertEquals(SpeechAvailability.MissingData, configureSpeech(
+            Locale.US, { emptySet() }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_MISSING_DATA }, { null }
+        ))
+        assertEquals(SpeechAvailability.Unsupported, configureSpeech(
+            Locale.US, { emptySet() }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_NOT_SUPPORTED }, { null }
+        ))
+    }
+
+    @Test fun countryVariantAvailabilityWorksWithoutEnumerationOrActualVoice() {
+        assertEquals(SpeechAvailability.Available(), configureSpeech(
+            Locale.US, { emptySet() }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE }, { null }
+        ))
+    }
+
+    @Test fun unknownActualAccentWithOnlyLanguageSupportNeedsNotice() {
+        assertSubstitutedEnglish(configureSpeech(
+            Locale.UK, { emptySet() }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_AVAILABLE }, { null }
+        ))
+    }
+
+    @Test fun voiceDataChangesAreReevaluatedOnRetryInsteadOfCachingAnEmptyResult() {
+        var availability = TextToSpeech.LANG_MISSING_DATA
+        var installed = emptySet<Voice>()
+        val select = {
+            configureSpeech(Locale.US, { installed }, { TextToSpeech.SUCCESS }, { availability }, { null })
+        }
+        assertEquals(SpeechAvailability.MissingData, select())
+        availability = TextToSpeech.LANG_COUNTRY_AVAILABLE
+        assertEquals(SpeechAvailability.Available(), select())
+        installed = setOf(voice("newly-installed"))
+        availability = TextToSpeech.LANG_NOT_SUPPORTED
+        assertEquals(SpeechAvailability.Available(), select())
+    }
+
+    @Test fun unavailableEnumerationStillTriesTheStandardLanguageApi() {
+        assertEquals(SpeechAvailability.Available(), configureSpeech(
+            Locale.US, { throw IllegalStateException("Enumeration unavailable") }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_COUNTRY_AVAILABLE }, { null }
+        ))
+        assertEquals(SpeechAvailability.Available(), configureSpeech(
+            Locale.US, { null }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_COUNTRY_AVAILABLE }, { null }
+        ))
+    }
+
+    @Test fun genericActualVoiceOverridesCountryGuaranteeWithHonestNotice() {
+        assertSubstitutedEnglish(configureSpeech(
+            Locale.US, { emptySet() }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_COUNTRY_AVAILABLE }, { voice("generic", locale = Locale.ENGLISH) }
+        ))
+    }
+
+    @Test fun actualMatchingVoiceCanConfirmAccentWithLanguageOnlyAvailability() {
+        assertEquals(SpeechAvailability.Available(), configureSpeech(
+            Locale.US, { emptySet() }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_AVAILABLE }, { voice("matching") }
+        ))
+    }
+
+    @Test fun actualOtherLanguageAndUnavailableDataNeverPlay() {
+        assertEquals(SpeechAvailability.Unsupported, configureSpeech(
+            Locale.US, { emptySet() }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_AVAILABLE }, { voice("other", locale = Locale.FRENCH) }
+        ))
+        assertEquals(SpeechAvailability.MissingData, configureSpeech(
+            Locale.US, { emptySet() }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_COUNTRY_AVAILABLE },
+            { voice("download", features = setOf(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)) }
+        ))
     }
 }

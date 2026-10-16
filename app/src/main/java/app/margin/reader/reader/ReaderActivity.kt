@@ -1,4 +1,4 @@
-@file:OptIn(org.readium.r2.shared.ExperimentalReadiumApi::class)
+@file:OptIn(org.readium.r2.shared.ExperimentalReadiumApi::class, org.readium.r2.shared.DelicateReadiumApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
 package app.margin.reader.reader
 
@@ -16,6 +16,16 @@ import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.compose.setContent
+import androidx.activity.OnBackPressedCallback
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.compose.ui.Alignment
+import org.readium.r2.navigator.input.InputListener
+import org.readium.r2.navigator.input.TapEvent
+import org.readium.r2.navigator.input.Key
+import org.readium.r2.navigator.input.KeyEvent
+import org.readium.r2.navigator.util.DirectionalNavigationAdapter
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -31,6 +41,7 @@ import androidx.lifecycle.lifecycleScope
 import app.margin.reader.MarginApp
 import app.margin.reader.data.ReadingTracker
 import app.margin.reader.learning.LearningPopup
+import app.margin.reader.learning.LearningSession
 import app.margin.reader.model.*
 import app.margin.reader.ui.MarginTheme
 import java.io.File
@@ -44,9 +55,6 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
-import org.readium.r2.navigator.epub.EpubPreferences
-import org.readium.r2.navigator.preferences.FontFamily
-import org.readium.r2.navigator.preferences.Theme
 import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
@@ -63,6 +71,8 @@ class ReaderActivity : AppCompatActivity() {
     private var initialLocator: Locator? = null
     private var lastLocator: Locator? = null
     private var positionLabel by mutableStateOf("")
+    private var chapterLabel by mutableStateOf("")
+    private var chrome by mutableStateOf(ReaderChromeState())
     private var panel by mutableStateOf<String?>(null)
     private var lookup by mutableStateOf<LookupRequest?>(null)
     private var quickJob: Job? = null
@@ -81,42 +91,83 @@ class ReaderActivity : AppCompatActivity() {
     private var mode: ActionMode? = null
     private var selectionFocus: android.view.View? = null
     private var openedMarked = false
+    private val learningSession = LearningSession()
+    private var locatorJob: Job? = null
+    private var renderedPreferences: Pair<ReaderPreferences, String>? = null
+    private val readerViewport = ReaderViewport { readerTextInsets(graph.store.settings.value.reading) }
+    private var paddingGestureJob: Job? = null
+    private var readerInputEpoch = 0L
+    private var handledPaddingGesture = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Fragment snapshots contain runtime page indexes. Recreate only from the durable locator,
         // not Android's stale navigator tree, including after process death.
         super.onCreate(null)
+        android.webkit.WebView.setWebContentsDebuggingEnabled(app.margin.reader.BuildConfig.DEBUG)
+        supportFragmentManager.registerFragmentLifecycleCallbacks(readerViewport, true)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        @Suppress("DEPRECATION")
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when (chrome.back(lookup != null || mode != null, panel != null)) {
+                    ReaderBackAction.DismissLookup -> dismissLookup(true)
+                    ReaderBackAction.DismissPanel -> panel = null
+                    ReaderBackAction.HideChrome -> chrome = ReaderChromeState()
+                    ReaderBackAction.Exit -> finish()
+                }
+            }
+        })
         setContent {
-            MarginTheme {
-                val settings by graph.store.settings.collectAsState()
-                LaunchedEffect(settings.reading) { navigator?.submitPreferences(settings.reading.toEpub()) }
-                Surface(Modifier.fillMaxSize()) {
-                    Column(Modifier.fillMaxSize().systemBarsPadding()) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            TextButton(onClick = { finish() }) { Text("Library") }
-                            TextButton(onClick = { dismissLookup(true); panel = "contents" }) { Text("Chapters") }
-                            TextButton(onClick = { dismissLookup(true); panel = "search" }) { Text("Search") }
-                            TextButton(onClick = { dismissLookup(true); panel = "type" }) { Text("Aa") }
-                        }
+            val settings by graph.store.settings.collectAsState()
+            MarginTheme(theme = settings.appTheme) {
+                LaunchedEffect(settings.reading, settings.appTheme) {
+                    refreshPreferences(settings)
+                    applySystemBars()
+                }
+                Surface(Modifier.fillMaxSize(), color = readerPaper(settings.appTheme)) {
+                    Box(Modifier.fillMaxSize()) {
                         if (book == null) {
-                            Box(Modifier.weight(1f).fillMaxWidth()) { CircularProgressIndicator(Modifier.padding(24.dp)) }
+                            CircularProgressIndicator(Modifier.align(Alignment.Center))
                         } else {
+                            // Only stable cutout / explicitly enabled bars reserve space. Chrome and
+                            // transient system bars cannot resize this viewport or repaginate Readium.
+                            val stableInsets = WindowInsets.displayCutout
+                                .union(if (settings.reading.immersive) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBarsIgnoringVisibility)
                             AndroidView(
-                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                modifier = Modifier.fillMaxSize().windowInsetsPadding(stableInsets),
                                 factory = { context ->
-                                    FragmentContainerView(context).apply {
-                                        id = NAVIGATOR_ID
-                                        layoutParams = FrameLayout.LayoutParams(-1, -1)
-                                        post { if (!isFinishing && !isDestroyed) attachNavigator() }
+                                    ReaderHostView(context,
+                                        onTap = { x, width ->
+                                            handlePaddingGesture { nav ->
+                                                if (isReaderCenterTap(x, width)) chrome = chrome.tap(x, width)
+                                                else navigate { if (x < width / 2) nav.goBackward() else nav.goForward() }
+                                            }
+                                        },
+                                        onSwipe = { forward ->
+                                            handlePaddingGesture { nav -> navigate { if (forward) nav.goForward() else nav.goBackward() } }
+                                        }
+                                    ).apply {
+                                        addView(FragmentContainerView(context).apply {
+                                            id = NAVIGATOR_ID
+                                            layoutParams = FrameLayout.LayoutParams(-1, -1)
+                                            post { if (!isFinishing && !isDestroyed) attachNavigator() }
+                                        })
                                     }
                                 }
                             )
                         }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            TextButton(onClick = { navigate { it.goBackward() } }) { Text("Previous") }
-                            Text(positionLabel, Modifier.padding(top = 16.dp), style = MaterialTheme.typography.labelMedium)
-                            TextButton(onClick = { navigate { it.goForward() } }) { Text("Next") }
-                        }
+                        ReaderPosition(chapterLabel, positionLabel, settings.appTheme, settings.reading.immersive)
+                        if (chrome.visible) ReaderChrome(
+                            theme = settings.appTheme,
+                            onLibrary = { finish() },
+                            onContents = { dismissLookup(true); panel = "contents" },
+                            onSearch = { dismissLookup(true); panel = "search" },
+                            onAppearance = { dismissLookup(true); panel = "type" },
+                            onHide = { chrome = ReaderChromeState() }
+                        )
                     }
                     when (panel) {
                         "contents" -> ContentsDialog()
@@ -127,7 +178,7 @@ class ReaderActivity : AppCompatActivity() {
                         key(request) {
                             LearningPopup(
                                 context = request.context, anchor = request.anchor, settings = settings,
-                                client = graph.explanations, dictionary = graph.dictionary, speech = graph.speech,
+                                session = learningSession, dictionary = graph.dictionary, speech = graph.speech,
                                 initialDictionary = request.dictionary,
                                 onDismiss = { dismissLookup(true) },
                                 onAdjust = { dismissLookup(false) }
@@ -147,7 +198,8 @@ class ReaderActivity : AppCompatActivity() {
                 initialLocator = json?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
                 if (initialLocator?.let(::isSafeReaderLocator) == false) error("Unsafe saved fragment identifier.")
                 lastLocator = initialLocator
-                positionLabel = initialLocator?.locations?.totalProgression?.let { "${(it * 100).toInt()}%" } ?: ""
+                positionLabel = ""
+                chapterLabel = initialLocator?.title.orEmpty()
                 tracker = ReadingTracker(graph.store, loaded.id, graph.scope).also { if (resumed) it.resume() }
                 writer = graph.scope.launch {
                     for (locator in positions) {
@@ -177,7 +229,7 @@ class ReaderActivity : AppCompatActivity() {
             .map { it.url().removeQuery().removeFragment().toString() }.toSet()
         supportFragmentManager.fragmentFactory = EpubNavigatorFactory(pub).createFragmentFactory(
             initialLocator = initialLocator,
-            initialPreferences = graph.store.settings.value.reading.toEpub(),
+            initialPreferences = graph.store.settings.value.let { it.reading.toEpub(it.appTheme) },
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onExternalLinkActivated(url: org.readium.r2.shared.util.AbsoluteUrl) {
                     val uri = android.net.Uri.parse(url.toString())
@@ -198,6 +250,10 @@ class ReaderActivity : AppCompatActivity() {
                 }
             },
             paginationListener = object : EpubNavigatorFragment.PaginationListener {
+                override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) {
+                    positionLabel = chapterPositionLabel(graph.store.settings.value.reading.scroll, pageIndex + 1, totalPages, locator.locations.progression)
+                    chapterLabel = locator.title.orEmpty()
+                }
                 override fun onPageLoaded() {
                     if (openedMarked) return
                     val id = book?.id ?: return
@@ -205,22 +261,81 @@ class ReaderActivity : AppCompatActivity() {
                     graph.scope.launch { graph.store.markOpened(id) }
                 }
             },
-            configuration = EpubNavigatorFragment.Configuration(selectionActionModeCallback = selectionActions)
+            configuration = EpubNavigatorFragment.Configuration(
+                // Readium 3.1 quotes generic families in --USER__fontFamily. An unquoted
+                // root inline family keeps its normal descendant inheritance working.
+                readiumCssRsProperties = org.readium.r2.navigator.epub.css.RsProperties(
+                    overrides = mapOf("font-family" to if (graph.store.settings.value.reading.fontFamily == "sans-serif") "sans-serif" else "serif")
+                ),
+                selectionActionModeCallback = selectionActions,
+                shouldApplyInsetsPadding = false
+            ).apply { useReadiumCssFontSize = true }
         )
         val fragment = supportFragmentManager.fragmentFactory.instantiate(classLoader, EpubNavigatorFragment::class.java.name) as EpubNavigatorFragment
         supportFragmentManager.beginTransaction().replace(NAVIGATOR_ID, fragment).commitNow()
         navigator = fragment
+        renderedPreferences = graph.store.settings.value.let { it.reading to it.appTheme }
+        fragment.addInputListener(object : InputListener {
+            override fun onTap(event: TapEvent): Boolean {
+                // Readium excludes links, handled gestures and active selection before this callback.
+                val width = fragment.publicationView.width.toFloat()
+                if (!isReaderCenterTap(event.point.x, width)) return false
+                chrome = chrome.tap(event.point.x, width)
+                tracker?.interact()
+                return true
+            }
+
+            override fun onKey(event: KeyEvent): Boolean {
+                if (event.type != KeyEvent.Type.Down || event.modifiers.isNotEmpty()) return false
+                // Reveal controls without stealing Tab traversal or arrow/space navigation.
+                if (event.key == Key.Tab || event.key == Key.ContextMenu) {
+                    chrome = ReaderChromeState(visible = true)
+                    return event.key == Key.ContextMenu
+                }
+                return false
+            }
+        })
+        fragment.addInputListener(DirectionalNavigationAdapter(fragment))
         // Readium 3.1 starts this StateFlow with initialLocator and emits subsequent locations
         // only after State.Ready and the requested resource is loaded (notifyCurrentLocation).
-        lifecycleScope.launch {
+        locatorJob = lifecycleScope.launch {
             fragment.currentLocator.drop(1).collect { locator ->
                 if (lastLocator != locator) dismissLookup(true)
                 lastLocator = locator
                 queuePosition(locator)
                 tracker?.interact()
-                positionLabel = locator.locations.totalProgression?.let { "${(it * 100).toInt()}%" } ?: ""
+                if (graph.store.settings.value.reading.scroll) {
+                    positionLabel = chapterPositionLabel(true, 0, 0, locator.locations.progression)
+                }
+                chapterLabel = locator.title.orEmpty()
+                // A requested appearance change can be deferred while the WebView has
+                // entered a chapter whose debounced native locator is not ready yet.
+                if (renderedPreferences != graph.store.settings.value.let { it.reading to it.appTheme }) {
+                    lifecycleScope.launch { refreshPreferences(graph.store.settings.value) }
+                }
             }
         }
+    }
+
+    private suspend fun refreshPreferences(settings: AppSettings) {
+        val fragment = navigator ?: return
+        if (renderedPreferences == (settings.reading to settings.appTheme)) return
+        // Readium's firstVisibleElementLocator quotes the entire block, which can
+        // span many pages. Capture the visible intra-block words without selection.
+        val current = fragment.currentLocator.value
+        val visible = fragment.evaluateJavascript(visibleReflowAnchorScript)?.let { result ->
+            runCatching { JSONObject(result) }.getOrNull()
+        }
+        val anchor = reflowLocator(current, visible) ?: return
+        if (navigator !== fragment || supportFragmentManager.isStateSaved || !resumed) return
+        dismissLookup(true)
+        locatorJob?.cancel()
+        initialLocator = anchor
+        lastLocator = anchor
+        navigator = null
+        positionLabel = ""
+        supportFragmentManager.beginTransaction().remove(fragment).commitNow()
+        attachNavigator()
     }
 
     private fun queuePosition(locator: Locator) {
@@ -228,6 +343,30 @@ class ReaderActivity : AppCompatActivity() {
         if (latestQueued != json) {
             latestQueued = json
             positions.trySend(locator)
+        }
+    }
+
+    private fun handlePaddingGesture(action: (EpubNavigatorFragment) -> Unit) {
+        handledPaddingGesture = true
+        val nav = navigator ?: return
+        val generation = selectionSession.generation
+        val input = readerInputEpoch
+        // Adjust can remove the toolbar while keeping selection, so absence of
+        // ActionMode is not proof that a padding gesture may turn the page.
+        if (mode != null || lookup != null) {
+            dismissLookup(true)
+            return
+        }
+        selectionProbeJob?.cancel()
+        paddingGestureJob?.cancel()
+        paddingGestureJob = lifecycleScope.launch {
+            val selected = nav.currentSelection()?.locator?.text?.highlight?.isNotBlank() == true
+            if (navigator !== nav || !resumed) return@launch
+            when (selectionSession.paddingAction(generation, selected || mode != null || lookup != null, input, readerInputEpoch)) {
+                ReaderPaddingAction.Ignore -> Unit
+                ReaderPaddingAction.ClearSelection -> dismissLookup(true)
+                ReaderPaddingAction.Navigate -> action(nav)
+            }
         }
     }
 
@@ -470,24 +609,25 @@ class ReaderActivity : AppCompatActivity() {
                     TextButton(onClick = { preferences = preferences.copy(fontFamily = "serif") }) { Text(if (preferences.fontFamily == "serif") "✓ Serif" else "Serif") }
                     TextButton(onClick = { preferences = preferences.copy(fontFamily = "sans-serif") }) { Text(if (preferences.fontFamily != "serif") "✓ Sans" else "Sans") }
                 }
-                PreferenceSlider("Font size", preferences.fontSize, 70f..180f) { preferences = preferences.copy(fontSize = it) }
-                PreferenceSlider("Line height", preferences.lineHeight, 1f..2.4f) { preferences = preferences.copy(lineHeight = it) }
-                PreferenceSlider("Paragraph spacing", preferences.paragraphSpacing, 0f..2f) { preferences = preferences.copy(paragraphSpacing = it) }
-                PreferenceSlider("Margins", preferences.pageMargins, 0.3f..2.5f) { preferences = preferences.copy(pageMargins = it) }
+                PreferenceSlider("Font size", "${preferences.fontSize.toInt()}%", preferences.fontSize, 100f..180f) { preferences = preferences.copy(fontSize = it) }
+                PreferenceSlider("Line height", String.format(java.util.Locale.US, "%.2f×", preferences.lineHeight), preferences.lineHeight, 1f..2.4f) { preferences = preferences.copy(lineHeight = it) }
+                PreferenceSlider("Paragraph spacing", String.format(java.util.Locale.US, "%.2f em", preferences.paragraphSpacing), preferences.paragraphSpacing, 0f..2f) { preferences = preferences.copy(paragraphSpacing = it) }
+                PreferenceSlider("Side margins", String.format(java.util.Locale.US, "%.2f×", preferences.pageMargins), preferences.pageMargins, 0.3f..2.5f) { preferences = preferences.copy(pageMargins = it) }
+                PreferenceSlider("Top text distance", "${preferences.topPaddingDp.toInt()} dp", preferences.topPaddingDp, 16f..120f) { preferences = preferences.copy(topPaddingDp = it) }
+                PreferenceSlider("Bottom text distance", "${preferences.bottomPaddingDp.toInt()} dp", preferences.bottomPaddingDp, 24f..140f) { preferences = preferences.copy(bottomPaddingDp = it) }
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     Text("Continuous scrolling", Modifier.padding(top = 12.dp))
                     Switch(checked = preferences.scroll, onCheckedChange = { preferences = preferences.copy(scroll = it) })
                 }
-                Row {
-                    listOf("dark" to "Dark", "warm" to "Warm", "light" to "Light").forEach { (value, label) ->
-                        TextButton(onClick = { preferences = preferences.copy(theme = value) }) { Text(if (preferences.theme == value) "✓ $label" else label) }
-                    }
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text("Immersive reading", Modifier.weight(1f).padding(top = 12.dp))
+                    Switch(checked = preferences.immersive, onCheckedChange = { preferences = preferences.copy(immersive = it) })
                 }
             }
         }, confirmButton = {
             TextButton(onClick = {
                 val changed = preferences
-                navigator?.submitPreferences(changed.toEpub())
+                // The settings observer applies typography and viewport geometry together.
                 graph.scope.launch { graph.store.updateSettings { latest -> latest.copy(reading = changed) } }
                 panel = null
             }) { Text("Apply") }
@@ -495,10 +635,15 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        handledPaddingGesture = false
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            readerInputEpoch++
+            paddingGestureJob?.cancel()
+        }
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP) tracker?.interact()
         val handled = super.dispatchTouchEvent(event)
-        if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP ||
-            event.actionMasked == MotionEvent.ACTION_CANCEL) observeSourceSelectionClear()
+        if (!handledPaddingGesture && (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP ||
+            event.actionMasked == MotionEvent.ACTION_CANCEL)) observeSourceSelectionClear()
         return handled
     }
     override fun onUserInteraction() { super.onUserInteraction(); tracker?.interact() }
@@ -506,20 +651,45 @@ class ReaderActivity : AppCompatActivity() {
         super.onResume()
         resumed = true
         tracker?.resume()
-        window.decorView.post { attachNavigator() }
+        window.decorView.post {
+            attachNavigator()
+            lifecycleScope.launch { refreshPreferences(graph.store.settings.value) }
+        }
+        applySystemBars()
     }
     override fun onPause() {
         resumed = false
+        paddingGestureJob?.cancel()
         dismissLookup(true)
         tracker?.pause()
         lastLocator?.let(::queuePosition)
         super.onPause()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applySystemBars()
+    }
+
+    private fun applySystemBars() {
+        val bars = graph.store.settings.value.let { readerSystemBars(it.reading, it.appTheme) }
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            isAppearanceLightStatusBars = bars.darkIcons
+            isAppearanceLightNavigationBars = bars.darkIcons
+            if (bars.statusVisible) show(WindowInsetsCompat.Type.statusBars()) else hide(WindowInsetsCompat.Type.statusBars())
+            if (bars.navigationVisible) show(WindowInsetsCompat.Type.navigationBars()) else hide(WindowInsetsCompat.Type.navigationBars())
+        }
     }
     override fun onSaveInstanceState(outState: Bundle) {
         lastLocator?.let { outState.putString(STATE_LOCATOR, it.toJSON().toString()) }
         super.onSaveInstanceState(outState)
     }
     override fun onDestroy() {
+        learningSession.close()
+        locatorJob?.cancel()
+        paddingGestureJob?.cancel()
+        supportFragmentManager.unregisterFragmentLifecycleCallbacks(readerViewport)
         quickJob?.cancel()
         closeSearch()
         positions.close()
@@ -541,8 +711,11 @@ class ReaderActivity : AppCompatActivity() {
     }
 }
 
-@Composable private fun PreferenceSlider(title: String, value: Double, range: ClosedFloatingPointRange<Float>, onChange: (Double) -> Unit) {
-    Text(title)
+@Composable private fun PreferenceSlider(title: String, label: String, value: Double, range: ClosedFloatingPointRange<Float>, onChange: (Double) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(title)
+        Text(label, style = MaterialTheme.typography.labelLarge)
+    }
     Slider(value = value.toFloat().coerceIn(range), onValueChange = { onChange(it.toDouble()) }, valueRange = range)
 }
 
@@ -553,15 +726,3 @@ internal fun flattenContents(links: List<Link>): List<Pair<Int, Link>> = buildLi
     append(links, 0)
 }
 
-private fun ReaderPreferences.toEpub() = EpubPreferences(
-    fontSize = fontSize, fontFamily = FontFamily(fontFamily), lineHeight = lineHeight,
-    pageMargins = pageMargins, paragraphSpacing = paragraphSpacing, scroll = scroll,
-    publisherStyles = false,
-    backgroundColor = org.readium.r2.navigator.preferences.Color(android.graphics.Color.parseColor(
-        when (theme) { "light" -> "#FAF9F4"; "warm" -> "#EEE5D3"; else -> "#171E23" }
-    )),
-    textColor = org.readium.r2.navigator.preferences.Color(android.graphics.Color.parseColor(
-        if (theme == "dark") "#E9E8DF" else "#262B2C"
-    )),
-    theme = when (theme) { "light" -> Theme.LIGHT; "warm" -> Theme.SEPIA; else -> Theme.DARK }
-)
