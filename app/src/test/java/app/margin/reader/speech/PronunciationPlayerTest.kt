@@ -33,12 +33,12 @@ class PronunciationPlayerTest {
     private class FakeSource : WordAudioSource {
         val calls = mutableListOf<Pair<String, String>>()
         var cancelled = 0
-        var gate: CompletableDeferred<RecordedWordAudio?>? = null
-        var recording: RecordedWordAudio? = null
+        var gate: CompletableDeferred<WordAudioClip?>? = null
+        var clip: WordAudioClip? = null
 
-        override suspend fun lookup(term: String, accent: String): RecordedWordAudio? {
+        override suspend fun lookup(term: String, accent: String): WordAudioClip? {
             calls += term to accent
-            val open = gate ?: return recording
+            val open = gate ?: return clip
             return try {
                 open.await()
             } catch (failure: CancellationException) {
@@ -64,18 +64,18 @@ class PronunciationPlayerTest {
         settle()
     }
 
-    private fun player(source: WordAudioSource) =
-        PronunciationPlayer(ApplicationProvider.getApplicationContext<Context>(), source)
+    private fun player(source: WordAudioSource, engines: List<String> = emptyList()) =
+        PronunciationPlayer(ApplicationProvider.getApplicationContext<Context>(), source) { engines }
 
     private fun settle() = shadowOf(Looper.getMainLooper()).idle()
 
     /** Audio whose bytes never came from the network, so a leaked playback attempt stays local. */
-    private fun recorded() = RecordedWordAudio(
+    private fun providerAudio() = WordAudioClip(
         ByteArray(64) { it.toByte() },
-        RecordingCredit("Dvortygirl", "Wikimedia Commons", "https://commons.wikimedia.org/wiki/File:En-us-word.ogg", "Public domain", "")
+        AudioCredit("Youdao Dictionary", "https://dict.youdao.com")
     )
 
-    @Test fun examplesNeverUseTheRecordedSource() {
+    @Test fun examplesUseNoProviderAudio() {
         val source = FakeSource()
         val player = player(source)
         player.speakExample("A little further, one page at a time.", "UK")
@@ -84,7 +84,7 @@ class PronunciationPlayerTest {
         player.shutdown()
     }
 
-    @Test fun phrasesAreNeverSentToTheRecordedSource() {
+    @Test fun phrasesAreNeverSentToTheProvider() {
         val source = FakeSource()
         val player = player(source)
         player.speakWord("A sentence from the book", "US")
@@ -115,7 +115,7 @@ class PronunciationPlayerTest {
 
     @Test fun stopCancelsTheLookupInFlightAndKeepsLateAudioSilent() {
         val source = FakeSource()
-        val gate = CompletableDeferred<RecordedWordAudio?>()
+        val gate = CompletableDeferred<WordAudioClip?>()
         source.gate = gate
         val player = player(source)
         player.speakWord("hello", "UK")
@@ -130,7 +130,7 @@ class PronunciationPlayerTest {
         assertNull(player.state.value.notice)
         assertNull(player.state.value.error)
 
-        gate.complete(recorded())
+        gate.complete(providerAudio())
         settle()
         assertFalse("A stopped lookup must not play later", player.state.value.playing)
         assertNull(player.state.value.credit)
@@ -139,18 +139,18 @@ class PronunciationPlayerTest {
 
     @Test fun aNewWordSupersedesTheEarlierLookup() {
         val source = FakeSource()
-        val first = CompletableDeferred<RecordedWordAudio?>()
+        val first = CompletableDeferred<WordAudioClip?>()
         source.gate = first
         val player = player(source)
         player.speakWord("hello", "UK")
 
-        val second = CompletableDeferred<RecordedWordAudio?>()
+        val second = CompletableDeferred<WordAudioClip?>()
         source.gate = second
         player.speakWord("water", "UK")
         assertEquals(listOf("hello" to "UK", "water" to "UK"), source.calls)
         assertEquals(1, source.cancelled)
 
-        first.complete(recorded())
+        first.complete(providerAudio())
         settle()
         assertEquals("water", player.state.value.text)
         assertNull(player.state.value.credit)
@@ -163,7 +163,7 @@ class PronunciationPlayerTest {
 
     @Test fun shutdownStopsLookupsAndRefusesFurtherRequests() {
         val source = FakeSource()
-        val gate = CompletableDeferred<RecordedWordAudio?>()
+        val gate = CompletableDeferred<WordAudioClip?>()
         source.gate = gate
         val player = player(source)
         player.speakWord("hello", "UK")
@@ -192,7 +192,7 @@ class PronunciationPlayerTest {
     }
 
     @Test fun focusLossStopsTheCurrentPlayback() {
-        val source = FakeSource().apply { recording = recorded() }
+        val source = FakeSource().apply { clip = providerAudio() }
         val player = player(source)
         player.speakWord("hello", "UK")
         assertTrue("Speaking holds audio focus until it stops", player.state.value.playing)
@@ -216,14 +216,14 @@ class PronunciationPlayerTest {
     @Test fun aTimedOutPreparationCannotStartAReleasedPlayerOrClaimCredit() {
         ShadowMediaPlayer.resetStaticState()
         ShadowMediaPlayer.addMediaInfo(DataSource.toDataSource("MediaDataSource"), ShadowMediaPlayer.MediaInfo(20_000, 8_000))
-        val source = FakeSource().apply { recording = recorded() }
+        val source = FakeSource().apply { clip = providerAudio() }
         val player = player(source)
         player.speakWord("hello", "UK")
         assertTrue(player.state.value.playing)
 
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(8_000))
 
-        assertNull("A recording that never started must not claim credit", player.state.value.credit)
+        assertNull("Provider audio that never started must not claim credit", player.state.value.credit)
         assertEquals("hello", player.state.value.text)
         player.shutdown()
         ShadowMediaPlayer.resetStaticState()
@@ -233,7 +233,7 @@ class PronunciationPlayerTest {
     @Test fun aSupersededEngineFailureCannotKillTheWordThatReplacedSystemSpeech() {
         ShadowTextToSpeech.reset()
         val source = FakeSource()
-        val gate = CompletableDeferred<RecordedWordAudio?>()
+        val gate = CompletableDeferred<WordAudioClip?>()
         val player = player(source)
 
         player.speakExample("A little further, one page at a time.", "US")
@@ -249,17 +249,83 @@ class PronunciationPlayerTest {
         player.shutdown()
     }
 
-    /** Falling back from a recording to speech speaks with the focus the request already holds. */
+    /** A broken default engine must not end the request while another installed engine can speak. */
+    @Test fun aBrokenDefaultEngineGivesWayToAnotherInstalledEngine() {
+        ShadowTextToSpeech.reset()
+        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
+        val player = player(FakeSource(), listOf("com.example.other-engine"))
+        player.speakExample("A little further, one page at a time.", "US")
+        val brokenDefault = lastEngine()
+
+        engineInitialization(TextToSpeech.ERROR)
+
+        assertTrue("The failed default engine is released", brokenDefault.isShutdown)
+        val alternative = lastEngine()
+        assertTrue("The other installed engine became the speaker", alternative !== brokenDefault)
+        alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
+        settle()
+
+        assertNull(player.state.value.error)
+        assertEquals("A little further, one page at a time.", alternative.lastSpokenText)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** An engine that never answers its initialization callback must not hold the request forever. */
+    @Test fun anEngineThatNeverInitializesGivesWayToTheNextOne() {
+        ShadowTextToSpeech.reset()
+        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
+        val player = player(FakeSource(), listOf("com.example.other-engine"))
+        player.speakExample("A little further, one page at a time.", "US")
+        val silent = lastEngine()
+        assertTrue("The request waits while its engine initializes", player.state.value.playing)
+
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(8_000))
+
+        assertTrue("A silent engine is released when its initialization times out", silent.isShutdown)
+        val alternative = lastEngine()
+        assertTrue("The next installed engine is tried", alternative !== silent)
+        alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
+        settle()
+
+        assertNull(player.state.value.error)
+        assertEquals("A little further, one page at a time.", alternative.lastSpokenText)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** Every installed engine is tried before a request fails, so the failure is about English, not one engine. */
+    @Test fun enginesWithoutEnglishAreAllTriedBeforeTheRequestFails() {
+        ShadowTextToSpeech.reset()
+        val player = player(FakeSource(), listOf("com.example.other-engine"))
+        player.speakExample("A little further, one page at a time.", "US")
+        val firstEngine = lastEngine()
+
+        engineInitialization(TextToSpeech.SUCCESS)
+
+        val alternative = lastEngine()
+        assertTrue("An English-less engine gives way to the next one", firstEngine.isShutdown)
+        assertTrue("The next installed engine was tried", alternative !== firstEngine)
+        alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
+        settle()
+
+        assertNotNull("No installed engine could speak English", player.state.value.error)
+        assertFalse(player.state.value.playing)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** Falling back from provider audio to speech speaks with the focus the request already holds. */
     @Test fun aFallbackReusesTheFocusItAlreadyHoldsForTheSameRequest() {
         ShadowMediaPlayer.resetStaticState()
         ShadowTextToSpeech.reset()
         ShadowTextToSpeech.addLanguageAvailability(Locale.US)
-        val source = FakeSource().apply { recording = recorded() }
+        val source = FakeSource().apply { clip = providerAudio() }
         val manager = audioManager()
         val player = player(source)
 
         player.speakWord("hello", "US")
-        assertNotNull("The recording takes audio focus", shadowOf(manager).lastAudioFocusRequest)
+        assertNotNull("Provider audio takes audio focus", shadowOf(manager).lastAudioFocusRequest)
         // Identity must be compared on the framework request, not Robolectric's wrapper record.
         val grantedFocus = shadowOf(manager).lastAudioFocusRequest.audioFocusRequest
         assertNull(shadowOf(manager).lastAbandonedAudioFocusRequest)

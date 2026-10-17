@@ -1,18 +1,133 @@
 package app.margin.reader.reader
 
-/** Selection ownership survives native toolbar recreation; tokens own asynchronous native reads. */
+/**
+ * One reader's selection ownership: the native toolbar lifetime, the physical pointer gesture and
+ * every asynchronous native selection read.
+ *
+ * Android creates the text-selection toolbar while the finger is still on the screen and recreates
+ * it during handle dragging, so toolbar creation is not a gesture boundary. Pointer ownership is
+ * physical: [holdStart] and [holdEnd] follow the real touch stream, [cancelGesture] is the only
+ * deliberate lifecycle reset, and clearing a selection or ending a session must never end a held
+ * gesture. An automatic lookup additionally needs a release the app actually observed plus the
+ * range a release read confirmed, so a native menu request mid-gesture can neither explain nor
+ * interrupt. The identity already explained is remembered so an adjustment never reopens the old
+ * highlight.
+ */
 internal class SelectionSession {
+    /** Identity of one native selection. [usable] means it can be explained or looked up. */
+    data class Identity(val highlight: String, val before: String, val after: String) {
+        val usable: Boolean get() = highlight.isNotBlank()
+    }
+
     var generation: Long = 0L
         private set
-    private var quickConsumed = false
 
+    /** True between ACTION_DOWN and ACTION_UP/ACTION_CANCEL. */
+    var pointerHeld: Boolean = false
+        private set
+
+    /**
+     * True once this selection session saw the pointer leave the screen. A native menu request can
+     * arrive while the finger is still selecting - and on some input paths the Activity never sees
+     * the pointer at all - so an automatic explanation requires a release that was actually
+     * observed, never a menu request that merely looks like one.
+     */
+    var hasObservedRelease: Boolean = false
+        private set
+
+    /** True while a native selection of this session exists, even when its toolbar was destroyed. */
+    var hasNativeSelection: Boolean = false
+        private set
+
+    /** Selection already explained or opened in this session. */
+    private var explained: Identity? = null
+
+    /**
+     * Selection the last released gesture ended with, or null when that gesture selected nothing.
+     * Automatic explanation can only explain this identity, never an earlier state of the gesture.
+     */
+    var released: Identity? = null
+        private set
+
+    fun holdStart() {
+        pointerHeld = true
+        hasObservedRelease = false
+    }
+
+    fun holdEnd() {
+        pointerHeld = false
+        hasObservedRelease = true
+    }
+
+    /** Native toolbar created or recreated. Returns the token owning this session's native reads. */
     fun beginNativeMode(): Long {
         generation++
+        hasNativeSelection = true
         return generation
     }
 
     fun isCurrent(token: Long): Boolean = token == generation
 
+    /**
+     * Quick Explain belongs to a released gesture and to the selection that gesture ended with. A
+     * held pointer, a pointer the app never observed leaving the screen, an obsolete read, an empty
+     * selection, a stale identity from earlier in the same gesture (the word it started on) or an
+     * already explained selection can never start one.
+     */
+    fun mayAutoExplain(token: Long, enabled: Boolean, identity: Identity?): Boolean =
+        enabled && isCurrent(token) && !pointerHeld && hasObservedRelease &&
+            identity?.usable == true && identity == released && identity != explained
+
+    /** Records what the released gesture ended with; an unusable release clears the previous one. */
+    fun releasedSelection(token: Long, identity: Identity?) {
+        if (isCurrent(token)) released = identity?.takeIf { it.usable }
+    }
+
+    /** Remembers the selection that already opened a lookup, however it was started. */
+    fun lookupOpened(token: Long, identity: Identity?) {
+        if (isCurrent(token) && identity?.usable == true) explained = identity
+    }
+
+    /**
+     * The reader stopped owning input (for example it paused). Only this deliberate lifecycle
+     * cancellation, a real ACTION_UP/ACTION_CANCEL, ends a held gesture: clearing a selection or
+     * ending a selection session must never do it.
+     */
+    fun cancelGesture() {
+        pointerHeld = false
+        hasObservedRelease = false
+    }
+
+    /**
+     * Source input may only end the selection session once the pointer is up. While a finger is
+     * still down, an empty native selection is just a selection that has not been composed yet, not
+     * a cleared one.
+     */
+    fun mayClearForSourceInput(): Boolean = !pointerHeld
+
+    /**
+     * Ends the selection session: new reads and new explanations need a new gesture. The physical
+     * pointer lifetime is separate, so a held gesture stays held.
+     */
+    fun clear() {
+        generation++
+        hasNativeSelection = false
+        hasObservedRelease = false
+        explained = null
+        released = null
+    }
+
+    /**
+     * A location change invalidates an open lookup, but it must not clear a native selection that a
+     * held gesture is still extending: Readium's debounced native location can move while the
+     * WebView settles under the drag, and clearing there ends multi-word selection mid-gesture.
+     */
+    fun mayClearForLocationChange(): Boolean = !(pointerHeld && hasNativeSelection)
+
+    /**
+     * Padding-band input shares native selection ownership. A read started before a newer gesture
+     * or session can neither clear nor navigate.
+     */
     fun paddingAction(
         token: Long,
         hasSelection: Boolean,
@@ -23,24 +138,29 @@ internal class SelectionSession {
         hasSelection -> ReaderPaddingAction.ClearSelection
         else -> ReaderPaddingAction.Navigate
     }
-
-    fun consumeQuick(token: Long): Boolean {
-        if (!isCurrent(token) || quickConsumed) return false
-        quickConsumed = true
-        return true
-    }
-
-    fun lookupOpened() { quickConsumed = true }
-
-    fun adjust() {
-        generation++
-        quickConsumed = true
-    }
-
-    fun clear() {
-        generation++
-        quickConsumed = false
-    }
 }
 
 internal enum class ReaderPaddingAction { Ignore, ClearSelection, Navigate }
+
+/**
+ * The read rule of one released selection, kept pure so it is testable without a navigator. Reads
+ * are consumed one at a time: two consecutive reads with the same identity confirm the range, a read
+ * reporting nothing selected ends it, and the budget bounds how long a still-moving native range is
+ * followed before it is reported as unconfirmed. Agreement is checked right after every read, so a
+ * sequence like A, B, B confirms B.
+ */
+internal class ReleasedSelectionReads(private val budget: Int) {
+    enum class Outcome { Confirmed, Unconfirmed, Empty }
+
+    private var previous: SelectionSession.Identity? = null
+    private var reads = 0
+
+    /** Consumes one read; null means the caller must keep reading within its budget. */
+    fun accept(identity: SelectionSession.Identity?): Outcome? {
+        reads++
+        if (identity == null) return Outcome.Empty
+        if (identity == previous) return Outcome.Confirmed
+        previous = identity
+        return if (reads >= budget) Outcome.Unconfirmed else null
+    }
+}

@@ -9,7 +9,7 @@ An Android EPUB reader for people who learn English by reading real books. A qui
 - One Focus Dark, Classic White or Warm Paper appearance choice across the entire app and reader.
 - Automatic reopening of the last-read book at its stored Readium locator. Reading positions survive app restarts and typography changes.
 - Structured contextual AI explanations with meaning, contextual usage, UK/US IPA and playable examples. Saved provider profiles switch without repeated setup and have independent temperatures. Successful answers are reused within the reader session; dictionary tabs do not repeat paid requests.
-- Optional Quick Explain, explicit offline dictionary, recorded word pronunciation and system-spoken examples, with preferred US/UK accent and optional autoplay.
+- Optional Quick Explain, explicit offline dictionary, online word pronunciation audio and system-spoken phrases and examples, with preferred US/UK accent and optional autoplay.
 - Actual foreground reading-time statistics, with idle detection and local daily storage.
 
 The app contains no sample library, AI answers or invented statistics. The interactive design prototype is a separate artifact, not shipped application code.
@@ -30,16 +30,16 @@ The debug APK is universal. The Gradle wrapper selects an installed JDK 17 on ma
 ## First use
 
 1. Use the library’s plus button to add a readable, DRM-free `.epub`, or open/share one from another app.
-2. Tap the page centre to show reading controls. Layout controls type, size, line/paragraph spacing, horizontal margins and top/bottom distances; immersive mode can be disabled. The single Appearance choice applies everywhere.
+2. Tap the page centre to show reading controls — chapter contents, search and appearance, plus typography, size, line/paragraph spacing, horizontal margins and top/bottom distances; immersive mode can be disabled. The single Appearance choice applies everywhere.
 3. Add model profiles in Settings using HTTPS base URL, model identifier, API key and temperature. Select the active profile without deleting the others. Temperature changes randomness, not speed; provider support varies. A connection test is a real request and may incur charges.
 4. Select a word or phrase and choose Explain or Dictionary. Quick Explain opens help directly. Switching tabs preserves the same answer; explicit Retry requests a new one.
-5. Use the term/example speakers. Single words use Wikimedia Commons recordings where available; phrases and examples use the configured Android speech engine. When the preferred accent is unavailable, another usable English voice is accepted with a notice, not an installation error. Settings has separate word and sentence previews. Actual recordings show creator/source/license credits.
+5. Use the term and example speakers. Single words use the public Youdao Dictionary word-audio service when it answers; phrases and examples use the configured Android speech engine. When the preferred accent is unavailable, another usable English voice is accepted with a notice, not an installation error. Settings has separate word and sentence previews. Word audio is credited to that service with a link, and the service states no creator or licence.
 
 To check system speech, open Settings → Pronunciation and try **Preview English sentence**. If it fails, use the speech-settings action to choose an English-capable text-to-speech engine or download English voice data. A phone assistant's built-in voice is not necessarily available to Android text-to-speech.
 
 ## Privacy and data
 
-Books, progress, preferences and statistics are local. Model requests contain only the selected text, bounded nearby snippets and available book/chapter titles. API keys use Android Keystore-backed encryption and app backup is disabled. Offline dictionary lookup does not contact a provider. A word-audio action sends only that word to Wikimedia Commons, never its sentence or book. Recording availability depends on coverage and connectivity; system English is the fallback. Android speech engines may use their own network voices when no usable offline English voice is installed.
+Books, progress, preferences and statistics are local. Model requests contain only the selected text, bounded nearby snippets and available book/chapter titles. API keys use Android Keystore-backed encryption and app backup is disabled. Offline dictionary lookup does not contact a provider. A word-audio action sends exactly one word to the public Youdao Dictionary endpoint — never its sentence, book text or chapter titles — and the returned audio is played from memory rather than stored. That endpoint is unofficial, needs no key and is not guaranteed to answer, so system English is the fallback. Phrases and examples never reach it: they use your Android speech engine, which may use its own network voices when no usable offline English voice is installed.
 
 See the [selection-context contract](agent-doc/reference/learning/SPEC.md#selection-context) for exact snippet limits and [provider integration](agent-doc/reference/learning/INTEGRATION.md) for structured-output compatibility. Provider/model support varies; malformed, truncated and refused output is not displayed as successful completion.
 

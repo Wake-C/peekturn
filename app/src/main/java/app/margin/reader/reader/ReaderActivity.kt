@@ -43,6 +43,8 @@ import app.margin.reader.data.ReadingTracker
 import app.margin.reader.learning.LearningPopup
 import app.margin.reader.learning.LearningSession
 import app.margin.reader.model.*
+import app.margin.reader.ui.BookSearchDialog
+import app.margin.reader.ui.BookSearchState
 import app.margin.reader.ui.MarginTheme
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -52,6 +54,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import org.readium.r2.navigator.Selection
 import org.json.JSONObject
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
@@ -66,6 +70,7 @@ class ReaderActivity : AppCompatActivity() {
     private val graph get() = (application as MarginApp).graph
     private var book by mutableStateOf<Book?>(null)
     private var publication: Publication? = null
+    private var chapterTitles: ChapterTitles? = null
     private var navigator: EpubNavigatorFragment? = null
     private var tracker: ReadingTracker? = null
     private var initialLocator: Locator? = null
@@ -75,11 +80,12 @@ class ReaderActivity : AppCompatActivity() {
     private var chrome by mutableStateOf(ReaderChromeState())
     private var panel by mutableStateOf<String?>(null)
     private var lookup by mutableStateOf<LookupRequest?>(null)
-    private var quickJob: Job? = null
+    private var releaseJob: Job? = null
     private val selectionSession = SelectionSession()
     private var selectionProbeJob: Job? = null
     private var searchJob: Job? = null
     private var searchIterator: SearchIterator? = null
+    private var searchQuery by mutableStateOf("")
     private var searchResults by mutableStateOf<List<Locator>>(emptyList())
     private var searchMessage by mutableStateOf("")
     private var searchBusy by mutableStateOf(false)
@@ -113,7 +119,7 @@ class ReaderActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when (chrome.back(lookup != null || mode != null, panel != null)) {
-                    ReaderBackAction.DismissLookup -> dismissLookup(true)
+                    ReaderBackAction.DismissLookup -> dismissLookup(true, "back")
                     ReaderBackAction.DismissPanel -> panel = null
                     ReaderBackAction.HideChrome -> chrome = ReaderChromeState()
                     ReaderBackAction.Exit -> finish()
@@ -162,11 +168,9 @@ class ReaderActivity : AppCompatActivity() {
                         ReaderPosition(chapterLabel, positionLabel, settings.appTheme, settings.reading.immersive)
                         if (chrome.visible) ReaderChrome(
                             theme = settings.appTheme,
-                            onLibrary = { finish() },
-                            onContents = { dismissLookup(true); panel = "contents" },
-                            onSearch = { dismissLookup(true); panel = "search" },
-                            onAppearance = { dismissLookup(true); panel = "type" },
-                            onHide = { chrome = ReaderChromeState() }
+                            onContents = { dismissLookup(true, "chrome contents"); panel = "contents" },
+                            onSearch = { dismissLookup(true, "chrome search"); panel = "search" },
+                            onAppearance = { dismissLookup(true, "chrome appearance"); panel = "type" }
                         )
                     }
                     when (panel) {
@@ -180,8 +184,9 @@ class ReaderActivity : AppCompatActivity() {
                                 context = request.context, anchor = request.anchor, settings = settings,
                                 session = learningSession, dictionary = graph.dictionary, speech = graph.speech,
                                 initialDictionary = request.dictionary,
-                                onDismiss = { dismissLookup(true) },
-                                onAdjust = { dismissLookup(false) }
+                                onClose = { dismissLookup(true, "popup close") },
+                                onCancel = { dismissLookup(true, "popup outside dismissal") },
+                                onAdjust = { dismissLookup(false, "popup adjust") }
                             )
                         }
                     }
@@ -193,13 +198,15 @@ class ReaderActivity : AppCompatActivity() {
                 graph.store.load()
                 val loaded = graph.store.findBook(intent.getLongExtra(EXTRA_BOOK, -1))
                     ?: error("This book is no longer in the library.")
-                publication = graph.engine.open(File(loaded.filePath))
+                val opened = graph.engine.open(File(loaded.filePath))
+                publication = opened
+                chapterTitles = ChapterTitles.of(opened.tableOfContents, opened.readingOrder)
                 val json = savedInstanceState?.getString(STATE_LOCATOR) ?: loaded.locatorJson
                 initialLocator = json?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
                 if (initialLocator?.let(::isSafeReaderLocator) == false) error("Unsafe saved fragment identifier.")
                 lastLocator = initialLocator
                 positionLabel = ""
-                chapterLabel = initialLocator?.title.orEmpty()
+                initialLocator?.let(::applyChapterLabel)
                 tracker = ReadingTracker(graph.store, loaded.id, graph.scope).also { if (resumed) it.resume() }
                 writer = graph.scope.launch {
                     for (locator in positions) {
@@ -252,7 +259,7 @@ class ReaderActivity : AppCompatActivity() {
             paginationListener = object : EpubNavigatorFragment.PaginationListener {
                 override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) {
                     positionLabel = chapterPositionLabel(graph.store.settings.value.reading.scroll, pageIndex + 1, totalPages, locator.locations.progression)
-                    chapterLabel = locator.title.orEmpty()
+                    applyChapterLabel(locator)
                 }
                 override fun onPageLoaded() {
                     if (openedMarked) return
@@ -300,14 +307,14 @@ class ReaderActivity : AppCompatActivity() {
         // only after State.Ready and the requested resource is loaded (notifyCurrentLocation).
         locatorJob = lifecycleScope.launch {
             fragment.currentLocator.drop(1).collect { locator ->
-                if (lastLocator != locator) dismissLookup(true)
+                if (lastLocator != locator) dismissLookupForLocationChange()
                 lastLocator = locator
                 queuePosition(locator)
                 tracker?.interact()
                 if (graph.store.settings.value.reading.scroll) {
                     positionLabel = chapterPositionLabel(true, 0, 0, locator.locations.progression)
                 }
-                chapterLabel = locator.title.orEmpty()
+                applyChapterLabel(locator)
                 // A requested appearance change can be deferred while the WebView has
                 // entered a chapter whose debounced native locator is not ready yet.
                 if (renderedPreferences != graph.store.settings.value.let { it.reading to it.appTheme }) {
@@ -328,7 +335,7 @@ class ReaderActivity : AppCompatActivity() {
         }
         val anchor = reflowLocator(current, visible) ?: return
         if (navigator !== fragment || supportFragmentManager.isStateSaved || !resumed) return
-        dismissLookup(true)
+        dismissLookup(true, "reflow")
         locatorJob?.cancel()
         initialLocator = anchor
         lastLocator = anchor
@@ -336,6 +343,11 @@ class ReaderActivity : AppCompatActivity() {
         positionLabel = ""
         supportFragmentManager.beginTransaction().remove(fragment).commitNow()
         attachNavigator()
+    }
+
+    /** Passive chapter label: Readium's chapter title, else the publication's own TOC/spine title. */
+    private fun applyChapterLabel(locator: Locator) {
+        chapterLabel = chapterTitles?.titleFor(locator).orEmpty()
     }
 
     private fun queuePosition(locator: Locator) {
@@ -353,8 +365,8 @@ class ReaderActivity : AppCompatActivity() {
         val input = readerInputEpoch
         // Adjust can remove the toolbar while keeping selection, so absence of
         // ActionMode is not proof that a padding gesture may turn the page.
-        if (mode != null || lookup != null) {
-            dismissLookup(true)
+        if (selectionSession.hasNativeSelection || lookup != null) {
+            dismissLookup(true, "padding gesture with a selection")
             return
         }
         selectionProbeJob?.cancel()
@@ -362,16 +374,16 @@ class ReaderActivity : AppCompatActivity() {
         paddingGestureJob = lifecycleScope.launch {
             val selected = nav.currentSelection()?.locator?.text?.highlight?.isNotBlank() == true
             if (navigator !== nav || !resumed) return@launch
-            when (selectionSession.paddingAction(generation, selected || mode != null || lookup != null, input, readerInputEpoch)) {
+            when (selectionSession.paddingAction(generation, selected || lookup != null, input, readerInputEpoch)) {
                 ReaderPaddingAction.Ignore -> Unit
-                ReaderPaddingAction.ClearSelection -> dismissLookup(true)
+                ReaderPaddingAction.ClearSelection -> dismissLookup(true, "padding gesture found a selection")
                 ReaderPaddingAction.Navigate -> action(nav)
             }
         }
     }
 
     private fun navigate(action: (EpubNavigatorFragment) -> Unit) {
-        dismissLookup(true)
+        dismissLookup(true, "navigation")
         tracker?.interact()
         navigator?.let(action)
     }
@@ -394,45 +406,51 @@ class ReaderActivity : AppCompatActivity() {
 
     private val selectionActions = object : ActionMode.Callback {
         override fun onCreateActionMode(actionMode: ActionMode, menu: Menu): Boolean {
+            // Android shows this toolbar as soon as a word is selected - while the finger is still
+            // down - and Chromium destroys and re-creates the floating mode when a handle drag stops
+            // or the selection menu is re-shown. So this is the native drag-stop signal, never proof
+            // of a release on its own: the Activity's touch stream owns "the pointer left the screen",
+            // and a held pointer or an unobserved release suppresses everything here.
             mode = actionMode
-            val generation = selectionSession.beginNativeMode()
+            selectionSession.beginNativeMode()
+            selectionTrace("native selection toolbar created held=${selectionSession.pointerHeld}")
             menu.clear()
             menu.add(0, EXPLAIN, 0, "Explain")
             menu.add(0, DICTIONARY, 1, "Dictionary")
             menu.add(0, android.R.id.copy, 2, "Copy")
-            quickJob?.cancel()
-            if (graph.store.settings.value.quickExplain) {
-                quickJob = lifecycleScope.launch {
-                    // Poll only for asynchronous native locator readiness. Gesture/session
-                    // identity is owned by SelectionSession, never by this interval or ActionMode.
-                    repeat(10) {
-                        delay(80)
-                        if (!selectionSession.isCurrent(generation)) return@launch
-                        val selected = navigator?.currentSelection()
-                        if (!selectionSession.isCurrent(generation)) return@launch
-                        if (selected?.locator?.text?.highlight?.isNotBlank() == true) {
-                            if (selectionSession.consumeQuick(generation)) showLookup(false, generation, selected)
-                            return@launch
-                        }
-                    }
-                }
+            if (!selectionSession.pointerHeld) {
+                // A long press can end before the toolbar exists; the finger is already up.
+                scheduleReleasedSelection()
             }
             return true
         }
-        override fun onPrepareActionMode(actionMode: ActionMode, menu: Menu) = false
+        override fun onPrepareActionMode(actionMode: ActionMode, menu: Menu): Boolean {
+            // Chromium calls this as part of creating the mode, so onCreateActionMode already owns
+            // that signal; the menu is left exactly as created.
+            return false
+        }
         override fun onActionItemClicked(actionMode: ActionMode, item: MenuItem): Boolean = when (item.itemId) {
             EXPLAIN, DICTIONARY -> {
-                quickJob?.cancel()
-                val generation = selectionSession.generation
-                lifecycleScope.launch { showLookup(item.itemId == DICTIONARY, generation) }
+                val token = selectionSession.generation
+                lifecycleScope.launch { showLookup(item.itemId == DICTIONARY, token) }
                 true
             }
             android.R.id.copy -> {
+                val token = selectionSession.generation
                 lifecycleScope.launch {
-                    navigator?.currentSelection()?.locator?.text?.highlight?.let { selected ->
-                        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Book selection", selected))
-                        dismissLookup(true)
+                    val nav = navigator ?: return@launch
+                    // The live native range decides, never a remembered one: a handle drag can revise
+                    // the selection without any Activity touch event.
+                    val selection = when (val read = readNativeSelection(nav, token)) {
+                        is NativeSelectionRead.Confirmed -> read.selection
+                        is NativeSelectionRead.Unconfirmed -> read.selection
+                        NativeSelectionRead.Empty -> return@launch reportSelectionUnreadable("No text is selected.")
+                        NativeSelectionRead.Unavailable ->
+                            return@launch reportSelectionUnreadable("The selection could not be read. Try again.")
                     }
+                    val selected = selection.locator.text.highlight?.takeIf { it.isNotBlank() } ?: return@launch
+                    getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Book selection", selected))
+                    dismissLookup(true, "copy")
                 }
                 true
             }
@@ -441,18 +459,126 @@ class ReaderActivity : AppCompatActivity() {
         override fun onDestroyActionMode(actionMode: ActionMode) { if (mode === actionMode) mode = null }
     }
 
-    private suspend fun showLookup(
-        dictionary: Boolean,
-        generation: Long,
-        captured: org.readium.r2.navigator.Selection? = null
-    ) {
+    /** A native read that cannot answer leaves the selection intact and says so, instead of guessing. */
+    private fun reportSelectionUnreadable(message: String) {
+        selectionTrace("explicit action without a readable native selection")
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * The only moment a released selection may be read and, with Quick Explain enabled, explained.
+     * The signals are independent on purpose: the Activity's touch stream owns "the pointer is
+     * still down / left the screen", while a native selection-menu creation is Chromium's
+     * drag-stop and menu re-show signal. An automatic explanation additionally needs reads that
+     * agreed, so a menu that re-shows mid-gesture can never explain a moving range.
+     */
+    private fun scheduleReleasedSelection() {
+        // A native menu request is not a release: the gesture must be one whose pointer the app saw
+        // leave the screen, with no pointer currently down.
+        if (selectionSession.pointerHeld || !selectionSession.hasObservedRelease || !selectionSession.hasNativeSelection) return
         val nav = navigator ?: return
-        if (!selectionSession.isCurrent(generation)) return
-        val selection = captured ?: nav.currentSelection() ?: return
-        if (!selectionSession.isCurrent(generation)) return
+        if (lookup != null) return
+        val token = selectionSession.generation
+        releaseJob?.cancel()
+        releaseJob = lifecycleScope.launch {
+            val read = readNativeSelection(nav, token)
+            // Only a range the native reader repeated may be explained automatically; an unconfirmed
+            // or unreadable one is recorded as no released range at all.
+            val selection = (read as? NativeSelectionRead.Confirmed)?.selection
+            val identity = selection?.identity()
+            selectionSession.releasedSelection(token, identity)
+            val quick = graph.store.settings.value.quickExplain
+            val explains = selectionSession.mayAutoExplain(token, quick, identity)
+            selectionTrace(
+                "released read=${read.traceName} chars=${identity?.highlight?.length ?: 0} " +
+                    "before=${identity?.before?.length ?: 0} after=${identity?.after?.length ?: 0} " +
+                    "quickExplain=$quick autoExplain=$explains"
+            )
+            if (!explains) return@launch
+            showLookup(dictionary = false, token = token, captured = selection)
+        }
+    }
+
+    /**
+     * Readium reads the selection through the WebView, so the value right after a release can still
+     * be the previous one. Returns [NativeSelectionRead.Confirmed] only when repeated reads agree;
+     * a native state that kept moving within the bounded budget is reported as
+     * [NativeSelectionRead.Unconfirmed] and only an explicit action may still use it. "Nothing
+     * selected" and "could not read" are separate answers, and no answer is ever replaced by a
+     * remembered range.
+     */
+    private suspend fun readNativeSelection(nav: EpubNavigatorFragment, token: Long): NativeSelectionRead {
+        val reads = ReleasedSelectionReads(NATIVE_SELECTION_READS)
+        repeat(NATIVE_SELECTION_READS) { attempt ->
+            if (!releaseReadIsCurrent(nav, token)) return NativeSelectionRead.Unavailable
+            val read = withTimeoutOrNull(NATIVE_SELECTION_READ_TIMEOUT_MS) { nav.currentSelection() }
+                ?: return NativeSelectionRead.Unavailable
+            if (!releaseReadIsCurrent(nav, token)) return NativeSelectionRead.Unavailable
+            // Agreement is decided right after each read, so the last two agreeing reads confirm the
+            // range even when a different value was reported earlier in the sequence.
+            when (reads.accept(read.identity())) {
+                ReleasedSelectionReads.Outcome.Confirmed -> return NativeSelectionRead.Confirmed(read)
+                ReleasedSelectionReads.Outcome.Empty -> return NativeSelectionRead.Empty
+                ReleasedSelectionReads.Outcome.Unconfirmed ->
+                    return NativeSelectionRead.Unconfirmed(read)
+                null -> Unit
+            }
+            if (attempt < NATIVE_SELECTION_READS - 1) delay(NATIVE_SELECTION_SETTLE_MS)
+        }
+        return NativeSelectionRead.Empty
+    }
+
+    /** Outcome of reading the native selection; an unreadable state is not "nothing selected". */
+    private sealed interface NativeSelectionRead {
+        val traceName: String
+
+        /** Repeated reads agreed on this range: the one automatic explanation accepts. */
+        data class Confirmed(val selection: Selection) : NativeSelectionRead {
+            override val traceName = "confirmed"
+        }
+        /** The last read only; the native state was still moving, so it is not release-proof. */
+        data class Unconfirmed(val selection: Selection) : NativeSelectionRead {
+            override val traceName = "unconfirmed"
+        }
+        object Empty : NativeSelectionRead {
+            override val traceName = "empty"
+        }
+        object Unavailable : NativeSelectionRead {
+            override val traceName = "unavailable"
+        }
+    }
+
+    private fun releaseReadIsCurrent(nav: EpubNavigatorFragment, token: Long): Boolean =
+        selectionSession.isCurrent(token) && !selectionSession.pointerHeld &&
+            navigator === nav && resumed && !isFinishing && !isDestroyed
+
+    private fun Selection.identity(): SelectionSession.Identity? {
+        val text = locator.text
+        val highlight = text.highlight.orEmpty()
+        if (highlight.isBlank()) return null
+        return SelectionSession.Identity(highlight, text.before.orEmpty(), text.after.orEmpty())
+    }
+
+    private suspend fun showLookup(dictionary: Boolean, token: Long, captured: Selection? = null) {
+        val nav = navigator ?: return
+        if (!selectionSession.isCurrent(token)) return
+        // The automatic path passes the range its confirmed release read produced. An explicit action
+        // reads the live native range here - Android can drag handles in their own native window, so
+        // nothing is ever explained from a remembered range, and an unconfirmed live range is still
+        // the user's current selection rather than an older one.
+        val selection = captured ?: when (val read = readNativeSelection(nav, token)) {
+            is NativeSelectionRead.Confirmed -> read.selection
+            is NativeSelectionRead.Unconfirmed -> read.selection
+            NativeSelectionRead.Empty -> return reportSelectionUnreadable("No text is selected.")
+            NativeSelectionRead.Unavailable ->
+                return reportSelectionUnreadable("The selection could not be read. Try again.")
+        }
+        if (!selectionSession.isCurrent(token)) return
         val locator = selection.locator
         val text = locator.text.highlight?.takeIf { it.isNotBlank() } ?: return
-        selectionSession.lookupOpened()
+        val identity = selection.identity()
+        if (identity != null) selectionSession.releasedSelection(token, identity)
+        selectionSession.lookupOpened(token, identity)
         selectionFocus = nav.view?.findFocus()
         val offset = IntArray(2)
         nav.view?.getLocationInWindow(offset)
@@ -461,7 +587,13 @@ class ReaderActivity : AppCompatActivity() {
             RectF(bounds.left, bounds.top, bounds.right, bounds.bottom)
         }
         lookup = LookupRequest(
-            LookupContext(text, locator.text.before.orEmpty(), locator.text.after.orEmpty(), book?.title.orEmpty(), locator.title ?: nav.currentLocator.value.title.orEmpty()),
+            LookupContext(
+                text,
+                locator.text.before.orEmpty(),
+                locator.text.after.orEmpty(),
+                book?.title.orEmpty(),
+                chapterTitles?.titleFor(locator).orEmpty()
+            ),
             anchor, dictionary
         )
         tracker?.interact()
@@ -486,35 +618,74 @@ class ReaderActivity : AppCompatActivity() {
         return padding
     }
 
-    private fun dismissLookup(clearSelection: Boolean) {
-        quickJob?.cancel()
+    /**
+     * Debug-gated selection trace. Selecting text is the user's own book content, so this records
+     * lengths and decisions only, never the passage itself. It exists to make an interrupted
+     * selection gesture diagnosable on a device; it is silent in release builds.
+     */
+    private fun selectionTrace(message: String) {
+        if (app.margin.reader.BuildConfig.DEBUG) android.util.Log.d(SELECTION_LOG_TAG, message)
+    }
+
+    /**
+     * Closes the current lookup. [reason] is diagnostic only: the trace must be able to tell a popup
+     * close, an outside dismissal, a lifecycle clear and a navigation clear apart.
+     */
+    private fun dismissLookup(clearSelection: Boolean, reason: String) {
+        releaseJob?.cancel()
         selectionProbeJob?.cancel()
         lookup = null
         graph.speech.stop()
         if (clearSelection) {
+            selectionTrace("cleared native selection reason=$reason")
             selectionSession.clear()
             navigator?.clearSelection()
             mode?.finish()
             mode = null
             selectionFocus = null
         } else {
-            selectionSession.adjust()
+            // Adjust only closes the popup: the session, its token and the native selection stand, so
+            // an unchanged highlight cannot reopen while a revised released selection may.
+            selectionTrace("kept native selection reason=$reason")
             selectionFocus?.requestFocus()
         }
     }
 
+    /**
+     * A moved publication location invalidates an open lookup. While a held gesture is still
+     * selecting, the native selection belongs to that gesture: Readium's debounced location can
+     * change as the WebView settles under the drag, and clearing there would end multi-word
+     * selection in both Quick Explain modes.
+     */
+    private fun dismissLookupForLocationChange() {
+        if (selectionSession.mayClearForLocationChange()) {
+            selectionTrace("location change dismissed the lookup")
+            dismissLookup(true, "location change")
+            return
+        }
+        selectionTrace("location change during a held gesture kept the native selection")
+        releaseJob?.cancel()
+        selectionProbeJob?.cancel()
+        lookup = null
+        graph.speech.stop()
+    }
+
     private fun observeSourceSelectionClear() {
         val nav = navigator ?: return
-        if (lookup != null || nav.view == null) return
+        // Reading a native selection while the finger is still down says nothing: before the long
+        // press composes a selection it is legitimately empty. Only a released pointer can end the
+        // selection session.
+        if (lookup != null || nav.view == null || !selectionSession.mayClearForSourceInput()) return
         val generation = selectionSession.generation
         selectionProbeJob?.cancel()
         selectionProbeJob = lifecycleScope.launch {
             val selected = nav.currentSelection()?.locator?.text?.highlight?.isNotBlank() == true
             // A toolbar's destruction alone is not a clear. Require the public native
             // selection to be absent after source input, with no replacement mode/popup.
-            if (selectionSession.isCurrent(generation) && !selected && mode == null && lookup == null) {
+            if (selectionSession.isCurrent(generation) && !selected && mode == null && lookup == null &&
+                selectionSession.mayClearForSourceInput()) {
                 selectionSession.clear()
-                quickJob?.cancel()
+                releaseJob?.cancel()
             }
         }
     }
@@ -535,27 +706,22 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     @Composable private fun SearchDialog() {
-        var query by remember { mutableStateOf("") }
         DisposableEffect(Unit) { onDispose { closeSearch() } }
-        AlertDialog(onDismissRequest = { panel = null }, title = { Text("Search book") },
-            text = {
-                Column {
-                    OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Word or phrase") }, singleLine = true)
-                    TextButton(onClick = { startSearch(query) }, enabled = query.isNotBlank()) { Text("Search") }
-                    if (searchBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text(searchMessage, style = MaterialTheme.typography.labelMedium)
-                    LazyColumn(Modifier.heightIn(max = 320.dp)) {
-                        items(searchResults) { locator ->
-                            TextButton(onClick = { panel = null; goSafely(locator) }) {
-                                Text(listOfNotNull(locator.title, locator.text.before, locator.text.highlight, locator.text.after).joinToString(" "))
-                            }
-                        }
-                        if (!searchEnded && searchIterator != null) item {
-                            TextButton(onClick = { nextSearchPage() }, enabled = !searchBusy) { Text("More results") }
-                        }
-                    }
-                }
-            }, confirmButton = { TextButton(onClick = { panel = null }) { Text("Close") } })
+        BookSearchDialog(
+            state = BookSearchState(
+                query = searchQuery,
+                results = searchResults,
+                message = searchMessage,
+                busy = searchBusy,
+                hasMore = !searchEnded && searchIterator != null
+            ),
+            chapterTitle = { locator -> chapterTitles?.titleFor(locator).orEmpty() },
+            onQueryChange = { searchQuery = it },
+            onSearch = { startSearch(searchQuery) },
+            onMoreResults = { nextSearchPage() },
+            onOpen = { locator -> panel = null; goSafely(locator) },
+            onDismiss = { panel = null }
+        )
     }
 
     private fun startSearch(query: String) {
@@ -636,14 +802,30 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         handledPaddingGesture = false
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            readerInputEpoch++
-            paddingGestureJob?.cancel()
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                readerInputEpoch++
+                paddingGestureJob?.cancel()
+                // Android creates the selection toolbar, and recreates it while handles are
+                // dragged, all inside one held gesture. Ownership starts here.
+                selectionSession.holdStart()
+                selectionTrace("pointer down pointers=${event.pointerCount}")
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                selectionSession.holdEnd()
+                selectionTrace("pointer released action=${event.actionMasked}")
+            }
         }
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP) tracker?.interact()
+        // The WebView applies the final native selection during this dispatch, so the released
+        // read below observes a settled selection rather than an intermediate drag state.
         val handled = super.dispatchTouchEvent(event)
-        if (!handledPaddingGesture && (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP ||
-            event.actionMasked == MotionEvent.ACTION_CANCEL)) observeSourceSelectionClear()
+        if (!handledPaddingGesture && (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)) {
+            observeSourceSelectionClear()
+        }
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            scheduleReleasedSelection()
+        }
         return handled
     }
     override fun onUserInteraction() { super.onUserInteraction(); tracker?.interact() }
@@ -660,7 +842,8 @@ class ReaderActivity : AppCompatActivity() {
     override fun onPause() {
         resumed = false
         paddingGestureJob?.cancel()
-        dismissLookup(true)
+        selectionSession.cancelGesture()
+        dismissLookup(true, "pause")
         tracker?.pause()
         lastLocator?.let(::queuePosition)
         super.onPause()
@@ -668,6 +851,8 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        // Window focus is not a selection signal: a handle drag does not change it, and a selection
+        // menu that takes focus returns it without the native range necessarily changing.
         if (hasFocus) applySystemBars()
     }
 
@@ -690,7 +875,7 @@ class ReaderActivity : AppCompatActivity() {
         locatorJob?.cancel()
         paddingGestureJob?.cancel()
         supportFragmentManager.unregisterFragmentLifecycleCallbacks(readerViewport)
-        quickJob?.cancel()
+        releaseJob?.cancel()
         closeSearch()
         positions.close()
         val readingTracker = tracker
@@ -707,6 +892,14 @@ class ReaderActivity : AppCompatActivity() {
         private const val NAVIGATOR_ID = 0x4D4152
         private const val EXPLAIN = 0x4D01
         private const val DICTIONARY = 0x4D02
+        private const val SELECTION_LOG_TAG = "MarginSelection"
+
+        // Readium's release-time selection read is a JavaScript round trip into the WebView, so a
+        // released selection is confirmed by agreeing reads instead of trusting one asynchronous value.
+        private const val NATIVE_SELECTION_READS = 3
+        private const val NATIVE_SELECTION_SETTLE_MS = 40L
+        private const val NATIVE_SELECTION_READ_TIMEOUT_MS = 1500L
+
         fun intent(context: Context, bookId: Long): Intent = Intent(context, ReaderActivity::class.java).putExtra(EXTRA_BOOK, bookId)
     }
 }

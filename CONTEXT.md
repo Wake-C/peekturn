@@ -10,9 +10,9 @@
 - **Dictionary lookup**: an explicit offline lexical lookup. It does not claim to interpret the current sentence.
 - **Quick Explain**: opening an explanation from a new selection without an additional Explain action.
 - **Pronunciation**: audible reading of a selected term, phrase or example. IPA is written phonetic notation, not audio.
-- **Recorded pronunciation**: an existing audio recording of a word. Distinct from synthesized speech and written IPA.
+- **Word audio**: pronunciation audio a reader can play for a single word, fetched from an online dictionary service. It is not app-owned, not necessarily a human recording, and distinct from system speech and written IPA.
 - **System speech**: synthesized reading of text using the phone's configured speech engine.
-- **Preferred accent**: the desired English pronunciation variety. It does not describe the accent of every available recording or voice.
+- **Preferred accent**: the desired English pronunciation variety. It does not describe the accent of every available voice or word-audio source.
 - **Reading time**: measured active foreground reading duration. It is not vocabulary mastery or estimated time remaining.
 - **Model configuration**: the settings used to request explanations from a model provider.
 - **Temperature**: model sampling randomness. Not response speed or reasoning mode.

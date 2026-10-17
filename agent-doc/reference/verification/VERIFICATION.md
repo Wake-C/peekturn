@@ -172,3 +172,60 @@ Independent profile and speech adversaries re-reviewed the repaired source and r
 All three playback-ownership regressions were observed assertion-red before their fixes. The focus fixture was then corrected to account for automatic shadow utterance completion and to compare framework focus objects rather than a shadow wrapper; its final positive checks prove fallback speech and release of the original focus. Compilation, local HTTPS-fixture and post-completion assertion errors are harness corrections, not additional product-regression evidence.
 
 These update model requests used fixture-only credentials and a controlled SSE provider, not a new live DeepSeek/Doubao acceptance run. No physical OnePlus device was attached; its engine behavior and perceived accent quality are not claimed as device-tested. Recorded coverage/connectivity remains conditional, and sentence speech still requires some usable English TTS capability. Private screenshots and logs remain ignored. The controlled model provider used for this update was stopped and its script removed; earlier local verification artifacts were not deleted.
+
+## Reader controls, selection, search and free word audio update (2026-10-16)
+
+Final package: `app.margin.reader` version `1.2.0`, version code `3`, universal debug APK. In an isolated detached checkout of `d00c736` with only this change applied, `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` passed with 174 tests in 25 classes, zero failures, errors or skips. Lint reported zero errors and 43 warnings, not a warning-free build. The APK is 56,293,374 bytes against 56,374,583 for the pre-change build: no speech model or voice data was added, and no paid audio service, API key or bundled engine is present.
+
+### Baseline-red regression evidence
+
+- Voice normalization: an isolated baseline worktree probe called `configureSpeech` with a voice reporting `Locale("eng","GBR")`, successful voice selection and `LANG_NOT_SUPPORTED` from the language API. It failed by assertion: expected `Available`, was `Unsupported`. The permanent case is `iso3EngineIdentifiersStillNameEnglishAndTheRequestedCountry`.
+- Held-pointer ownership: the equivalent probe (`holdStart`, then a session clear, then assert the pointer is still held) failed by assertion against the pre-fix tree before the permanent regression was added.
+- Adjust after Quick Explain: the baseline probe failed by assertion because `adjust()` permanently consumed Quick Explain for that selection.
+- The rewritten `SelectionSession` interface makes the new session tests compile-red against the baseline by design; no compatibility shim was retained, so assertion-level red evidence is claimed only for the three probes above.
+
+### Native behavior on the API 35 emulator
+
+Reading controls, with synthetic fixtures and no production data:
+
+- The bottom rail renders exactly three 48 dp actions (chapters, search, reading appearance); the back and close actions are gone. Back hides the rail and stays in the reader; a second Back returns to the library.
+- Paragraph geometry measured through the WebView was identical with the rail shown and hidden, so showing controls does not repaginate or move the reading position.
+- The current chapter title renders top-left from the publication's own titles, visible while chrome is hidden; at 1.5x system text the label stayed at its capped size instead of reaching the first book line.
+
+Search:
+
+- Rows are full width with the resolved chapter title on its own line and a bounded, ellipsis-marked snippet; the matched word is highlighted. The pre-change build wrapped whole paragraphs in rounded buttons that clipped them, which no longer occurs.
+- The query field, result count and Close footer stayed fixed while the result list scrolled independently; "More results" grew the list from 18 to 36 loaded matches; an unmatched query reported "No matches.".
+- Tapping a result left the sheet and opened that locator: the reader showed chapter page 5/5 containing the selected passage.
+- At 1.5x system text the field, status and footer stayed visible with the keyboard up, and rows wrapped to two-line snippets without clipping.
+
+Settings at 1.0x and 1.5x system text:
+
+- Appearance is three side-by-side theme tiles, wrapping to two per row at 1.5x; Pronunciation is one auto-pronounce row, one US/UK selector and adjacent Word/Sentence preview actions, with the provider notice, errors and system-speech entry one tap away under "Audio details".
+
+Selection and lookup:
+
+- Quick Explain on, raw hold-and-drag: the native toolbar was created while the pointer was still down, no read or request happened before release, the released read was confirmed, and exactly one popup and one request carried the released phrase. The mid-gesture screenshot shows no popup.
+- Adjust kept the native selection, both handles and the highlight, and closed the popup; a subsequent end-handle drag produced one confirmed release read and one new request for the revised range.
+- Quick Explain off: releasing a drag produced no popup and no request, the highlight and handles stayed usable, and explicit Explain sent the exact released phrase.
+- Explanation rendering: meaning, contextual meaning and both examples rendered with the popup sized to its content.
+
+Speech:
+
+- Sentence preview and sentence actions used the installed system engine with real native audio frames and the notice that the requested accent is not guaranteed, rather than a false "not installed" error.
+- Word audio for both UK and US came from the public provider and played through native media decode with real audio frames; with networking disabled the action fell back to system speech with a truthful notice and no stale credit. The shown credit was `Audio: Youdao Dictionary`.
+- Provider sentence synthesis was probed separately and answered HTTP 500 for all 15 tested example sentences, so phrases and examples intentionally remain on system speech rather than being routed to that endpoint.
+
+### Defects found during review and runtime, and their evidence
+
+- The explanation body rendered empty with the footer mid-card in an interim build. The cause was the popup footer growing to its incoming maximum height while its buttons filled that height, starving the weighted scrollable body. Reproduced on that build, and rendering was confirmed restored after the footer returned to its measured height. This is a build-specific defect of the interim state, not of the delivered source.
+- An early candidate release explained the initial word while the finger was still down. The source-input clear ran on pointer-down, and the session clear reset the physical pointer flag, so the mid-gesture toolbar looked released. Reproduced with a mid-hold screenshot and the decision trace; the fix keeps pointer ownership separate from selection state and requires an observed release.
+- Native selection reads that returned A, B, B confirmed B; the agreement check ran before each read instead of after it. Corrected with a permanent session-level case.
+
+### Remaining evidence boundaries
+
+- No physical OnePlus was available. That engine's identifier reporting, handle behavior and perceived accent quality remain unverified; the emulator installed engine is a different implementation.
+- The word-audio provider is an unofficial public endpoint used without permission or licence claims: availability, coverage and accent quality are not guaranteed, only the requested word is sent, and nothing is cached to disk. Recorded playback frames are not evidence of accent quality.
+- The popup is absent from uiautomator dumps on this emulator, so its footer geometry was derived from screenshots; a measured ~20 px offset between the drawn label and the responding touch target was observed once and not independently measured from the view tree.
+- These checks used a controlled synthetic provider, not a new live commercial-model acceptance run. Device state (font scale 1.0, Quick Explain on, dark theme, UK accent, auto-pronounce off) was restored and the temporary provider was stopped.
+- Raw multitouch injection was required: `adb shell input motionevent` is a no-op on this emulator and `input draganddrop` cancels a selection during its move phase.

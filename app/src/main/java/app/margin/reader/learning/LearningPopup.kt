@@ -38,7 +38,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.margin.reader.data.OfflineDictionary
 import app.margin.reader.model.*
 import app.margin.reader.speech.PronunciationPlayer
-import app.margin.reader.ui.RecordingAttribution
+import app.margin.reader.ui.AudioAttribution
 import kotlinx.coroutines.CancellationException
 import kotlin.math.roundToInt
 
@@ -52,7 +52,8 @@ fun LearningPopup(
     dictionary: OfflineDictionary,
     speech: PronunciationPlayer,
     initialDictionary: Boolean = false,
-    onDismiss: () -> Unit,
+    onClose: () -> Unit,
+    onCancel: () -> Unit,
     onAdjust: () -> Unit
 ) {
     var dictionaryTab by remember(context) { mutableStateOf(initialDictionary) }
@@ -120,8 +121,10 @@ fun LearningPopup(
     }
     val width = with(density) { geometry.width.toDp() }
     val height = with(density) { geometry.height.toDp() }
-    fun close() { speech.stop(); onDismiss() }
-    Popup(popupPositionProvider = position, onDismissRequest = { close() },
+    fun close() { speech.stop(); onClose() }
+    // An outside touch or Back is reported separately from the Close button so the reader can tell
+    // which dismissal happened; both still close the popup and clear the selection.
+    Popup(popupPositionProvider = position, onDismissRequest = { speech.stop(); onCancel() },
         properties = PopupProperties(focusable = true, clippingEnabled = true)) {
         Surface(modifier = Modifier.width(width).heightIn(max = height).pointerInput(activity) {
             awaitPointerEventScope {
@@ -204,7 +207,7 @@ fun LearningPopup(
                         playback.notice?.let {
                             Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 17.sp)
                         }
-                        playback.credit?.let { RecordingAttribution(it) }
+                        playback.credit?.let { AudioAttribution(it) }
                         playback.error?.let {
                             Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
                             TextButton(onClick = speech::openSystemSettings) { Text("Speech settings") }

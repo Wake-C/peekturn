@@ -29,31 +29,35 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Playing includes pending lookups and initialization, so the same speaker button can always stop it.
- * [credit] describes the recording currently used for a word and stays until the next request or stop.
+ * [credit] describes the provider audio currently used for a word and stays until the next request or
+ * stop.
  */
 data class SpeechState(
     val text: String = "",
     val playing: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
-    val credit: RecordingCredit? = null
+    val credit: AudioCredit? = null
 )
 
 internal const val ACCENT_NOT_GUARANTEED = "Using system English; requested accent is not guaranteed."
 private const val MISSING_ENGLISH_DATA = "English voice data is missing. Open system speech settings to download it, then try again."
-private const val NO_ENGLISH_VOICE = "No installed English voice can speak this. Open system speech settings to add one."
-private const val RECORDING_UNAVAILABLE = "No recorded pronunciation is available; using system speech."
+private const val NO_ENGLISH_VOICE = "English speech is unavailable from the installed engines. Check system speech settings."
+private const val NO_SPEECH_ENGINE = "No working speech engine. Open system speech settings to install one."
+private const val WORD_AUDIO_UNAVAILABLE = "No word audio is available; using system speech."
 private const val LOOKUP_TIMEOUT_MS = 10_000L
 private const val PREPARE_TIMEOUT_MS = 8_000L
+private const val INITIALIZE_TIMEOUT_MS = 8_000L
 
 /**
- * Main-thread serialized, latest-only pronunciation. A word prefers the requested accent's Commons
- * recording, installed English speech always remains the fallback, and nothing about a superseded
- * request may still reach the speaker. Call shutdown when its owner is destroyed.
+ * Main-thread serialized, latest-only pronunciation. A word prefers its free provider audio, installed
+ * English speech always remains the fallback, and nothing about a superseded request may still reach
+ * the speaker. Call shutdown when its owner is destroyed.
  */
 class PronunciationPlayer(
     context: Context,
-    private val recordings: WordAudioSource = WordAudioClient()
+    private val provider: WordAudioSource = YoudaoWordAudioClient(),
+    private val engines: (Context) -> List<String> = ::installedSpeechEngines
 ) {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -73,6 +77,10 @@ class PronunciationPlayer(
     private var media: MediaPlayer? = null
     private var mediaPrepared = false
     private var focus: AudioFocusRequest? = null
+    private var initTimeout: Runnable? = null
+    private var candidates: List<String?> = emptyList()
+    private var candidateIndex = 0
+    private var trouble: EngineTrouble? = null
     private val attributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_MEDIA)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -80,13 +88,16 @@ class PronunciationPlayer(
 
     private data class Request(val text: String, val locale: Locale, val id: Long)
 
-    private enum class Path { Speech, Recording }
+    private enum class Path { Speech, Audio }
 
-    /** A single word: the requested accent's recording when available, otherwise installed English speech. */
-    fun speakWord(text: String, accent: String) = onMain { begin(text, accent, recording = true) }
+    /** What stopped an engine, worst last: the final error names the most actionable of these. */
+    private enum class EngineTrouble { Init, Unsupported, MissingData }
+
+    /** A single word: the requested accent's provider audio when available, otherwise installed English speech. */
+    fun speakWord(text: String, accent: String) = onMain { begin(text, accent, lookupAudio = true) }
 
     /** A phrase, sentence or example: installed English system speech only. */
-    fun speakExample(text: String, accent: String) = onMain { begin(text, accent, recording = false) }
+    fun speakExample(text: String, accent: String) = onMain { begin(text, accent, lookupAudio = false) }
 
     fun stop() = onMain { stopInternal() }
 
@@ -120,7 +131,7 @@ class PronunciationPlayer(
         fail("System speech settings are unavailable on this device.")
     }
 
-    private fun begin(text: String, accent: String, recording: Boolean) {
+    private fun begin(text: String, accent: String, lookupAudio: Boolean) {
         if (closed) return
         stopInternal()
         val locale = speechLocale(accent)
@@ -137,25 +148,25 @@ class PronunciationPlayer(
         path = Path.Speech
         mutableState.value = SpeechState(text, playing = true)
         // Only one plain word may leave the device; anything else speaks locally.
-        val term = if (recording) wordLookupTerm(text) else null
-        if (term == null) requestSpeech(request, null) else lookupRecording(request, term, accent)
+        val term = if (lookupAudio) wordLookupTerm(text) else null
+        if (term == null) requestSpeech(request, null) else lookupWordAudio(request, term, accent)
     }
 
-    private fun lookupRecording(request: Request, term: String, accent: String) {
-        path = Path.Recording
+    private fun lookupWordAudio(request: Request, term: String, accent: String) {
+        path = Path.Audio
         lookup = scope.launch {
-            val recording = try {
-                withTimeoutOrNull(LOOKUP_TIMEOUT_MS) { recordings.lookup(term, accent) }
+            val clip = try {
+                withTimeoutOrNull(LOOKUP_TIMEOUT_MS) { provider.lookup(term, accent) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 null
             }
             if (!isCurrent(request)) return@launch
-            if (recording == null) {
-                requestSpeech(request, RECORDING_UNAVAILABLE)
+            if (clip == null) {
+                requestSpeech(request, WORD_AUDIO_UNAVAILABLE)
             } else {
-                playRecording(recording, request)
+                playClip(clip, request)
             }
         }
     }
@@ -163,7 +174,7 @@ class PronunciationPlayer(
     /** Only the newest request may still reach the speaker; superseded ones are ignored entirely. */
     private fun isCurrent(request: Request) = !closed && request.id == generation && pending === request
 
-    private fun playRecording(recording: RecordedWordAudio, request: Request) {
+    private fun playClip(clip: WordAudioClip, request: Request) {
         if (!requestFocus(request)) return
         val player = try { MediaPlayer() } catch (_: RuntimeException) { null }
         if (player == null) {
@@ -174,7 +185,7 @@ class PronunciationPlayer(
         mediaPrepared = false
         try {
             player.setAudioAttributes(attributes)
-            player.setDataSource(RecordingDataSource(recording.audio))
+            player.setDataSource(ClipDataSource(clip.audio))
             player.setOnPreparedListener { prepared ->
                 mediaAction(prepared, request) {
                     mediaPrepared = true
@@ -185,7 +196,7 @@ class PronunciationPlayer(
                         false
                     }
                     if (started) {
-                        mutableState.value = mutableState.value.copy(notice = null, credit = recording.credit)
+                        mutableState.value = mutableState.value.copy(notice = null, credit = clip.credit)
                     } else {
                         fallbackToSpeech(request)
                     }
@@ -206,19 +217,19 @@ class PronunciationPlayer(
         }, PREPARE_TIMEOUT_MS)
     }
 
-    /** A recording that cannot play is never an error while installed English speech can speak instead. */
+    /** Audio the decoder cannot play is never an error while installed English speech can speak instead. */
     private fun fallbackToSpeech(request: Request) {
         releaseMedia()
-        requestSpeech(request, RECORDING_UNAVAILABLE)
+        requestSpeech(request, WORD_AUDIO_UNAVAILABLE)
     }
 
     /**
-     * Only the player that is still the current recording may start, finish or fail it: a superseded,
-     * released or replaced player must never reach the speaker or claim the recording's credit.
+     * Only the player that is still the current audio may start, finish or fail it: a superseded,
+     * released or replaced player must never reach the speaker or claim the clip's credit.
      */
     private fun mediaAction(player: MediaPlayer, request: Request, action: () -> Unit) {
         main.post {
-            if (media === player && path == Path.Recording && isCurrent(request) && mutableState.value.playing) action()
+            if (media === player && path == Path.Audio && isCurrent(request) && mutableState.value.playing) action()
         }
     }
 
@@ -229,32 +240,74 @@ class PronunciationPlayer(
         if (ready) playLatest() else if (engine == null) initialize()
     }
 
+    /**
+     * Tries the engines in order: the user's default first, then every other engine that declares the
+     * TTS service. A failure of the engine being tried only moves on to the next candidate, so a broken
+     * or English-less default cannot hide an engine that can speak.
+     */
     private fun initialize() {
-        val initialization = ++engineGeneration
-        try {
-            engine = TextToSpeech(app) { status ->
-                // Always post: construction must have assigned engine before handling init.
-                main.post {
-                    if (closed || initialization != engineGeneration) return@post
-                    if (status != TextToSpeech.SUCCESS) {
-                        releaseEngine()
-                        // A superseded sentence's engine must not fail the newer request, which may not
-                        // need system speech at all.
-                        if (path == Path.Speech && pending != null) {
-                            fail("No working speech engine. Open system speech settings to install one.")
-                        }
-                    } else {
-                        ready = true
-                        engine?.setAudioAttributes(attributes)
-                        engine?.setOnUtteranceProgressListener(listener)
-                        playLatest()
-                    }
-                }
-            }
-        } catch (_: RuntimeException) {
-            releaseEngine()
-            fail("Speech could not initialize. Open system speech settings.")
+        if (closed || engine != null) return
+        if (candidates.isEmpty()) {
+            candidates = listOf<String?>(null) + engines(app)
+            candidateIndex = 0
         }
+        if (candidateIndex >= candidates.size) {
+            reportEngineFailure()
+            return
+        }
+        val candidate = candidates[candidateIndex++]
+        val initialization = ++engineGeneration
+        val onInit = TextToSpeech.OnInitListener { status ->
+            // Always post: construction must have assigned engine before handling init.
+            main.post { onEngineInitialized(initialization, status) }
+        }
+        try {
+            engine = if (candidate == null) TextToSpeech(app, onInit) else TextToSpeech(app, onInit, candidate)
+        } catch (_: RuntimeException) {
+            engine = null
+            noteTrouble(EngineTrouble.Init)
+            initialize()
+            return
+        }
+        scheduleInitTimeout(initialization)
+    }
+
+    /** An engine that never reports its initialization must not hold the request: the next one gets a turn. */
+    private fun scheduleInitTimeout(initialization: Long) {
+        cancelInitTimeout()
+        val timeout = Runnable { onEngineTimeout(initialization) }
+        initTimeout = timeout
+        main.postDelayed(timeout, INITIALIZE_TIMEOUT_MS)
+    }
+
+    private fun onEngineTimeout(initialization: Long) {
+        initTimeout = null
+        if (closed || initialization != engineGeneration || engine == null) return
+        releaseEngine()
+        noteTrouble(EngineTrouble.Init)
+        if (path == Path.Speech && pending != null) initialize() else forgetEngines()
+    }
+
+    private fun cancelInitTimeout() {
+        initTimeout?.let { main.removeCallbacks(it) }
+        initTimeout = null
+    }
+
+    private fun onEngineInitialized(initialization: Long, status: Int) {
+        if (closed || initialization != engineGeneration) return
+        cancelInitTimeout()
+        if (status != TextToSpeech.SUCCESS) {
+            releaseEngine()
+            noteTrouble(EngineTrouble.Init)
+            // A superseded sentence's engine must not fail the newer request, which may not need
+            // system speech at all.
+            if (path == Path.Speech && pending != null) initialize() else forgetEngines()
+            return
+        }
+        ready = true
+        engine?.setAudioAttributes(attributes)
+        engine?.setOnUtteranceProgressListener(listener)
+        playLatest()
     }
 
     private fun playLatest() {
@@ -281,13 +334,15 @@ class PronunciationPlayer(
                     )
                 }
                 SpeechAvailability.MissingData -> {
+                    noteTrouble(EngineTrouble.MissingData)
                     releaseEngine()
-                    fail(MISSING_ENGLISH_DATA)
+                    initialize()
                     return
                 }
                 SpeechAvailability.Unsupported -> {
+                    noteTrouble(EngineTrouble.Unsupported)
                     releaseEngine()
-                    fail(NO_ENGLISH_VOICE)
+                    initialize()
                     return
                 }
             }
@@ -299,6 +354,29 @@ class PronunciationPlayer(
             releaseEngine()
             fail("Speech playback failed. Check system speech settings and try again.")
         }
+    }
+
+    /** No engine is left to try, so the request fails with the most actionable cause found. */
+    private fun reportEngineFailure() {
+        val found = trouble
+        trouble = null
+        forgetEngines()
+        if (path != Path.Speech || pending == null) return
+        fail(when (found) {
+            EngineTrouble.MissingData -> MISSING_ENGLISH_DATA
+            EngineTrouble.Unsupported -> NO_ENGLISH_VOICE
+            EngineTrouble.Init, null -> NO_SPEECH_ENGINE
+        })
+    }
+
+    private fun noteTrouble(found: EngineTrouble) {
+        val current = trouble
+        if (current == null || found.ordinal > current.ordinal) trouble = found
+    }
+
+    private fun forgetEngines() {
+        candidates = emptyList()
+        candidateIndex = 0
     }
 
     private val listener = object : UtteranceProgressListener() {
@@ -342,9 +420,12 @@ class PronunciationPlayer(
         lookup?.cancel()
         lookup = null
         speechNotice = null
+        cancelInitTimeout()
         engine?.stop()
         releaseMedia()
         abandonFocus()
+        forgetEngines()
+        trouble = null
         mutableState.value = mutableState.value.copy(playing = false, error = message, notice = null, credit = null)
     }
 
@@ -355,9 +436,15 @@ class PronunciationPlayer(
         lookup?.cancel()
         lookup = null
         speechNotice = null
+        cancelInitTimeout()
         engine?.stop()
+        // A half-initialized engine is dropped so it can never hold the next request.
+        if (!ready) releaseEngine()
         releaseMedia()
         abandonFocus()
+        // Capabilities are re-read on the next request, so a retry after system settings sees the change.
+        forgetEngines()
+        trouble = null
         mutableState.value = mutableState.value.copy(playing = false, error = null, notice = null, credit = null)
     }
 
@@ -387,6 +474,7 @@ class PronunciationPlayer(
     }
 
     private fun releaseEngine() {
+        cancelInitTimeout()
         engineGeneration++
         ready = false
         val previous = engine
@@ -430,15 +518,60 @@ internal fun focusLossSilences(playing: Boolean, closed: Boolean, requestId: Lon
     !closed && playing && requestId == generation
 
 /**
+ * Other engines that declare the platform's TTS service action, so a broken or English-less default
+ * engine is not the end of the story. Discovery mirrors how the platform itself finds engines: the
+ * declared service action is the only requirement, because real engines such as eSpeak-NG export
+ * their TTS service without the binding permission and would otherwise be invisible. Only enabled
+ * services are listed, the engine the user chose stays with the default candidate, and nothing
+ * OEM-specific is assumed. The default is read from settings rather than
+ * TextToSpeech.getDefaultEngine(), which needs an engine context a first-ever lookup may not have.
+ */
+internal fun installedSpeechEngines(context: Context): List<String> {
+    val default = try {
+        Settings.Secure.getString(context.contentResolver, Settings.Secure.TTS_DEFAULT_SYNTH)
+    } catch (_: Exception) {
+        null
+    }
+    return try {
+        val intent = Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE).addCategory(Intent.CATEGORY_DEFAULT)
+        context.packageManager.queryIntentServices(intent, 0)
+            .mapNotNull { it.serviceInfo?.packageName }
+            .filter { it != default }
+            .distinct()
+            .sorted()
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
+
+/**
+ * Engines may report ISO 639-2/T languages ("eng") and ISO 3166-1 alpha-3 countries ("USA", "GBR"),
+ * which name the same voice as the ISO 639-1 / alpha-2 identifiers this app requests. Normalizing
+ * before every comparison keeps English and the requested accent recognizable instead of unsupported.
+ */
+internal fun normalizeLanguage(language: String): String = when (language.lowercase()) {
+    "eng" -> "en"
+    else -> language.lowercase()
+}
+
+internal fun normalizeCountry(country: String): String = when (country.uppercase()) {
+    "USA" -> "US"
+    "GBR", "UK" -> "GB"
+    else -> country.uppercase()
+}
+
+/**
  * Installed English voices, best first: offline before network-only, then the requested accent, then
  * quality, latency and a stable name. A country difference is a preference, never a blocker.
  */
 internal fun englishVoices(voices: Set<Voice>, locale: Locale): List<Voice> =
     voices.filter {
-        it.locale.language == locale.language && it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true
+        normalizeLanguage(it.locale.language) == normalizeLanguage(locale.language) &&
+            it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true
     }.sortedWith(
         compareBy<Voice>(
-            { it.isNetworkConnectionRequired }, { it.locale.country != locale.country },
+            { it.isNetworkConnectionRequired },
+            { normalizeCountry(it.locale.country) != normalizeCountry(locale.country) },
             { -it.quality }, { it.latency }, { it.name }
         )
     )
@@ -461,19 +594,22 @@ internal inline fun configureSpeech(
     setLanguage: (Locale) -> Int,
     currentVoice: () -> Voice?
 ): SpeechAvailability {
+    val language = normalizeLanguage(locale.language)
+    val country = normalizeCountry(locale.country)
     val enumerated = try { voices().orEmpty() } catch (_: RuntimeException) { emptySet() }
     for (candidate in englishVoices(enumerated, locale)) {
         val selected = try { setVoice(candidate) == TextToSpeech.SUCCESS } catch (_: RuntimeException) { false }
         if (!selected) continue
         val actual = try { currentVoice() } catch (_: RuntimeException) { null }
-        if (actual != null && actual.locale.language != locale.language) continue
+        if (actual != null && normalizeLanguage(actual.locale.language) != language) continue
         if (actual?.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true) {
             return SpeechAvailability.MissingData
         }
         // A reported voice is authoritative, including an empty country: only an unreported one may
         // fall back to what the accepted voice promised.
-        val country = actual?.locale?.country ?: candidate.locale.country
-        return SpeechAvailability.Available(if (country == locale.country) null else ACCENT_NOT_GUARANTEED)
+        val spokenCountry = actual?.locale?.country?.let(::normalizeCountry)
+            ?: normalizeCountry(candidate.locale.country)
+        return SpeechAvailability.Available(if (spokenCountry == country) null else ACCENT_NOT_GUARANTEED)
     }
     var missingData = false
     for (probe in listOf(locale, otherEnglishCountry(locale), Locale.ENGLISH)) {
@@ -484,21 +620,22 @@ internal inline fun configureSpeech(
         }
         if (support !in TextToSpeech.LANG_AVAILABLE..TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE) continue
         val actual = try { currentVoice() } catch (_: RuntimeException) { null }
-        if (actual != null && actual.locale.language != locale.language) continue
+        if (actual != null && normalizeLanguage(actual.locale.language) != language) continue
         if (actual?.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true) {
             return SpeechAvailability.MissingData
         }
-        val country = actual?.locale?.country
-            ?: probe.country.takeIf { support >= TextToSpeech.LANG_COUNTRY_AVAILABLE }
-        return SpeechAvailability.Available(if (country == locale.country) null else ACCENT_NOT_GUARANTEED)
+        val spokenCountry = actual?.locale?.country?.let(::normalizeCountry)
+            ?: probe.country.takeIf { support >= TextToSpeech.LANG_COUNTRY_AVAILABLE }?.let(::normalizeCountry)
+        return SpeechAvailability.Available(if (spokenCountry == country) null else ACCENT_NOT_GUARANTEED)
     }
     return if (missingData) SpeechAvailability.MissingData else SpeechAvailability.Unsupported
 }
 
-internal fun otherEnglishCountry(locale: Locale): Locale = if (locale.country == "GB") Locale.US else Locale.UK
+internal fun otherEnglishCountry(locale: Locale): Locale =
+    if (normalizeCountry(locale.country) == "GB") Locale.US else Locale.UK
 
 /** Bounded in-memory audio for MediaPlayer: no temporary file can leak, and nothing is written to disk. */
-private class RecordingDataSource(private val audio: ByteArray) : MediaDataSource() {
+private class ClipDataSource(private val audio: ByteArray) : MediaDataSource() {
     override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
         if (position < 0 || position >= audio.size) return -1
         val count = minOf(size.toLong(), audio.size - position).toInt()

@@ -16,11 +16,11 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.sp
-import app.margin.reader.speech.RecordingCredit
+import app.margin.reader.speech.AudioCredit
 
-/** Shared inline credit for the actual recording, not the generated explanation. */
+/** Shared inline credit for the audio actually playing: its provider and nothing else. */
 @Composable
-internal fun RecordingAttribution(credit: RecordingCredit) {
+internal fun AudioAttribution(credit: AudioCredit) {
     val context = LocalContext.current
     val links = TextLinkStyles(SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline))
     val text = buildAnnotatedString {
@@ -31,19 +31,16 @@ internal fun RecordingAttribution(credit: RecordingCredit) {
                 try {
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 } catch (_: ActivityNotFoundException) {
-                    Log.w("MarginSpeech", "No browser is available for recording credits")
+                    Log.w("MarginSpeech", "No browser is available for audio credits")
                     Toast.makeText(context, "No browser is available to open this link.", Toast.LENGTH_SHORT).show()
                 } catch (_: SecurityException) {
-                    Log.w("MarginSpeech", "Recording credits could not be opened")
+                    Log.w("MarginSpeech", "Audio credits could not be opened")
                     Toast.makeText(context, "This link could not be opened.", Toast.LENGTH_SHORT).show()
                 }
             }) { append(unbrokenLabel) }
         }
         append("Audio: ")
-        credit.creator?.takeIf { it.isNotBlank() }?.let { append(it); append(" · ") }
         link(credit.sourceName, credit.sourceUrl)
-        append(" · ")
-        link(credit.licenseName, credit.licenseUrl)
     }
     Text(text, fontSize = 11.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

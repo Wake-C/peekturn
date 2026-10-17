@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package app.margin.reader.ui
 
 import androidx.compose.foundation.BorderStroke
@@ -8,18 +10,25 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -34,6 +43,8 @@ import app.margin.reader.model.AppSettings
 import app.margin.reader.model.LlmProfile
 import app.margin.reader.model.ModelConfig
 import app.margin.reader.speech.PronunciationPlayer
+import app.margin.reader.speech.SpeechState
+import app.margin.reader.speech.WORD_AUDIO_NOTICE
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -56,17 +67,10 @@ fun SettingsScreen(
         onDispose { lifecycle.removeObserver(observer); speech.stop() }
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("Settings", style = MaterialTheme.typography.headlineLarge)
         Text("Appearance", style = MaterialTheme.typography.titleLarge)
-        Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("dark" to "Focus Dark", "light" to "Classic White", "warm" to "Warm Paper").forEach { (value, label) ->
-                val preview = marginColorScheme(value)
-                ThemeChoice(label, settings.appTheme == value, preview.background, preview.onBackground) {
-                    onSave { latest -> latest.copy(appTheme = value) }
-                }
-            }
-        }
+        ThemeGroup(settings.appTheme) { value -> onSave { latest -> latest.copy(appTheme = value) } }
         HorizontalDivider()
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("AI profiles", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
@@ -107,41 +111,10 @@ fun SettingsScreen(
             }
         }
         HorizontalDivider()
-        PreferenceSwitch("Quick Explain", "Explain a new selection immediately. Off keeps Explain as an explicit action.",
+        PreferenceSwitch("Quick Explain", "Explain a selection once you release it. Off keeps Explain as an explicit action.",
             settings.quickExplain) { enabled -> onSave { latest -> latest.copy(quickExplain = enabled) } }
         HorizontalDivider()
-        Text("Pronunciation", style = MaterialTheme.typography.titleLarge)
-        PreferenceSwitch("Auto-pronounce", "Speak the selected word or phrase once when a lookup opens.",
-            settings.autoPronounce) { enabled -> onSave { latest -> latest.copy(autoPronounce = enabled) } }
-        HorizontalDivider()
-        Text("Preferred accent", style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            listOf("US", "UK").forEach { accent ->
-                FilterChip(selected = settings.accent == accent, onClick = {
-                    speech.stop()
-                    onSave { latest -> latest.copy(accent = accent) }
-                }, label = { Text(if (accent == "US") "US English" else "UK English") }, modifier = Modifier.heightIn(min = 48.dp))
-            }
-        }
-        Text("Words use online recordings when available. Phrases and examples use your phone’s English voice; another English accent may be used.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("Only the word, not its sentence or book, is sent to Wikimedia Commons.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        val wordPreview = playback.playing && playback.text == "hello"
-        OutlinedButton(onClick = {
-            if (wordPreview) speech.stop() else speech.speakWord("hello", settings.accent)
-        }, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (wordPreview) "Stop word audio" else "Preview ${settings.accent} word") }
-        val examplePreview = playback.playing && playback.text == "A little further, one page at a time."
-        OutlinedButton(onClick = {
-            if (examplePreview) speech.stop() else speech.speakExample("A little further, one page at a time.", settings.accent)
-        }, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (examplePreview) "Stop sentence" else "Preview English sentence") }
-        playback.notice?.let { message -> Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall) }
-        playback.credit?.let { RecordingAttribution(it) }
-        playback.error?.let { message -> Text(message, color = MaterialTheme.colorScheme.error) }
-        TextButton(onClick = { speech.openSystemSettings() }, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text(if (playback.error != null) "Install or choose a system voice" else "System speech settings")
-        }
+        PronunciationSection(settings, playback, speech, onSave)
     }
     editingProfile?.let { profile ->
         ModelConfigurationDialog(initial = profile.config, onDismiss = { editingProfile = null },
@@ -169,24 +142,106 @@ fun SettingsScreen(
     }
 }
 
+/** Appearance stays side by side, wrapping to two per row once text is scaled up. */
 @Composable
-private fun ThemeChoice(label: String, selected: Boolean, paper: Color, ink: Color, onSelect: () -> Unit) {
+private fun ThemeGroup(selected: String, onSelect: (String) -> Unit) {
+    val perRow = if (LocalDensity.current.fontScale >= 1.3f) 2 else 3
+    FlowRow(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = perRow) {
+        listOf("dark" to "Focus Dark", "light" to "Classic White", "warm" to "Warm Paper").forEach { (value, label) ->
+            val preview = marginColorScheme(value)
+            ThemeChoice(label, selected == value, preview.background, preview.onBackground, Modifier.weight(1f)) {
+                onSelect(value)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeChoice(label: String, selected: Boolean, paper: Color, ink: Color, modifier: Modifier = Modifier, onSelect: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Surface(
-        modifier = Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
+        modifier = modifier.selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
         shape = MaterialTheme.shapes.medium,
         color = if (selected) colors.primaryContainer else colors.surface,
         contentColor = if (selected) colors.onPrimaryContainer else colors.onSurface,
         border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) colors.primary else colors.outline)
     ) {
-        Row(Modifier.heightIn(min = 64.dp).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(40.dp).background(paper, MaterialTheme.shapes.small), contentAlignment = Alignment.Center) {
-                Text("Aa", color = ink, fontFamily = FontFamily.Serif, style = MaterialTheme.typography.titleLarge)
+        Column(Modifier.fillMaxWidth().heightIn(min = 72.dp).padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.sizeIn(minWidth = 40.dp, minHeight = 40.dp).background(paper, MaterialTheme.shapes.small)
+                .padding(horizontal = 6.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
+                Text("Aa", color = ink, fontFamily = FontFamily.Serif, style = MaterialTheme.typography.titleMedium)
             }
-            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-            RadioButton(selected = selected, onClick = null)
+            Text(label, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 2)
         }
+    }
+}
+
+private const val PREVIEW_WORD = "hello"
+private const val PREVIEW_SENTENCE = "A little further, one page at a time."
+
+/**
+ * Concise controls first (toggle, accent, word/sentence previews); the source explanation and the
+ * system speech entry point stay one tap away. Failures are never hidden inside the expansion.
+ */
+@Composable
+private fun PronunciationSection(
+    settings: AppSettings,
+    playback: SpeechState,
+    speech: PronunciationPlayer,
+    onSave: ((AppSettings) -> AppSettings) -> Unit
+) {
+    var details by rememberSaveable { mutableStateOf(false) }
+    val wordPreview = playback.playing && playback.text == PREVIEW_WORD
+    val sentencePreview = playback.playing && playback.text == PREVIEW_SENTENCE
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Pronunciation", style = MaterialTheme.typography.titleLarge)
+        PreferenceSwitch("Auto-pronounce", "Speak the selected word or phrase once when a lookup opens.",
+            settings.autoPronounce) { enabled -> onSave { latest -> latest.copy(autoPronounce = enabled) } }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            listOf("US", "UK").forEach { accent ->
+                FilterChip(selected = settings.accent == accent, onClick = {
+                    speech.stop()
+                    onSave { latest -> latest.copy(accent = accent) }
+                }, label = { Text(if (accent == "US") "US English" else "UK English") },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp))
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PreviewAction("Word", wordPreview, Modifier.weight(1f)) {
+                if (wordPreview) speech.stop() else speech.speakWord(PREVIEW_WORD, settings.accent)
+            }
+            PreviewAction("Sentence", sentencePreview, Modifier.weight(1f)) {
+                if (sentencePreview) speech.stop() else speech.speakExample(PREVIEW_SENTENCE, settings.accent)
+            }
+        }
+        playback.error?.let { message -> Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        playback.notice?.let { message -> Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
+        playback.credit?.let { AudioAttribution(it) }
+        TextButton(onClick = { details = !details }, modifier = Modifier.heightIn(min = 48.dp)) {
+            Icon(if (details) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(if (details) "Hide audio details" else "Audio details")
+        }
+        if (details) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(WORD_AUDIO_NOTICE, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { speech.openSystemSettings() }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(if (playback.error != null) "Install or choose a system voice" else "System speech settings")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreviewAction(label: String, playing: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = modifier.heightIn(min = 48.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+        Icon(if (playing) Icons.Default.Stop else Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(if (playing) "Stop" else label, textAlign = TextAlign.Center, maxLines = 2)
     }
 }
 
