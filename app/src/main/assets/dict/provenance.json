@@ -1,0 +1,17 @@
+{
+  "project": "ECDICT",
+  "upstream": "https://github.com/skywind3000/ECDICT",
+  "revision": "bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b",
+  "source_url": "https://raw.githubusercontent.com/skywind3000/ECDICT/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b/ecdict.csv",
+  "license": "MIT",
+  "license_url": "https://raw.githubusercontent.com/skywind3000/ECDICT/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b/LICENSE",
+  "source_sha256": "1a6947e04785db63613a92e14903cdae7954f7e84860b10e68e5c7cbb3f9c3cf",
+  "source_rows": 770611,
+  "entry_count": 770482,
+  "schema_version": 1,
+  "sqlite_sha256": "841c62f4d0675abdb08509d0f25496a11be4e721638c1767383752e58800fbb5",
+  "asset_sha256": "9ca19604832b77f98008562b18edf4534c3bd90654f441ed95eac6d7a339e48c",
+  "sqlite_bytes": 71032832,
+  "asset_bytes": 28558636,
+  "transformation": "Trim and collapse whitespace; lowercase exact keys; retain first normalized duplicate; retain entries containing an English letter and at least one definition/translation; unescape literal newline separators. Preserve upstream spelling, phonetic, POS, English definition and Chinese translation."
+}

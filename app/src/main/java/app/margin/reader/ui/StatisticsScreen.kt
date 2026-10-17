@@ -1,0 +1,148 @@
+package app.margin.reader.ui
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import app.margin.reader.model.Book
+import app.margin.reader.model.ReadingStats
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
+
+internal data class ReadingSummary(val today: Long, val week: Long, val total: Long, val daily: List<Pair<LocalDate, Long>>)
+
+/** Local calendar dates, including zero days, with an explicit clock for deterministic callers. */
+internal fun readingSummary(stats: ReadingStats, today: LocalDate, period: Int): ReadingSummary {
+    val days = mutableMapOf<LocalDate, Long>()
+    stats.days.forEach { record ->
+        val date = runCatching { LocalDate.parse(record.date) }.getOrNull()
+        if (date != null && !date.isAfter(today)) days[date] = (days[date] ?: 0L) + record.seconds.coerceAtLeast(0L)
+    }
+    val monday = today.minusDays((today.dayOfWeek.value - 1).toLong())
+    return ReadingSummary(
+        today = days[today] ?: 0L,
+        week = days.filterKeys { !it.isBefore(monday) }.values.sum(),
+        total = days.values.sum(),
+        daily = (period - 1 downTo 0).map { offset -> today.minusDays(offset.toLong()).let { it to (days[it] ?: 0L) } }
+    )
+}
+
+internal fun readingDuration(seconds: Long): String {
+    val value = seconds.coerceAtLeast(0)
+    return when {
+        value == 0L -> "0 min"
+        value < 60 -> "$value sec"
+        value < 3600 -> "${value / 60} min"
+        else -> "${value / 3600} hr ${value % 3600 / 60} min"
+    }
+}
+
+@Composable
+fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> Unit) {
+    var period by rememberSaveable { mutableIntStateOf(7) }
+    val today by produceState(LocalDate.now()) {
+        while (true) { value = LocalDate.now(); delay(30_000) }
+    }
+    val summary = remember(stats, today, period) { readingSummary(stats, today, period) }
+    val totals = remember(stats.books) { stats.books.groupBy { it.bookId }.mapValues { (_, records) -> records.sumOf { it.seconds.coerceAtLeast(0L) } } }
+    val recent = remember(books, totals) { books.filter { (totals[it.id] ?: 0L) > 0 }.sortedByDescending { it.lastReadAt } }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        item {
+            Text("Statistics", style = MaterialTheme.typography.headlineLarge)
+            Text("Your time with books, made visible.", Modifier.padding(top = 8.dp), color = FocusColors.Muted)
+        }
+        item {
+            HorizontalDivider()
+            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                TimeMetric("Today", summary.today)
+                TimeMetric("This week · Monday onward", summary.week)
+                TimeMetric("All reading time", summary.total)
+            }
+            HorizontalDivider()
+        }
+        item {
+            Text("Daily reading", style = MaterialTheme.typography.titleLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(7, 30).forEach { days ->
+                    FilterChip(selected = period == days, onClick = { period = days }, label = { Text("$days days") },
+                        modifier = Modifier.heightIn(min = 48.dp))
+                }
+            }
+            Text("${readingDuration(summary.daily.sumOf { it.second })} in the last $period days", color = FocusColors.Muted,
+                style = MaterialTheme.typography.bodyMedium)
+        }
+        item { ReadingChart(summary.daily) }
+        if (summary.total == 0L) item {
+            Text("No reading time yet", style = MaterialTheme.typography.titleMedium)
+            Text("Time appears here as you read and interact with a book. No estimates or backfilled activity.",
+                Modifier.padding(top = 8.dp), color = FocusColors.Muted)
+        }
+        item { Text("Recent books", style = MaterialTheme.typography.titleLarge) }
+        if (recent.isEmpty()) item { Text("Books with recorded reading time will appear here.", color = FocusColors.Muted) }
+        items(recent, key = { it.id }) { book ->
+            Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "Read ${book.title}") { onOpen(book) }.padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                BookCover(book, Modifier.width(56.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(book.title, style = MaterialTheme.typography.titleMedium)
+                    Text(book.author.ifBlank { "Unknown author" }, color = FocusColors.Muted, style = MaterialTheme.typography.bodySmall)
+                    Text(readingDuration(totals[book.id] ?: 0L), color = FocusColors.Accent, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            HorizontalDivider()
+        }
+    }
+}
+
+@Composable
+private fun TimeMetric(label: String, seconds: Long) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, color = FocusColors.Muted, style = MaterialTheme.typography.bodySmall)
+        Text(readingDuration(seconds), style = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = "tnum"))
+    }
+}
+
+@Composable
+private fun ReadingChart(days: List<Pair<LocalDate, Long>>) {
+    val accent = FocusColors.Accent
+    val grid = MaterialTheme.colorScheme.outlineVariant
+    val max = days.maxOfOrNull { it.second }?.coerceAtLeast(1L) ?: 1L
+    val dateFormat = remember { DateTimeFormatter.ofPattern("MMM d") }
+    val description = days.joinToString("; ") { (day, seconds) -> "${day.format(dateFormat)}: ${readingDuration(seconds)}" }
+    Column {
+        Text("Peak day: ${readingDuration(days.maxOfOrNull { it.second } ?: 0L)}", style = MaterialTheme.typography.bodySmall, color = FocusColors.Muted)
+        Canvas(Modifier.fillMaxWidth().height(168.dp).padding(vertical = 12.dp).semantics { contentDescription = "Daily reading chart. $description" }) {
+            for (line in 0..2) {
+                val y = size.height * line / 2f
+                drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+            }
+            val path = Path()
+            days.forEachIndexed { index, (_, seconds) ->
+                val x = size.width * index / (days.size - 1).coerceAtLeast(1)
+                val y = size.height * (1f - seconds.toFloat() / max)
+                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                if (seconds > 0) drawCircle(accent, 2.dp.toPx(), Offset(x, y))
+            }
+            drawPath(path, accent, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(days.first().first.format(dateFormat), style = MaterialTheme.typography.bodySmall, color = FocusColors.Muted)
+            Text(days.last().first.format(dateFormat), style = MaterialTheme.typography.bodySmall, color = FocusColors.Muted)
+        }
+    }
+}

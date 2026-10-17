@@ -1,0 +1,12 @@
+<resources>
+    <style name="Theme.Margin" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#171E23</item>
+        <item name="android:navigationBarColor">#171E23</item>
+        <item name="android:windowBackground">#171E23</item>
+        <item name="android:colorAccent">#D9B783</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <color name="launcher_background">#171E23</color>
+</resources>
