@@ -34,10 +34,6 @@ private const val USER_AGENT = "Mozilla/5.0"
 /** The route's bound, under the player's four-second route budget so this client reports its own stop. */
 private const val ROUTE_BUDGET_MS = 3_700L
 
-private const val OVERSIZED_ANSWER = "oversized answer"
-private const val NO_AUDIO_BYTES = "no audio bytes"
-private const val ANSWER_NOT_AUDIO = "answer not audio"
-
 /**
  * Speech for arbitrary text from a public, key-free endpoint: one bounded HTTPS GET per text, the
  * simplest possible fallback when the read-aloud handshake refuses or stalls. It is unendorsed and
@@ -146,7 +142,7 @@ class BaiduSpeechClient(
             throw cancelled
         } catch (error: Exception) {
             currentCoroutineContext().ensureActive()
-            val stage = routeStage(error, responseSeen)
+            val stage = routeStage(error, responseSeen, tracker.stage)
                 ?: if (responseSeen) RouteStage.FirstByte else tracker.stage
             failed(
                 RouteOutcome(

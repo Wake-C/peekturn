@@ -64,12 +64,6 @@ private const val RETRY_MIN_MS = 250L
 
 private const val NANOS_PER_MILLI = 1_000_000L
 
-/** What a route says when it reached the service but the answer was unusable, never the spoken text. */
-private const val OVERSIZED_ANSWER = "oversized answer"
-private const val NO_AUDIO_BYTES = "no audio bytes"
-private const val ANSWER_NOT_AUDIO = "answer not audio"
-private const val CONNECTION_CLOSED = "connection closed before audio"
-
 /** Speech for a phrase, sentence or example; null means no usable audio, so device speech speaks. */
 interface SentenceAudioSource {
     /** The short, stable name this route is reported under: "bing" or "baidu". */
@@ -320,12 +314,14 @@ class BingSpeechClient(
                     ?.minus(deviceNowMs)
                 tracker.stage = RouteStage.Handshake
             } else {
-                val seen = tracker.stage == RouteStage.FirstByte
-                // A cause the platform names keeps its stage; anything else that ended the upgrade
-                // before a first byte means the handshake never completed, never that the text was
-                // the problem.
-                tracker.stage = routeStage(failure, responseSeen = seen) ?: when (tracker.stage) {
-                    RouteStage.Resolve, RouteStage.Tls -> tracker.stage
+                val observed = tracker.stage
+                // A cause the platform names keeps its stage; a timeout keeps the stage the tracker
+                // last observed; anything else that ended the upgrade before a first byte means the
+                // handshake never completed, never that the text was the problem.
+                tracker.stage = routeStage(
+                    failure, responseSeen = observed == RouteStage.FirstByte, observed = observed
+                ) ?: when (observed) {
+                    RouteStage.Resolve, RouteStage.Tls -> observed
                     else -> RouteStage.Handshake
                 }
             }

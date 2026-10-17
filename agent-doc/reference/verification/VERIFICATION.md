@@ -411,3 +411,30 @@ Changes:
 Verified: 247 unit tests with no failures, errors or skips; lint and isolated assembly. Not verified:
 the user's device (still unreachable), and the US/UK frame pair on an emulator whose data path is
 wedged. The report format is the evidence path: the reader can copy it and send it back.
+
+### Review of the diagnostics round and its corrections (2026-10-17)
+
+Four independent reviews (standards, privacy, specification, adversarial) covered \`08e589c..61f1c33\`.
+The privacy axis was clean; the others found six defects, all in the diagnostic path rather than in
+playback, and all corrected before this record:
+
+- The report never reached the reading popup - only Settings rendered it - so a failure while reading
+  showed an error with nothing to copy, and any stop (including the popup's own "Speech settings" and a
+  pause) erased it. The report now renders under the error in both places with the same copy action, a
+  stop keeps it, and only a new request or the reader dismissing it clears it.
+- Text that the services decline (beyond their length limit) was recorded as a failed route with
+  fabricated "no audio 0ms" evidence. A declined request is now recorded as declined and the message
+  says the text is too long for online audio.
+- A route that supplied the clip was still described as failed when playback then failed. The message
+  now distinguishes "online audio was found but could not play".
+- Word requests omitted the dictionary route from the report and hardcoded "both online routes", and
+  the dictionary attempt used a longer bound than the others. Every route that runs is recorded in
+  order, the message counts the routes actually attempted, and every route shares the same bound.
+- Timeouts before a response were always attributed to the connection, hiding TLS and header stalls.
+  The observed stage is kept, with "connect" only when nothing was observed.
+- An offered English voice that accepted the utterance and then failed had no verdict. It now reports a
+  playback failure with the engine evidence, the fourth device-speech outcome.
+
+Verified after the corrections: 256 unit tests with no failures, errors or skips; lint and isolated
+assembly. Still unverified: the reader's own phone (the report it can now copy is the next evidence),
+the US/UK frame pair, and the service's acceptance of a skew-corrected token on a genuinely wrong clock.

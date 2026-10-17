@@ -65,10 +65,12 @@ internal const val MISSING_ENGLISH_DATA = "Your speech engine reports its Englis
 internal const val NO_ENGLISH_VOICE = "None of the device's speech engines offered an English voice. Check system speech settings."
 internal const val NO_SPEECH_ENGINE = "The device's speech engine did not start. Open system speech settings to check it."
 private const val NO_ONLINE_AUDIO = "No online audio is available for this text; using system speech."
+private const val TOO_LONG_NOTICE = "$TOO_LONG_FOR_ONLINE; using system speech."
 /**
  * Every online route — the dictionary recording and each speech service — gets the same short bound,
- * so a phone on a hostile network spends at most a few seconds per route instead of ten. The clients'
- * own bounds are shorter still, so they can say where they stopped before this one cuts them off.
+ * so a phone on a hostile network spends at most a few seconds per route instead of ten. The speech
+ * services' own bounds are shorter still, so they can say where they stopped before this one cuts
+ * them off; the dictionary has no shorter bound of its own, so this one is what bounds it.
  */
 private const val LOOKUP_TIMEOUT_MS = 4_000L
 private const val PREPARE_TIMEOUT_MS = 8_000L
@@ -125,6 +127,15 @@ class PronunciationPlayer(
 
     /** What each online route answered for the current request, in the order they were tried. */
     private val onlineOutcomes = mutableListOf<RouteOutcome>()
+
+    /**
+     * Whether this request ever got a clip. A failure after that is a playback failure, not proof
+     * that the online routes had nothing, so the message must not lead with a missing route.
+     */
+    private var clipObtained = false
+
+    /** Why no online route was asked at all, when the text is past what the services will voice. */
+    private var onlineUnavailable: String? = null
     private val attributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_MEDIA)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -142,6 +153,14 @@ class PronunciationPlayer(
     fun speakExample(text: String, accent: String) = onMain { begin(text, accent, word = false) }
 
     fun stop() = onMain { stopInternal() }
+
+    /**
+     * The reader has dealt with a failure, so its message and report are no longer the answer to what
+     * they just saw. Only a deliberate dismissal clears them; a stop keeps them.
+     */
+    fun dismissFailure() = onMain {
+        mutableState.value = mutableState.value.copy(error = null, diagnostic = null)
+    }
 
     fun shutdown() = onMain {
         if (!closed) {
@@ -197,17 +216,32 @@ class PronunciationPlayer(
 
     /**
      * The online routes for this request, in order: the dictionary's recording of a single word first
-     * where the endpoint accepts one, then each speech service in turn, which voices arbitrary text. The
-     * first route with audio plays it; a route that has nothing, fails or redirects only moves on, and
-     * installed device speech speaks when none of them can.
+     * where the endpoint accepts one, then each speech service in turn, which voices arbitrary text.
+     * A text no service will voice is declined before any request is made, because a route that was
+     * never attempted must not be reported as one that failed. The first route with audio plays it;
+     * a route that has nothing or fails only moves on, and installed device speech speaks when none
+     * of them can.
      */
     private fun lookupOnline(request: Request, accent: String, term: String?) {
         path = Path.Audio
+        // The clients' own contract decides what can be asked, so a text they would decline is
+        // declined here, before any route is recorded as having failed.
+        if (speechLookupText(request.text) == null) {
+            onlineUnavailable = TOO_LONG_FOR_ONLINE
+            requestSpeech(request, TOO_LONG_NOTICE)
+            return
+        }
         lookup = scope.launch {
-            val clip = (term?.let { word -> onlineClip(LOOKUP_TIMEOUT_MS) { wordAudio.lookup(word, accent) } })
-                ?: sentenceClip(request.text, accent)
+            val clip = (term?.let { word ->
+                onlineClip(DICTIONARY_ROUTE, LOOKUP_TIMEOUT_MS) { wordAudio.lookup(word, accent) }
+            }) ?: sentenceClip(request.text, accent)
             if (!isCurrent(request)) return@launch
-            if (clip == null) requestSpeech(request, NO_ONLINE_AUDIO) else playClip(clip, request)
+            if (clip == null) {
+                requestSpeech(request, NO_ONLINE_AUDIO)
+            } else {
+                clipObtained = true
+                playClip(clip, request)
+            }
         }
     }
 
@@ -252,21 +286,44 @@ class PronunciationPlayer(
             RouteOutcome(source.route, RouteStage.Connect, LOOKUP_TIMEOUT_MS, timedOut = true)
         } else {
             RouteOutcome(
-                source.route, RouteStage.Answer, elapsedMillis(started), detail = "no audio"
+                source.route, RouteStage.Answer, elapsedMillis(started), detail = NO_AUDIO
             )
         }
         return null
     }
 
-    /** One route's attempt, bounded by its own timeout and cancelled with the coroutine that made it. */
-    private suspend fun onlineClip(timeoutMs: Long, lookup: suspend () -> AudioClip?): AudioClip? =
-        try {
-            withTimeoutOrNull(timeoutMs) { lookup() }
+    /**
+     * One route's attempt, bounded by the player's per-route budget and cancelled with the coroutine
+     * that made it. A route that ran and returned nothing is recorded, because it ran; one that
+     * overran the budget is recorded as a timeout at the only stage this side observed, the wait.
+     */
+    private suspend fun onlineClip(
+        route: String,
+        timeoutMs: Long,
+        lookup: suspend () -> AudioClip?
+    ): AudioClip? {
+        val started = System.nanoTime()
+        var returned = false
+        val clip = try {
+            withTimeoutOrNull(timeoutMs) {
+                val found = lookup()
+                returned = true
+                found
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
+            returned = true
             null
         }
+        if (clip != null) return clip
+        onlineOutcomes += if (!returned) {
+            RouteOutcome(route, RouteStage.Connect, timeoutMs, timedOut = true)
+        } else {
+            RouteOutcome(route, RouteStage.Answer, elapsedMillis(started), detail = NO_AUDIO)
+        }
+        return null
+    }
 
     /** Only the newest request may still reach the speaker; superseded ones are ignored entirely. */
     private fun isCurrent(request: Request) = !closed && request.id == generation && pending === request
@@ -492,7 +549,9 @@ class PronunciationPlayer(
         val notices = listOfNotNull(speechNotice, notice)
         val accepted = tts.speak(request.text, TextToSpeech.QUEUE_FLUSH, null, request.id.toString()) ==
             TextToSpeech.SUCCESS
-        if (accepted && substituting) utteranceAccepted = true
+        // An engine that accepted the text has answered about its ability to speak it, whether the app
+        // chose the voice or the engine offered its own; a later failure is playback either way.
+        if (accepted) utteranceAccepted = true
         if (!substituting) pending = null
         if (!accepted) {
             releaseEngine()
@@ -552,10 +611,10 @@ class PronunciationPlayer(
 
     /**
      * An engine that accepted the request but could not speak it. The engine's own substituted voice was
-     * never promised, so its failure hands the request to the next installed engine, and what the engine
-     * said about its data still counts towards the classification that ends the queue; a voice the engine
-     * offered and set is a real answer, so its failure is reported as one, in the engine's own words when
-     * it said the voice is not installed yet.
+     * never promised, so its failure hands the request to the next installed engine; a voice the engine
+     * offered and set is a real answer, so its failure is reported as one, with the same verdict and
+     * evidence as any other playback failure - and in the engine's own words when it said the voice is
+     * not installed yet.
      */
     private fun utteranceFailed(errorCode: Int?) {
         releaseEngine()
@@ -564,16 +623,9 @@ class PronunciationPlayer(
             initialize()
             return
         }
-        if (errorCode == TextToSpeech.ERROR_NOT_INSTALLED_YET) {
-            // The engine said the voice is not installed, so that is what the reader is told, in the
-            // same words the classification uses, so the message and the report cannot drift apart.
-            fail(
-                DeviceSpeechFailure.MissingData.message,
-                evidence.report(DeviceSpeechFailure.MissingData)
-            )
-        } else {
-            fail("Speech playback failed. Check system speech settings.")
-        }
+        if (errorCode == TextToSpeech.ERROR_NOT_INSTALLED_YET) missingEnglishData = true
+        val failure = deviceSpeechFailure(engineStarted, missingEnglishData, utteranceAccepted)
+        fail(failure.message, evidence.report(failure))
     }
 
     private fun callback(id: String?, action: () -> Unit) {
@@ -585,6 +637,8 @@ class PronunciationPlayer(
     private fun finish() {
         pending = null
         substituting = false
+        clipObtained = false
+        onlineUnavailable = null
         onlineOutcomes.clear()
         releaseMedia()
         abandonFocus()
@@ -592,9 +646,10 @@ class PronunciationPlayer(
     }
 
     /**
-     * Every failure that ends a request without a speaker says that the online routes failed too, so
-     * the reader is never left believing their phone simply has no voice. The copyable report carries
-     * one line per online attempt, the device clock and version, and the device-speech evidence.
+     * Every failure that ends a request without a speaker says what the online routes actually did,
+     * so the reader is never left believing their phone simply has no voice, nor told that a route
+     * failed when it supplied the clip. The copyable report carries one line per online route that
+     * failed, the device clock and version, and the device-speech evidence.
      */
     private fun fail(message: String, diagnostic: String? = null) {
         val shown = noSpeakerMessage(message)
@@ -614,21 +669,23 @@ class PronunciationPlayer(
         missingEnglishData = false
         utteranceAccepted = false
         substituting = false
+        clipObtained = false
+        onlineUnavailable = null
         onlineOutcomes.clear()
         mutableState.value = mutableState.value.copy(
             playing = false, error = shown, notice = null, credit = null, diagnostic = report
         )
     }
 
-    /** The one sentence that names both halves of the failure, without implying the phone has no voice. */
+    /** What the online routes did, then the device's own answer, each from its own classification. */
     private fun noSpeakerMessage(message: String): String {
-        if (onlineOutcomes.isEmpty()) return message
-        val online = if (onlineOutcomes.map { it.route }.distinct().size > 1) {
-            "Both online audio routes failed"
-        } else {
-            "Online audio failed"
+        val online = when {
+            clipObtained -> "Online audio was found but could not play"
+            onlineUnavailable != null -> onlineUnavailable
+            onlineOutcomes.isNotEmpty() -> onlineFailureLead(onlineOutcomes)
+            else -> null
         }
-        return "$online, and ${message.replaceFirstChar { it.lowercase() }}"
+        return failureMessage(online, message)
     }
 
     /** The online line, the build and clock identity, then the device-speech report when there is one. */
@@ -664,11 +721,16 @@ class PronunciationPlayer(
         forgetEngines()
         engineStarted = false
         missingEnglishData = false
+        utteranceAccepted = false
         substituting = false
+        clipObtained = false
+        onlineUnavailable = null
         evidence.clear()
         onlineOutcomes.clear()
+        // A failure's message and report are what the reader just saw; acting on them (speech
+        // settings, a pause) must not erase them. A new request and a deliberate dismissal do.
         mutableState.value = mutableState.value.copy(
-            playing = false, error = null, notice = null, credit = null, diagnostic = null
+            playing = false, notice = null, credit = null
         )
     }
 

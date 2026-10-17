@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.margin.reader.data.OfflineDictionary
 import app.margin.reader.model.*
 import app.margin.reader.speech.PronunciationPlayer
+import app.margin.reader.speech.SpeechReport
 import app.margin.reader.ui.AudioAttribution
 import kotlinx.coroutines.CancellationException
 import kotlin.math.roundToInt
@@ -218,7 +219,11 @@ fun LearningPopup(
                         playback.credit?.let { AudioAttribution(it) }
                         playback.error?.let {
                             Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
-                            TextButton(onClick = speech::openSystemSettings) { Text("Speech settings") }
+                            playback.diagnostic?.let { report -> SpeechReport(report) }
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(onClick = speech::openSystemSettings) { Text("Speech settings") }
+                                TextButton(onClick = speech::dismissFailure) { Text("Dismiss") }
+                            }
                         }
                     }
                 }

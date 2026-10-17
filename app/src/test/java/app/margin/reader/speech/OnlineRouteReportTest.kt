@@ -1,11 +1,17 @@
 package app.margin.reader.speech
 
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.ConnectException
+import java.net.InetSocketAddress
+import java.net.Proxy
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.time.Instant
 import javax.net.ssl.SSLHandshakeException
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -25,6 +31,44 @@ class OnlineRouteReportTest {
         assertEquals(RouteStage.FirstByte, routeStage(SocketTimeoutException("read"), responseSeen = true))
         assertNull("An unnamed error before a response keeps the observed stage",
             routeStage(IOException("reset"), responseSeen = false))
+    }
+
+    /** A stall keeps the milestone the tracker saw, so a TLS or header wait is not called a connect. */
+    @Test fun aTimeoutKeepsTheStageTheTrackerObserved() {
+        assertEquals(RouteStage.Tls,
+            routeStage(SocketTimeoutException("tls"), responseSeen = false, observed = RouteStage.Tls))
+        assertEquals(RouteStage.Handshake,
+            routeStage(SocketTimeoutException("upgrade"), responseSeen = false, observed = RouteStage.Handshake))
+        assertEquals(RouteStage.Response,
+            routeStage(InterruptedIOException("headers"), responseSeen = false, observed = RouteStage.Response))
+        assertEquals(RouteStage.Connect,
+            routeStage(SocketTimeoutException("nothing observed"), responseSeen = false))
+    }
+
+    /** A plain GET is waiting for its response after connecting, never for a WebSocket handshake. */
+    @Test fun aPlainGetIsNotReportedAsAHandshake() {
+        val call = OkHttpClient().newCall(Request.Builder().url("http://127.0.0.1/").build())
+        val address = InetSocketAddress("127.0.0.1", 80)
+
+        val get = RouteStageTracker(webSocket = false)
+        get.connectEnd(call, address, Proxy.NO_PROXY, Protocol.HTTP_1_1)
+        assertEquals(RouteStage.Response, get.stage)
+
+        val socket = RouteStageTracker(webSocket = true)
+        socket.connectEnd(call, address, Proxy.NO_PROXY, Protocol.HTTP_1_1)
+        assertEquals(RouteStage.Handshake, socket.stage)
+    }
+
+    /** The lead counts the routes that actually ran, so a word's three are not called "both". */
+    @Test fun theLeadNamesTheNumberOfRoutesThatActuallyRan() {
+        val bing = RouteOutcome("bing", RouteStage.Answer, 1)
+        val baidu = RouteOutcome("baidu", RouteStage.Answer, 2)
+        val dictionary = RouteOutcome(DICTIONARY_ROUTE, RouteStage.Answer, 3)
+
+        assertEquals("Online audio failed", onlineFailureLead(emptyList()))
+        assertEquals("Online audio failed", onlineFailureLead(listOf(bing)))
+        assertEquals("Both online audio routes failed", onlineFailureLead(listOf(bing, baidu)))
+        assertEquals("All 3 online audio routes failed", onlineFailureLead(listOf(dictionary, bing, baidu)))
     }
 
     @Test fun theReportLineCarriesEachRouteItsOutcomeAndMilliseconds() {

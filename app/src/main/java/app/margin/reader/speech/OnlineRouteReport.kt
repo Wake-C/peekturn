@@ -16,6 +16,25 @@ import okhttp3.EventListener
 import okhttp3.Protocol
 
 /**
+ * What a route says it answered with when it reached the service but the answer was unusable. The
+ * clients, the player and the report share this one vocabulary, and none of it ever carries the text
+ * that was asked to be spoken.
+ */
+internal const val OVERSIZED_ANSWER = "oversized answer"
+internal const val NO_AUDIO_BYTES = "no audio bytes"
+internal const val ANSWER_NOT_AUDIO = "answer not audio"
+internal const val CONNECTION_CLOSED = "connection closed before audio"
+
+/** What an attempt that reached the service and returned nothing is reported as. */
+internal const val NO_AUDIO = "no audio"
+
+/** Why no online route was asked at all: the text is past what the services will voice. */
+internal const val TOO_LONG_FOR_ONLINE = "This text is too long for online audio"
+
+/** The route name a single word's dictionary recording is reported under. */
+internal const val DICTIONARY_ROUTE = "dictionary"
+
+/**
  * The step of an online attempt that stopped it. A report that says only "no audio" cannot tell a
  * phone whose clock the service rejected from a phone whose operator dropped the upgrade, so each
  * attempt keeps the stage it reached and the status, if any, it was given.
@@ -66,6 +85,28 @@ internal fun onlineFailureReport(outcomes: List<RouteOutcome>): String =
     "online: " + outcomes.joinToString("; ") { "${it.route}=${it.outcome()} ${it.elapsedMs}ms" }
 
 /**
+ * The leading clause of a failure message, from how many routes were actually attempted: a word may
+ * have tried its dictionary recording plus both services, while a phrase only has the services. A
+ * route that was never attempted is absent from [outcomes], so the sentence cannot claim a failure
+ * that did not happen.
+ */
+internal fun onlineFailureLead(outcomes: List<RouteOutcome>): String {
+    val attempts = outcomes.map { it.route }.distinct().size
+    return when {
+        attempts <= 1 -> "Online audio failed"
+        attempts == 2 -> "Both online audio routes failed"
+        else -> "All $attempts online audio routes failed"
+    }
+}
+
+/**
+ * The reader's failure sentence: what the online routes did, then the device's own answer. The two
+ * halves come from their own classification, so neither can claim a cause the app did not observe.
+ */
+internal fun failureMessage(online: String?, device: String): String =
+    if (online == null) device else "$online, and ${device.replaceFirstChar { it.lowercase() }}"
+
+/**
  * The clock and build identity a wrong device clock would otherwise hide. Both are fixed facts of the
  * phone, not of the text, so the report can carry them without widening what leaves the device.
  */
@@ -84,14 +125,19 @@ internal fun parseHttpDate(value: String): Long? = try {
 
 /**
  * The stage a failed attempt reached, from what the platform reported. Exceptions that name a cause
- * keep it; anything else falls back to the stage the listener had already observed.
+ * keep it; a timeout keeps the stage the tracker last observed, because a TLS or header stall is not
+ * a failed connection; anything else falls back to the stage the listener had already observed.
  */
-internal fun routeStage(error: Throwable, responseSeen: Boolean): RouteStage? = when (error) {
+internal fun routeStage(
+    error: Throwable,
+    responseSeen: Boolean,
+    observed: RouteStage = RouteStage.Connect
+): RouteStage? = when (error) {
     is UnknownHostException -> RouteStage.Resolve
     is SSLException -> RouteStage.Tls
     is ConnectException -> RouteStage.Connect
-    is SocketTimeoutException -> if (responseSeen) RouteStage.FirstByte else RouteStage.Connect
-    is InterruptedIOException -> if (responseSeen) RouteStage.FirstByte else RouteStage.Connect
+    is SocketTimeoutException -> if (responseSeen) RouteStage.FirstByte else observed
+    is InterruptedIOException -> if (responseSeen) RouteStage.FirstByte else observed
     else -> if (responseSeen) RouteStage.FirstByte else null
 }
 
@@ -122,7 +168,11 @@ internal class RouteStageTracker(private val webSocket: Boolean) : EventListener
         proxy: Proxy,
         protocol: Protocol?
     ) {
-        if (stage == RouteStage.Connect || stage == RouteStage.Tls) stage = RouteStage.Handshake
+        if (stage == RouteStage.Connect || stage == RouteStage.Tls) {
+            // A WebSocket still has its upgrade ahead; a plain GET is now waiting for the response
+            // headers, and calling that a handshake would misname whatever stalls next.
+            stage = if (webSocket) RouteStage.Handshake else RouteStage.Response
+        }
     }
 
     override fun responseHeadersStart(call: Call) {
