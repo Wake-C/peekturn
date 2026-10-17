@@ -209,8 +209,8 @@ private fun LanguageGroup(selected: String, onSelect: (String) -> Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.getSystemService(LocaleManager::class.java)?.systemLocales?.get(0)?.language
         } else {
-            @Suppress("DEPRECATION")
-            context.resources.configuration.locales[0]?.language
+            // Before per-app locales exist, the system resources are the device's own.
+            Resources.getSystem().configuration.locales[0]?.language
         }
     }
     val systemName = stringResource(if (systemLanguage == "zh") R.string.settings_language_zh else R.string.settings_language_en)

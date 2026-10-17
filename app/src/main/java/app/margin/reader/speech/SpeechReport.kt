@@ -30,6 +30,8 @@ import app.margin.reader.R
 fun SpeechReport(report: String) {
     val context = LocalContext.current
     var copied by remember(report) { mutableStateOf(false) }
+    // Resolved in composition so the label follows the interface language.
+    val clipLabel = stringResource(R.string.speech_report_clip_label)
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         SelectionContainer {
             Text(
@@ -40,7 +42,7 @@ fun SpeechReport(report: String) {
         }
         TextButton(onClick = {
             context.getSystemService(ClipboardManager::class.java)
-                ?.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.speech_report_clip_label), report))
+                ?.setPrimaryClip(ClipData.newPlainText(clipLabel, report))
             copied = true
         }, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(if (copied) R.string.speech_report_copied else R.string.speech_report_copy_details))

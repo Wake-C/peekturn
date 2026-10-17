@@ -96,6 +96,9 @@ fun LearningPopup(
     LaunchedEffect(context, explanationRequested, settings.activeProfileId, settings.model) {
         if (explanationRequested) session.open(context, settings.activeProfileId, settings.model)
     }
+    // Resolved in composition: reading a resource from inside the coroutine would need a Context
+    // and would not follow a language or configuration change.
+    val dictionaryErrorMessage = stringResource(R.string.reader_lookup_dictionary_error)
     LaunchedEffect(context, dictionaryTab, dictionaryRetry) {
         if (!dictionaryTab || entry != null && dictionaryRetry == 0) return@LaunchedEffect
         dictionaryLoading = true
@@ -103,7 +106,7 @@ fun LearningPopup(
         try {
             entry = dictionary.lookup(context.selection)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { dictionaryError = androidContext.getString(R.string.reader_lookup_dictionary_error) }
+        catch (_: Exception) { dictionaryError = dictionaryErrorMessage }
         finally { dictionaryLoading = false }
     }
     val density = LocalDensity.current
