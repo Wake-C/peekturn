@@ -53,14 +53,33 @@ private const val SSML_CONTENT_TYPE = "application/ssml+xml"
 private const val NORMAL_CLOSURE = 1000
 
 /**
- * The whole request is bounded: the service answers in well under a second, and a handshake that
- * stalls must hand the text to the next route rather than hold the speaker.
+ * The whole route is bounded: the service answers in well under a second, and a handshake that
+ * stalls must hand the text to the next route rather than hold the speaker. The bound is deliberately
+ * under the player's four-second route budget so this client can report where it stopped.
  */
-private const val LOOKUP_BUDGET_MS = 6_000L
+private const val LOOKUP_BUDGET_MS = 3_700L
+
+/** A retry that cannot get at least this much of the budget is reported instead of attempted. */
+private const val RETRY_MIN_MS = 250L
+
+private const val NANOS_PER_MILLI = 1_000_000L
+
+/** What a route says when it reached the service but the answer was unusable, never the spoken text. */
+private const val OVERSIZED_ANSWER = "oversized answer"
+private const val NO_AUDIO_BYTES = "no audio bytes"
+private const val ANSWER_NOT_AUDIO = "answer not audio"
+private const val CONNECTION_CLOSED = "connection closed before audio"
 
 /** Speech for a phrase, sentence or example; null means no usable audio, so device speech speaks. */
-fun interface SentenceAudioSource {
-    suspend fun lookup(text: String, accent: String): AudioClip?
+interface SentenceAudioSource {
+    /** The short, stable name this route is reported under: "bing" or "baidu". */
+    val route: String
+
+    /**
+     * One bounded attempt. A failure calls [failed] with the stage it reached before returning null;
+     * cancellation, which is a newer request rather than a failure, is never reported.
+     */
+    suspend fun lookup(text: String, accent: String, failed: (RouteOutcome) -> Unit = {}): AudioClip?
 }
 
 /**
@@ -89,15 +108,54 @@ class BingSpeechClient(
     private val connectionId: () -> String = { UUID.randomUUID().toString().replace("-", "") }
 ) : SentenceAudioSource {
 
+    override val route: String = "bing"
+
     private val http = client
 
-    override suspend fun lookup(text: String, accent: String): AudioClip? {
+    /**
+     * The route's whole budget covers the handshake and the first audio frame. The token is derived from
+     * the device clock, so a 401/403 that carries the service's own `Date` is retried once with the
+     * clock corrected by the observed skew; the same text goes to the same host, and only the handshake
+     * is repeated. A timeout or a rejection without a `Date` is reported rather than retried.
+     */
+    override suspend fun lookup(
+        text: String,
+        accent: String,
+        failed: (RouteOutcome) -> Unit
+    ): AudioClip? {
+        val started = System.nanoTime()
         val spoken = speechLookupText(text) ?: return null
         // The accents this app offers are the accents this service voices, so the same mapping gates
         // the request and names its voice.
         val locale = speechLocale(accent) ?: return null
-        val audio = withTimeoutOrNull(LOOKUP_BUDGET_MS) { speak(spoken, locale) } ?: return null
-        return AudioClip(audio, BING_CREDIT)
+        val deadline = started + LOOKUP_BUDGET_MS * NANOS_PER_MILLI
+        var skew: Long? = null
+        var attempts = 0
+        while (true) {
+            val remaining = (deadline - System.nanoTime()) / NANOS_PER_MILLI
+            if (remaining <= 0) {
+                failed(
+                    RouteOutcome(
+                        route, RouteStage.Handshake, elapsedMillis(started),
+                        timedOut = true, clockSkewMs = skew
+                    )
+                )
+                return null
+            }
+            val clock = now() + (skew ?: 0L) / 1000.0
+            val answer = attempt(spoken, locale, clock, remaining)
+            val audio = answer.audio
+            if (audio != null) return AudioClip(audio, BING_CREDIT)
+            attempts++
+            val rejected = answer.httpStatus == 401 || answer.httpStatus == 403
+            val retry = attempts == 1 && rejected && answer.clockSkewMs != null &&
+                (deadline - System.nanoTime()) / NANOS_PER_MILLI >= RETRY_MIN_MS
+            if (!retry) {
+                failed(answer.outcome(route, elapsedMillis(started), skew ?: answer.clockSkewMs))
+                return null
+            }
+            skew = answer.clockSkewMs
+        }
     }
 
     /**
@@ -106,20 +164,46 @@ class BingSpeechClient(
      * closes it as soon as the request that owns it goes away — and only audio reaches the caller.
      */
     @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
-    private suspend fun speak(text: String, locale: Locale): ByteArray? {
-        val session = Session(configMessage(), ssmlMessage(text, locale))
-        val connection = http.newWebSocket(handshake(now()), session)
+    private suspend fun attempt(
+        text: String,
+        locale: Locale,
+        clockSeconds: Double,
+        budgetMs: Long
+    ): Answer {
+        val tracker = RouteStageTracker(webSocket = true)
+        val session = Session(
+            configMessage(), ssmlMessage(text, locale), tracker, (clockSeconds * 1000).toLong()
+        )
+        val connection = http.newBuilder().eventListener(tracker).build()
+            .newWebSocket(handshake(clockSeconds), session)
         val job = currentCoroutineContext()[Job]!!
         val cancellation = job.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { cause ->
             if (cause != null) connection.cancel()
         }
-        val audio = try {
-            session.audio.await()
+        val finished = try {
+            withTimeoutOrNull(budgetMs) { session.done.await() }
         } finally {
             cancellation.dispose()
             if (session.ended) connection.close(NORMAL_CLOSURE, null) else connection.cancel()
         }
-        return audio?.takeIf(::mpegAudio)
+        if (finished == null) {
+            return Answer(null, tracker.stage, timedOut = true, clockSkewMs = session.clockSkewMs)
+        }
+        val audio = session.collected.toByteArray()
+        return when {
+            session.oversized -> Answer(null, RouteStage.Answer, detail = OVERSIZED_ANSWER)
+            session.httpStatus != null -> Answer(
+                null, RouteStage.Handshake,
+                httpStatus = session.httpStatus, clockSkewMs = session.clockSkewMs
+            )
+            !session.ended -> Answer(
+                null, if (session.opened) tracker.stage else RouteStage.Handshake,
+                detail = CONNECTION_CLOSED
+            )
+            audio.isEmpty() -> Answer(null, RouteStage.FirstByte, detail = NO_AUDIO_BYTES)
+            !mpegAudio(audio) -> Answer(null, RouteStage.Answer, detail = ANSWER_NOT_AUDIO)
+            else -> Answer(audio, RouteStage.FirstByte)
+        }
     }
 
     private fun handshake(seconds: Double) = Request.Builder()
@@ -155,19 +239,47 @@ class BingSpeechClient(
             "<prosody pitch='+0Hz' rate='+0%' volume='+0%'>${ssmlEscape(text)}</prosody></voice></speak>"
 
     /**
+     * One attempt's answer. [audio] is present only when the turn delivered usable MPEG; otherwise the
+     * stage, status and clock evidence are what a failure report can say.
+     */
+    private data class Answer(
+        val audio: ByteArray?,
+        val stage: RouteStage,
+        val httpStatus: Int? = null,
+        val timedOut: Boolean = false,
+        val detail: String? = null,
+        val clockSkewMs: Long? = null
+    ) {
+        fun outcome(route: String, elapsedMs: Long, skewMs: Long?): RouteOutcome =
+            RouteOutcome(route, stage, elapsedMs, httpStatus, timedOut, detail, skewMs)
+    }
+
+    /**
      * The service's answers for one handshake: the audio frames it sends between the turn's start and
      * its end, up to the ceiling this app is willing to hold in memory. Anything unexpected — a failed
-     * handshake, a socket that closes early, more audio than a clip can be — completes with no audio.
+     * handshake, a socket that closes early, more audio than a clip can be — completes with the
+     * evidence a failure report needs, including the service's own `Date` when it rejected the upgrade.
      */
-    private class Session(private val config: String, private val ssml: String) : WebSocketListener() {
-        val audio = CompletableDeferred<ByteArray?>()
-        private val collected = ByteArrayOutputStream()
+    private class Session(
+        private val config: String,
+        private val ssml: String,
+        private val tracker: RouteStageTracker,
+        private val deviceNowMs: Long
+    ) : WebSocketListener() {
+        val done = CompletableDeferred<Unit>()
+        val collected = ByteArrayOutputStream()
 
         /** Whether the service ended the turn, which is what makes a clean close the polite goodbye. */
         var ended = false
-            private set
+        var opened = false
+        var oversized = false
+        var httpStatus: Int? = null
+        var clockSkewMs: Long? = null
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            // The upgrade is done; what remains is the first audio frame, not the handshake.
+            opened = true
+            tracker.stage = RouteStage.FirstByte
             webSocket.send(config)
             webSocket.send(ssml)
         }
@@ -175,21 +287,23 @@ class BingSpeechClient(
         override fun onMessage(webSocket: WebSocket, text: String) {
             if (bingFramePath(text.toByteArray(Charsets.UTF_8)) != PATH_TURN_END) return
             ended = true
-            audio.complete(collected.toByteArray().takeIf { it.isNotEmpty() })
+            done.complete(Unit)
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
             // The frame's own size is checked before anything is copied out of it, so a single
             // oversized frame cannot spike memory past the ceiling this route promises.
             if (collected.size() + bytes.size > MAX_AUDIO_BYTES) {
-                audio.complete(null)
+                oversized = true
+                done.complete(Unit)
                 webSocket.cancel()
                 return
             }
             val payload = bingAudioPayload(bytes.toByteArray()) ?: return
             if (collected.size() + payload.size > MAX_AUDIO_BYTES) {
                 // An answer larger than any usable clip is refused, not buffered.
-                audio.complete(null)
+                oversized = true
+                done.complete(Unit)
                 webSocket.cancel()
                 return
             }
@@ -197,16 +311,34 @@ class BingSpeechClient(
         }
 
         override fun onFailure(webSocket: WebSocket, failure: Throwable, response: Response?) {
-            audio.complete(null)
+            if (response != null) {
+                // The upgrade was refused with a real HTTP answer: keep its status and the clock
+                // evidence in its Date header, which is the only way to see a wrong device clock.
+                httpStatus = response.code
+                clockSkewMs = response.header("Date")
+                    ?.let(::parseHttpDate)
+                    ?.minus(deviceNowMs)
+                tracker.stage = RouteStage.Handshake
+            } else {
+                val seen = tracker.stage == RouteStage.FirstByte
+                // A cause the platform names keeps its stage; anything else that ended the upgrade
+                // before a first byte means the handshake never completed, never that the text was
+                // the problem.
+                tracker.stage = routeStage(failure, responseSeen = seen) ?: when (tracker.stage) {
+                    RouteStage.Resolve, RouteStage.Tls -> tracker.stage
+                    else -> RouteStage.Handshake
+                }
+            }
+            done.complete(Unit)
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             webSocket.cancel()
-            audio.complete(null)
+            done.complete(Unit)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            audio.complete(null)
+            done.complete(Unit)
         }
     }
 }

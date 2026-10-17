@@ -116,17 +116,33 @@ internal enum class DeviceSpeechFailure(val verdict: String, val message: String
     NoEnglishVoice(
         "no installed speech engine offered an English voice",
         NO_ENGLISH_VOICE
+    ),
+
+    /**
+     * An engine accepted the text with its own voice and then failed to speak it. That is a playback
+     * failure, not a missing voice, and telling the reader the voice is missing would be a false
+     * negative - the exact mistake that made a working Chinese OEM phone look voiceless.
+     */
+    PlaybackFailed(
+        "the engine accepted an English utterance and then failed to speak it",
+        "Your speech engine accepted English but could not speak it. Check system speech settings, or choose another engine."
     )
 }
 
 /**
  * The most actionable cause a finished attempt found: an engine that started is more informative than
- * one that never answered, and an engine that named missing English data is more actionable than one
- * that named no English voice at all.
+ * one that never answered, an engine that named missing English data is more actionable than one
+ * that named no English voice at all, and an engine that accepted an utterance before failing is a
+ * playback problem rather than a missing voice.
  */
-internal fun deviceSpeechFailure(engineStarted: Boolean, missingEnglishData: Boolean): DeviceSpeechFailure = when {
+internal fun deviceSpeechFailure(
+    engineStarted: Boolean,
+    missingEnglishData: Boolean,
+    utteranceAccepted: Boolean = false
+): DeviceSpeechFailure = when {
     !engineStarted -> DeviceSpeechFailure.NotStarted
     missingEnglishData -> DeviceSpeechFailure.MissingData
+    utteranceAccepted -> DeviceSpeechFailure.PlaybackFailed
     else -> DeviceSpeechFailure.NoEnglishVoice
 }
 

@@ -383,3 +383,31 @@ Verified: 232 unit tests with no failures, errors or skips; lint and isolated as
 standards review of this round found that the new WebSocket route followed redirects (the text could have
 been re-sent to another host) and that a single oversized frame was copied before the size check; both are
 fixed, and the shared classification message is no longer duplicated as a literal.
+
+## Speech failure evidence and build identity (2026-10-17)
+
+A phone in mainland China still reported that no English voice existed after the Microsoft route was
+added, and no build could be told apart because every previous package shared version code 3. The
+version is now 1.3.0 (code 4), and a request that ends without a speaker reports why.
+
+Changes:
+
+- Each online route now records where it stopped - resolve, connect, TLS, a rejected upgrade with its
+  HTTP status, a response status, a first-byte stall, no audio bytes, an unusable answer, an oversized
+  answer - plus the elapsed milliseconds. Nothing about the selected text is recorded.
+- On total failure the message carries two halves: `online: bing=<outcome> <ms>ms; baidu=<outcome>
+  <ms>ms` and the existing device report, preceded by the device clock in UTC and the app version. The
+  copy action that already existed for the device report now copies both. Nothing is shown on success.
+- Each online route is bounded to about 4 seconds instead of 10, so a blocked route cannot leave the
+  reader waiting for two timeouts before the fallback speaks.
+- The Microsoft handshake handles clock skew the way the service requires: a 401/403 that carries a
+  Date header is retried once with the token derived from the server's time, and the measured skew is
+  reported. A wrong phone clock is otherwise invisible.
+- The device verdict gained the state it was missing: an engine that accepted the English utterance and
+  then failed it is reported as a playback failure, not as "no installed engine offered an English
+  voice". That false negative is what made a working Chinese OEM phone look voiceless; it is the most
+  likely reading of the user's message.
+
+Verified: 247 unit tests with no failures, errors or skips; lint and isolated assembly. Not verified:
+the user's device (still unreachable), and the US/UK frame pair on an emulator whose data path is
+wedged. The report format is the evidence path: the reader can copy it and send it back.

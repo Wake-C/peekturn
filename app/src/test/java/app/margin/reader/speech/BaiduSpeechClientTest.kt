@@ -95,6 +95,49 @@ class BaiduSpeechClientTest {
         assertNull("An empty answer is not audio", client().lookup("hello", "UK"))
     }
 
+    /** The route's failure is reported with the status or stage that produced it, never the text. */
+    @Test fun everyFailedAnswerIsReportedWithItsStage() = runBlocking {
+        val outcomes = mutableListOf<RouteOutcome>()
+
+        server.enqueue(MockResponse().setResponseCode(400).setBody(failureBody))
+        assertNull(client().lookup("hello", "US") { outcomes += it })
+        assertEquals(RouteStage.Response, outcomes.single().stage)
+        assertEquals(400, outcomes.single().httpStatus)
+        assertEquals("HTTP 400", outcomes.single().outcome())
+
+        outcomes.clear()
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "https://example.test/x.mp3"))
+        assertNull(client().lookup("hello", "US") { outcomes += it })
+        assertEquals("HTTP 302", outcomes.single().outcome())
+
+        outcomes.clear()
+        serve(ByteArray((MAX_AUDIO_BYTES + 1).toInt()))
+        assertNull(client().lookup("hello", "UK") { outcomes += it })
+        assertEquals(RouteStage.Answer, outcomes.single().stage)
+        assertEquals("oversized answer", outcomes.single().outcome())
+
+        outcomes.clear()
+        serve(failureBody.toByteArray(), "text/html")
+        assertNull(client().lookup("hello", "US") { outcomes += it })
+        assertEquals("answer not audio", outcomes.single().outcome())
+
+        outcomes.clear()
+        serve(ByteArray(0), "audio/mpeg")
+        assertNull(client().lookup("hello", "US") { outcomes += it })
+        assertEquals(RouteStage.FirstByte, outcomes.single().stage)
+        assertEquals("no audio bytes", outcomes.single().outcome())
+    }
+
+    /** A cancellation belongs to whichever newer request caused it, so it never becomes a report. */
+    @Test fun aCancelledRouteIsNotReportedAsAFailure() = runBlocking {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val outcomes = mutableListOf<RouteOutcome>()
+        assertNull(withTimeoutOrNull(1_000) {
+            client().lookup("hello", "UK") { outcomes += it }
+        })
+        assertTrue("A superseded attempt is not this request's failure", outcomes.isEmpty())
+    }
+
     @Test fun oversizedAnswersAreRefusedInsteadOfBuffered() = runBlocking {
         serve(ByteArray((MAX_AUDIO_BYTES + 1).toInt()))
         assertNull("A body past the audio limit must not be kept", client().lookup("hello", "UK"))

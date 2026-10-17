@@ -14,6 +14,7 @@ import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -203,6 +204,109 @@ class BingSpeechClientTest {
         server.enqueue(MockResponse().setResponseCode(403))
         assertNull(client().lookup("hello", "US"))
         assertEquals(1, server.requestCount)
+    }
+
+    /** A refusal is reported with its route, HTTP status and elapsed time, and never the text. */
+    @Test fun aRefusedHandshakeIsReportedWithItsHttpStatusAndNotTheText() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(403))
+        val outcomes = mutableListOf<RouteOutcome>()
+        val spoken = "a private sentence"
+        assertNull(client().lookup(spoken, "US") { outcomes += it })
+
+        val outcome = outcomes.single()
+        assertEquals("bing", outcome.route)
+        assertEquals(RouteStage.Handshake, outcome.stage)
+        assertEquals(403, outcome.httpStatus)
+        assertNull("Without a Date header there is no clock evidence", outcome.clockSkewMs)
+        assertEquals("handshake rejected HTTP 403", outcome.outcome())
+        assertFalse("No selection text may reach the report", outcome.outcome().contains(spoken))
+        assertTrue(outcome.elapsedMs >= 0)
+    }
+
+    /**
+     * The token is derived from the device clock, so a 401/403 carrying the server's `Date` is retried
+     * once with the clock corrected by the observed skew; the text and the host do not change.
+     */
+    @Test fun aRejectedHandshakeWithTheServerDateIsRetriedOnceWithTheCorrectedClock() = runBlocking {
+        val deviceClock = 1_700_000_600.0
+        val serverDate = "Tue, 14 Nov 2023 22:13:20 GMT"
+        server.enqueue(MockResponse().setResponseCode(403).setHeader("Date", serverDate))
+        serve()
+        val client = BingSpeechClient(
+            OkHttpClient(), server.url("/consumer/speech/synthesize/readaloud/edge/v1"),
+            { deviceClock }, { connectionId }
+        )
+
+        assertNotNull(client.lookup("hello", "US"))
+        assertEquals("One retry, and no more", 2, server.requestCount)
+        val first = server.takeRequest().requestUrl!!.queryParameter("Sec-MS-GEC")
+        val second = server.takeRequest().requestUrl!!.queryParameter("Sec-MS-GEC")
+        assertEquals("The first token uses the device's own clock", bingSecMsGec(deviceClock), first)
+        assertEquals(
+            "The retry uses the clock the server's Date proves",
+            bingSecMsGec(1_700_000_000.0), second
+        )
+    }
+
+    /** A retry that is refused too reports the status it got and the skew that was measured. */
+    @Test fun aSecondRejectionReportsTheStatusAndTheObservedSkew() = runBlocking {
+        val deviceClock = 1_700_000_600.0
+        val serverDate = "Tue, 14 Nov 2023 22:13:20 GMT"
+        server.enqueue(MockResponse().setResponseCode(403).setHeader("Date", serverDate))
+        server.enqueue(MockResponse().setResponseCode(403).setHeader("Date", serverDate))
+        val outcomes = mutableListOf<RouteOutcome>()
+        val client = BingSpeechClient(
+            OkHttpClient(), server.url("/consumer/speech/synthesize/readaloud/edge/v1"),
+            { deviceClock }, { connectionId }
+        )
+
+        assertNull(client.lookup("hello", "US") { outcomes += it })
+        assertEquals(2, server.requestCount)
+        val outcome = outcomes.single()
+        assertEquals(403, outcome.httpStatus)
+        assertEquals("Device is 10 minutes ahead of the server", -600_000L, outcome.clockSkewMs)
+        assertEquals(
+            "handshake rejected HTTP 403 (clock skew -600000ms)", outcome.outcome()
+        )
+    }
+
+    /** An upgrade that is dropped without an HTTP answer is reported as a handshake never completed. */
+    @Test fun anUpgradeThatNeverCompletesIsReportedAsSuch() = runBlocking {
+        server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        val outcomes = mutableListOf<RouteOutcome>()
+        assertNull(client().lookup("hello", "US") { outcomes += it })
+
+        val outcome = outcomes.single()
+        assertEquals(RouteStage.Handshake, outcome.stage)
+        assertNull(outcome.httpStatus)
+        assertFalse(outcome.timedOut)
+        assertEquals("handshake not completed", outcome.outcome())
+    }
+
+    /** A completed turn that carried nothing usable names the stage instead of saying only "no audio". */
+    @Test fun everyUnusableAnswerIsReportedWithItsStage() = runBlocking {
+        val outcomes = mutableListOf<RouteOutcome>()
+
+        serve(frames = emptyList())
+        assertNull(client().lookup("hello", "US") { outcomes += it })
+        assertEquals(RouteStage.FirstByte, outcomes.single().stage)
+        assertEquals("no audio bytes", outcomes.single().outcome())
+
+        outcomes.clear()
+        serve(frames = listOf(audioFrame("<html>not audio</html>".toByteArray())))
+        assertNull(client().lookup("hello", "US") { outcomes += it })
+        assertEquals("answer not audio", outcomes.single().outcome())
+
+        outcomes.clear()
+        serve(frames = listOf(audioFrame(audio + ByteArray((MAX_AUDIO_BYTES + 1).toInt()))))
+        assertNull(client().lookup("hello", "US") { outcomes += it })
+        assertEquals("oversized answer", outcomes.single().outcome())
+
+        outcomes.clear()
+        serve(frames = listOf(audioFrame("not audio at all".toByteArray(), path = "response")))
+        assertNull(client().lookup("hello", "US") { outcomes += it })
+        assertEquals("A turn with no audio at all is the first-byte stage",
+            RouteStage.FirstByte, outcomes.single().stage)
     }
 
     /** A handshake that is never answered must not hold the speaker, and its socket must be closed. */
