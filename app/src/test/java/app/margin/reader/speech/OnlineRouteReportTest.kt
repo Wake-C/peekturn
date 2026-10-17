@@ -103,3 +103,28 @@ class OnlineRouteReportTest {
         assertTrue("The version identity is part of the line", line.contains("("))
     }
 }
+
+/** OkHttp wraps the platform failure; the stage must come from the cause, not the wrapper. */
+class RouteStageCauseTest {
+    @org.junit.Test fun `a refused connection reads as a connection failure through its cause`() {
+        val wrapped = java.io.IOException(
+            "upgrade failed",
+            java.net.ConnectException("Connection refused")
+        )
+        org.junit.Assert.assertEquals(
+            RouteStage.Connect,
+            routeStage(wrapped, responseSeen = false, observed = RouteStage.Handshake)
+        )
+    }
+
+    @org.junit.Test fun `a stalled read after headers is a first-byte stall`() {
+        val wrapped = java.io.IOException(
+            "read",
+            java.net.SocketTimeoutException("timeout")
+        )
+        org.junit.Assert.assertEquals(
+            RouteStage.FirstByte,
+            routeStage(wrapped, responseSeen = true)
+        )
+    }
+}

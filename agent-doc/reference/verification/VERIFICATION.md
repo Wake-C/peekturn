@@ -438,3 +438,41 @@ playback, and all corrected before this record:
 Verified after the corrections: 256 unit tests with no failures, errors or skips; lint and isolated
 assembly. Still unverified: the reader's own phone (the report it can now copy is the next evidence),
 the US/UK frame pair, and the service's acceptance of a skew-corrected token on a genuinely wrong clock.
+
+### Self-probing the speech paths on a controlled device (2026-10-17)
+
+The reader's own phone is not reachable from here, so two reachable ends were tested from this side
+instead of reporting another guess.
+
+**The failure report, end to end.** A fresh emulator was created from the API 35 image, the delivered
+1.3.0 (4) package installed, and the app's HTTPS blocked in both address families for its own uid
+(IPv4 was not enough: the first attempt still reached the service over IPv6). With the device's speech
+engine disabled as well, the Settings sentence preview produced exactly the report the change exists to
+provide, read back from the rendered UI:
+
+```
+Both online audio routes failed, and the device's speech engine did not start. Open system speech settings to check it.
+
+online: bing=handshake not completed 2100ms; baidu=connect failed 46ms
+device clock: 2026-10-17T09:34:39.365264Z; app: 1.3.0 (4)
+Device speech report: engines tried: system default engine; voices listed: not asked; result: the device's speech engine did not start.
+```
+
+The copy action was exercised: it changed to "Copied" and the report was placed on the clipboard.
+
+**Route independence.** With Microsoft's range rejected and Baidu untouched, the sentence preview still
+played, credited "Audio: Microsoft Read Aloud" at 77184 frames (48 kHz, 1.608 s), so a blocked fallback
+does not disturb the primary. With everything blocked for the app, both routes failed as reported and
+the engine fallback spoke with the truthful notice.
+
+**A precision defect found by the probe and fixed.** A refused connection on the Microsoft route was
+labelled "handshake not completed" rather than a connection failure, because OkHttp wraps the platform
+exception; the stage mapping now walks the cause chain (resolve, connect, TLS, timeout-after-headers)
+instead of trusting the outermost type, with tests. The remaining wording there is still generic for a
+blocked upgrade, noted rather than claimed fixed.
+
+**What this proves and what it cannot.** It proves the report reaches the reader in Settings, is
+copyable, distinguishes the two online routes, distinguishes a missing engine from playback failure and
+carries the clock and version. It cannot prove the reader's own carrier path, the behaviour of their
+OEM engine binary, or audible quality. A fake engine that reports voices and then fails to speak was
+designed but not built; the verdict for that case is covered by unit tests instead.

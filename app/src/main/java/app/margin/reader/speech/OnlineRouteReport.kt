@@ -3,6 +3,8 @@ package app.margin.reader.speech
 import app.margin.reader.BuildConfig
 import java.io.InterruptedIOException
 import java.net.ConnectException
+import java.net.SocketException
+import java.net.NoRouteToHostException
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.SocketTimeoutException
@@ -132,13 +134,24 @@ internal fun routeStage(
     error: Throwable,
     responseSeen: Boolean,
     observed: RouteStage = RouteStage.Connect
-): RouteStage? = when (error) {
-    is UnknownHostException -> RouteStage.Resolve
-    is SSLException -> RouteStage.Tls
-    is ConnectException -> RouteStage.Connect
-    is SocketTimeoutException -> if (responseSeen) RouteStage.FirstByte else observed
-    is InterruptedIOException -> if (responseSeen) RouteStage.FirstByte else observed
-    else -> if (responseSeen) RouteStage.FirstByte else null
+): RouteStage? {
+    if (responseSeen) return RouteStage.FirstByte
+    // OkHttp wraps the platform failure in its own exceptions, so the name that says where the
+    // attempt stopped is often a cause, not the top of the chain: a refused connection must read as
+    // a connection failure even when the outer type is a generic IO exception.
+    var current: Throwable? = error
+    var depth = 0
+    while (current != null && depth < 8) {
+        when (current) {
+            is UnknownHostException -> return RouteStage.Resolve
+            is SSLException -> return RouteStage.Tls
+            is ConnectException, is SocketException, is NoRouteToHostException -> return RouteStage.Connect
+            is SocketTimeoutException, is InterruptedIOException -> return observed
+        }
+        current = current.cause
+        depth++
+    }
+    return null
 }
 
 /**
