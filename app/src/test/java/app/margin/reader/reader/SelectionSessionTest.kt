@@ -1,5 +1,6 @@
 package app.margin.reader.reader
 
+import android.view.MotionEvent
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -243,6 +244,33 @@ class SelectionSessionTest {
         assertEquals(ReaderPaddingAction.Ignore, session.paddingAction(token, hasSelection = true, gestureInput = 1, currentInput = 2))
         assertEquals(ReaderPaddingAction.Ignore, session.paddingAction(token, hasSelection = false, gestureInput = 1, currentInput = 2))
         assertEquals(ReaderPaddingAction.Navigate, session.paddingAction(token, hasSelection = false, gestureInput = 2, currentInput = 2))
+    }
+
+    /**
+     * Android reports a cancellation as well as a release, and a cancellation can arrive while the
+     * finger is still down (a system gesture or another window taking the touch). Only the release
+     * may explain a range, so a cancelled stream leaves the session without an observed release.
+     */
+    @Test fun `only a real release makes a range eligible for automatic explanation`() {
+        assertEquals(GestureEnd.Release, gestureEnd(MotionEvent.ACTION_UP))
+        assertEquals(GestureEnd.Cancelled, gestureEnd(MotionEvent.ACTION_CANCEL))
+        assertNull(gestureEnd(MotionEvent.ACTION_MOVE))
+
+        val session = SelectionSession()
+        val token = session.beginNativeMode()
+        val frozen = SelectionSession.Identity("relucta", "was ", "nt to leave")
+
+        session.holdStart()
+        session.releasedSelection(token, frozen)
+        assertEquals(GestureEnd.Cancelled, gestureEnd(MotionEvent.ACTION_CANCEL))
+        session.cancelGesture()
+        assertFalse(session.pointerHeld)
+        assertFalse("A cancelled stream must not explain a mid-gesture range", session.mayAutoExplain(token, true, frozen))
+
+        session.holdStart()
+        session.releasedSelection(token, frozen)
+        session.holdEnd()
+        assertTrue("A release the reader saw makes the same range eligible", session.mayAutoExplain(token, true, frozen))
     }
 
     /** A whitespace-only native selection is never explainable. */

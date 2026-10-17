@@ -811,19 +811,28 @@ class ReaderActivity : AppCompatActivity() {
                 selectionSession.holdStart()
                 selectionTrace("pointer down pointers=${event.pointerCount}")
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                selectionSession.holdEnd()
-                selectionTrace("pointer released action=${event.actionMasked}")
+            else -> when (gestureEnd(event.actionMasked)) {
+                // A system gesture or another window can cancel the stream while the finger is still
+                // down, so only a real release may explain a range.
+                GestureEnd.Release -> {
+                    selectionSession.holdEnd()
+                    selectionTrace("pointer released action=${event.actionMasked}")
+                }
+                GestureEnd.Cancelled -> {
+                    selectionSession.cancelGesture()
+                    selectionTrace("pointer gesture cancelled action=${event.actionMasked}")
+                }
+                null -> Unit
             }
         }
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_UP) tracker?.interact()
         // The WebView applies the final native selection during this dispatch, so the released
         // read below observes a settled selection rather than an intermediate drag state.
         val handled = super.dispatchTouchEvent(event)
-        if (!handledPaddingGesture && (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)) {
+        if (!handledPaddingGesture && event.actionMasked == MotionEvent.ACTION_UP) {
             observeSourceSelectionClear()
         }
-        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+        if (event.actionMasked == MotionEvent.ACTION_UP) {
             scheduleReleasedSelection()
         }
         return handled

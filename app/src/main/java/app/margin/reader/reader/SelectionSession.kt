@@ -1,5 +1,7 @@
 package app.margin.reader.reader
 
+import android.view.MotionEvent
+
 /**
  * One reader's selection ownership: the native toolbar lifetime, the physical pointer gesture and
  * every asynchronous native selection read.
@@ -22,15 +24,16 @@ internal class SelectionSession {
     var generation: Long = 0L
         private set
 
-    /** True between ACTION_DOWN and ACTION_UP/ACTION_CANCEL. */
+    /** True between ACTION_DOWN and ACTION_UP, or until the gesture stream is cancelled. */
     var pointerHeld: Boolean = false
         private set
 
     /**
-     * True once this selection session saw the pointer leave the screen. A native menu request can
-     * arrive while the finger is still selecting - and on some input paths the Activity never sees
-     * the pointer at all - so an automatic explanation requires a release that was actually
-     * observed, never a menu request that merely looks like one.
+     * True once this selection session saw the pointer leave the screen in an ACTION_UP. A native
+     * menu request can arrive while the finger is still selecting - and on some input paths the
+     * Activity never sees the pointer at all - so an automatic explanation requires a release that
+     * was actually observed, never a menu request that merely looks like one. A cancelled gesture
+     * stream is not a release, because the finger may still be down.
      */
     var hasObservedRelease: Boolean = false
         private set
@@ -89,9 +92,10 @@ internal class SelectionSession {
     }
 
     /**
-     * The reader stopped owning input (for example it paused). Only this deliberate lifecycle
-     * cancellation, a real ACTION_UP/ACTION_CANCEL, ends a held gesture: clearing a selection or
-     * ending a selection session must never do it.
+     * The reader stopped owning input: the Activity paused, or Android cancelled the gesture stream
+     * because a system gesture or another window took the touch. A cancel is not a release - the
+     * finger may still be down - so it never counts as an observed one and cannot explain a range.
+     * Only a real ACTION_UP does that; clearing a selection or ending a session never does.
      */
     fun cancelGesture() {
         pointerHeld = false
@@ -141,6 +145,22 @@ internal class SelectionSession {
 }
 
 internal enum class ReaderPaddingAction { Ignore, ClearSelection, Navigate }
+
+/**
+ * How the reader's gesture stream ended. Android reports both a real release and a cancellation:
+ * only a release means the finger left the screen, because a cancelled stream (a system gesture or
+ * another window taking the touch) can arrive while the finger is still down. An automatic
+ * explanation may only be built from [Release].
+ */
+internal enum class GestureEnd { Release, Cancelled }
+
+internal fun gestureEnd(actionMasked: Int): GestureEnd? = when (actionMasked) {
+    MotionEvent.ACTION_UP -> GestureEnd.Release
+    MotionEvent.ACTION_CANCEL -> GestureEnd.Cancelled
+    else -> null
+}
+
+
 
 /**
  * The read rule of one released selection, kept pure so it is testable without a navigator. Reads
