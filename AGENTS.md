@@ -1,10 +1,20 @@
 # Margin
 
-Independent Android English EPUB reader. The accepted product and acceptance criteria are in [docs/SPEC.md](docs/SPEC.md); architectural ownership and runtime constraints are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Stable vocabulary is in [CONTEXT.md](CONTEXT.md). Documentation ownership is in [docs/doc-conventions.md](docs/doc-conventions.md).
+Independent Android EPUB reader for people learning English through sustained reading.
 
-- Readium owns EPUB parsing, rendering, navigation and locators. Do not introduce a custom paginator or flatten the original EPUB.
-- Do not copy source or assets from the adjacent VibeReading project. New implementations may use the documented lessons and independently sourced dependencies/data.
+## Work boundaries
+
+- Keep the unmodified Readium navigator; do not replace it with a custom paginator or flattened chapter text.
+- VibeReading is a separate codebase, not a source or edit target. Reuse lessons, not its code or assets.
 - Production surfaces show actual local data and actual provider results. No demo answers, placeholder books or fabricated reading statistics.
 - Keep credentials, private book text and temporary verification data out of tracked files and logs.
-- Use the build manifests for dependency versions and README for build/run commands. Validate changed behavior on Android, not only in unit tests.
-- No duplicate CLAUDE.md/GEMINI.md rule bodies: this runtime reads AGENTS.md directly.
+- Behavior changes require verification on Android, not only unit tests.
+
+## Task context
+
+- For code changes, shared actors, boundaries and state ownership: [architecture](agent-doc/essential/ARCHITECTURE.md).
+- For feature work, design or verification: follow the [task routes](agent-doc/reference/AGENTS.md) to the affected owner.
+- Domain terminology: [glossary](CONTEXT.md).
+- Build and run commands: [README](README.md#build-and-run).
+- Dependency, dictionary and recording attribution: [third-party notices](THIRD_PARTY_NOTICES.md).
+- Documentation changes: [ownership conventions](agent-doc/essential/doc-conventions.md).

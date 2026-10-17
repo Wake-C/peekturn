@@ -1,13 +1,15 @@
 # Margin
 
-An Android EPUB reader for people who learn English by reading real books. Focus is a quiet dark interface: a book, contextual help when needed, and a return to the same sentence.
+An Android EPUB reader for people who learn English by reading real books. A quiet, book-first interface with contextual help when needed and a return to the same reading position.
 
 ## Features
 
 - Original EPUB import and rendering through Readium, chapter navigation, in-book search, configurable typography and page/scroll reading.
+- Optional immersive fullscreen reading, enabled by default; center-tap overlay controls, quiet chapter/page indicators, and independently adjustable top/bottom content spacing.
+- One Focus Dark, Classic White or Warm Paper appearance choice across the entire app and reader.
 - Automatic reopening of the last-read book at its stored Readium locator. Reading positions survive app restarts and typography changes.
-- Structured, streamed contextual AI explanations with meaning, contextual usage, UK/US IPA and playable examples. One configurable OpenAI-compatible model; no prompt editor or chapter translation.
-- Optional Quick Explain, explicit offline dictionary, and Android system pronunciation with US/UK preference and optional autoplay.
+- Structured contextual AI explanations with meaning, contextual usage, UK/US IPA and playable examples. Saved provider profiles switch without repeated setup and have independent temperatures. Successful answers are reused within the reader session; dictionary tabs do not repeat paid requests.
+- Optional Quick Explain, explicit offline dictionary, recorded word pronunciation and system-spoken examples, with preferred US/UK accent and optional autoplay.
 - Actual foreground reading-time statistics, with idle detection and local daily storage.
 
 The app contains no sample library, AI answers or invented statistics. The interactive design prototype is a separate artifact, not shipped application code.
@@ -27,26 +29,27 @@ The debug APK is universal. The Gradle wrapper selects an installed JDK 17 on ma
 
 ## First use
 
-1. Import a readable, DRM-free `.epub` using the document picker or an external Open With/Share action.
-2. Read normally. Settings inside the reader control type, spacing, margins, paper and page/scroll mode.
-3. Configure your model's HTTPS base URL, model identifier and API key in Settings. Connection testing uses a real request and may incur provider charges.
-4. Select a word or phrase and choose Explain or Dictionary. Enable Quick Explain for automatic lookup from a new selection.
-5. Use the term/example speakers. Install the desired English voice through Android speech settings if unavailable.
+1. Use the library’s plus button to add a readable, DRM-free `.epub`, or open/share one from another app.
+2. Tap the page centre to show reading controls. Layout controls type, size, line/paragraph spacing, horizontal margins and top/bottom distances; immersive mode can be disabled. The single Appearance choice applies everywhere.
+3. Add model profiles in Settings using HTTPS base URL, model identifier, API key and temperature. Select the active profile without deleting the others. Temperature changes randomness, not speed; provider support varies. A connection test is a real request and may incur charges.
+4. Select a word or phrase and choose Explain or Dictionary. Quick Explain opens help directly. Switching tabs preserves the same answer; explicit Retry requests a new one.
+5. Use the term/example speakers. Single words use Wikimedia Commons recordings where available; phrases and examples use the configured Android speech engine. When the preferred accent is unavailable, another usable English voice is accepted with a notice, not an installation error. Settings has separate word and sentence previews. Actual recordings show creator/source/license credits.
+
+To check system speech, open Settings → Pronunciation and try **Preview English sentence**. If it fails, use the speech-settings action to choose an English-capable text-to-speech engine or download English voice data. A phone assistant's built-in voice is not necessarily available to Android text-to-speech.
 
 ## Privacy and data
 
-Books, progress, preferences and statistics are local. Model requests contain only the selected text, bounded nearby snippets and available book/chapter titles. API keys use Android Keystore-backed encryption and app backup is disabled. Offline dictionary lookup does not contact a provider. System speech may use network voices if the engine has no installed offline equivalent; voice capabilities are engine-dependent.
+Books, progress, preferences and statistics are local. Model requests contain only the selected text, bounded nearby snippets and available book/chapter titles. API keys use Android Keystore-backed encryption and app backup is disabled. Offline dictionary lookup does not contact a provider. A word-audio action sends only that word to Wikimedia Commons, never its sentence or book. Recording availability depends on coverage and connectivity; system English is the fallback. Android speech engines may use their own network voices when no usable offline English voice is installed.
 
-Readium supplies up to roughly 200 characters on each side of a selection in the pinned implementation. Margin further caps this to the last 30 words before and first 30 after. Complete paragraphs and a minimum context length are not guaranteed.
-
-The OpenAI endpoint uses strict JSON schema mode. DeepSeek and custom compatible endpoints use JSON object mode plus application validation. Provider/model support varies; malformed, truncated and refused output is not displayed as successful completion.
+See the [selection-context contract](agent-doc/reference/learning/SPEC.md#selection-context) for exact snippet limits and [provider integration](agent-doc/reference/learning/INTEGRATION.md) for structured-output compatibility. Provider/model support varies; malformed, truncated and refused output is not displayed as successful completion.
 
 ## Project documentation
 
-- [Product specification](docs/SPEC.md)
-- [Architecture and ownership](docs/ARCHITECTURE.md)
+- [Product scope, design and acceptance](agent-doc/reference/SPEC.md)
+- [Architecture and shared ownership](agent-doc/essential/ARCHITECTURE.md)
+- [Feature requirements and integration routes](agent-doc/reference/AGENTS.md)
 - [Domain terminology](CONTEXT.md)
-- [Verification evidence and remaining boundaries](docs/VERIFICATION.md)
+- [Verification evidence and remaining boundaries](agent-doc/reference/verification/VERIFICATION.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-The offline dictionary is independently built from ECDICT upstream. Its source revision, hashes, license and rebuild command are recorded in the notices. No source or assets were copied from VibeReading.
+The offline dictionary is independently built from ECDICT upstream. Its source revision, hashes, license and rebuild command are recorded in the [notices](THIRD_PARTY_NOTICES.md#ecdict-offline-dictionary).
