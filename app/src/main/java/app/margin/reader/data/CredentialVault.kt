@@ -9,7 +9,12 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-internal class CredentialVault {
+internal interface CredentialVault {
+    fun encrypt(value: String): String
+    fun decrypt(value: String): String
+}
+
+internal class AndroidCredentialVault : CredentialVault {
     private val alias = "margin.model.credentials.v1"
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -19,12 +24,12 @@ internal class CredentialVault {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
-    fun encrypt(value: String): String {
+    override fun encrypt(value: String): String {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
         return Base64.encodeToString(cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
     }
-    fun decrypt(value: String): String {
+    override fun decrypt(value: String): String {
         val bytes = Base64.decode(value, Base64.NO_WRAP)
         require(bytes.size > 12) { "Invalid protected credential" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")

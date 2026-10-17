@@ -12,13 +12,26 @@ data class Book(
     val lastReadAt: Long = 0L
 )
 
+/** Sampling temperature for explanations: it controls randomness, not speed or answer length. */
 data class ModelConfig(
     val name: String = "DeepSeek",
     val endpoint: String = "https://api.deepseek.com",
     val model: String = "deepseek-chat",
     val apiKey: String = "",
-    val thinking: Boolean = false
-)
+    val temperature: Double = DEFAULT_TEMPERATURE
+) {
+    companion object {
+        const val MIN_TEMPERATURE = 0.0
+        const val MAX_TEMPERATURE = 2.0
+        const val DEFAULT_TEMPERATURE = 0.3
+
+        /** Only a finite value inside the supported range may be sent to a provider. */
+        fun validTemperature(value: Double) = value.isFinite() && value >= MIN_TEMPERATURE && value <= MAX_TEMPERATURE
+
+        /** Invalid, missing or non-finite stored values fall back to the documented default. */
+        fun sanitizeTemperature(value: Double) = if (validTemperature(value)) value else DEFAULT_TEMPERATURE
+    }
+}
 
 data class ReaderPreferences(
     val fontSize: Double = 100.0,
@@ -27,16 +40,25 @@ data class ReaderPreferences(
     val pageMargins: Double = 1.0,
     val paragraphSpacing: Double = 0.7,
     val scroll: Boolean = false,
-    val theme: String = "dark"
+    val topPaddingDp: Double = 16.0,
+    val bottomPaddingDp: Double = 24.0,
+    val immersive: Boolean = true
 )
+
+data class LlmProfile(val id: String, val config: ModelConfig)
 
 data class AppSettings(
     val quickExplain: Boolean = false,
     val autoPronounce: Boolean = false,
     val accent: String = "US",
-    val model: ModelConfig = ModelConfig(),
-    val reading: ReaderPreferences = ReaderPreferences()
-)
+    val profiles: List<LlmProfile> = listOf(LlmProfile("default", ModelConfig())),
+    val activeProfileId: String = "default",
+    val reading: ReaderPreferences = ReaderPreferences(),
+    val appTheme: String = "dark"
+) {
+    val model: ModelConfig
+        get() = profiles.firstOrNull { it.id == activeProfileId }?.config ?: ModelConfig()
+}
 
 data class LookupContext(
     val selection: String,

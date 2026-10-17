@@ -137,13 +137,45 @@ class ExplanationClientTest {
         assertFalse(events.any { it is ExplanationEvent.Complete || it is ExplanationEvent.Failure })
     }
 
-    @Test fun thinkingFlagIsSentWithoutAnAutomaticRetry() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(422))
-        val events = ExplanationClient().explain(config().copy(thinking = true), LookupContext("hello")).toList()
-        assertTrue(events.single() is ExplanationEvent.Failure)
-        val request = JsonParser.parseString(server.takeRequest().body.readUtf8()).asJsonObject
-        assertEquals("enabled", request.getAsJsonObject("thinking")["type"].asString)
+    @Test fun chosenNumericTemperatureIsSentForExplanationAndConnectionTest() = runBlocking {
+        val profile = config().copy(temperature = 1.2)
+        server.enqueue(stream(chunk(payload) + chunk(finish = "stop") + "data: [DONE]\n\n"))
+        assertTrue(ExplanationClient().testConnection(profile).isSuccess)
+        server.enqueue(stream(chunk(payload) + chunk(finish = "stop") + "data: [DONE]\n\n"))
+        ExplanationClient().explain(profile, LookupContext("hello")).toList()
+        repeat(2) { index ->
+            val request = server.takeRequest()
+            assertEquals("/v1/chat/completions", request.path)
+            val json = JsonParser.parseString(request.body.readUtf8()).asJsonObject
+            val sent = json.get("temperature")?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive
+            assertNotNull("Request $index must carry the profile temperature", sent)
+            assertTrue("Temperature must be a JSON number, not a string", sent?.isNumber == true)
+            assertEquals(1.2, sent?.asDouble ?: -1.0, 0.0)
+            assertFalse(json.has("thinking"))
+            assertFalse(json.has("reasoning_effort"))
+        }
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test fun providerRejectionStaysVisibleExactlyOnceWithoutRetryingOrRewritingTheModel() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(422).setBody("temperature 0.7 is unsupported"))
+        val events = ExplanationClient().explain(config().copy(temperature = 0.7), LookupContext("hello")).toList()
+        val failure = events.single()
+        assertTrue(failure is ExplanationEvent.Failure)
+        assertTrue((failure as ExplanationEvent.Failure).message.contains("temperature", true))
+        assertFalse(events.toString().contains("is unsupported"))
         assertEquals(1, server.requestCount)
+        val request = JsonParser.parseString(server.takeRequest().body.readUtf8()).asJsonObject
+        assertEquals("configured-model", request.get("model").asString)
+        assertEquals(0.7, request.get("temperature")?.takeIf { it.isJsonPrimitive }?.asDouble ?: -1.0, 0.0)
+    }
+
+    @Test fun unusableTemperatureNeverReachesTheProvider() = runBlocking {
+        listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -0.1, 2.1).forEach { value ->
+            val events = ExplanationClient().explain(config().copy(temperature = value), LookupContext("hello")).toList()
+            assertTrue("$value must fail before transport", events.single() is ExplanationEvent.Failure)
+        }
+        assertEquals(0, server.requestCount)
     }
 
     @Test fun malformedEnvelopeNeverLeaksJsonOrReasoningInAnError() = runBlocking {

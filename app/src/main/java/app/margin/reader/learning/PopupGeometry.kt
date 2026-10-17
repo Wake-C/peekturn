@@ -11,26 +11,27 @@ internal fun learningPopupGeometry(
     requestedHeight: Int,
     anchor: PopupSelectionBounds?,
     inset: Int,
-    minimumHeight: Int = 260
+    minimumHeight: Int = 420
 ): PopupGeometry {
     val availableWidth = (windowWidth - 2 * inset).coerceAtLeast(1)
     val availableHeight = (windowHeight - 2 * inset).coerceAtLeast(1)
     val width = requestedWidth.coerceIn(1, availableWidth)
     val above = anchor?.let { (it.top - 2 * inset).coerceIn(0, availableHeight) } ?: 0
     val below = anchor?.let { (windowHeight - it.bottom - 2 * inset).coerceIn(0, availableHeight) } ?: 0
-    // Select by available space, never by the current streamed content height.
+    // Prefer the source side only when it leaves a genuinely useful answer body.
     val placeBelow = below >= above
     val sideCapacity = if (placeBelow) below else above
-    val heightLimit = if (anchor != null && sideCapacity >= minimumHeight) sideCapacity else availableHeight
+    val fitsSide = anchor != null && sideCapacity >= minimumHeight
+    val heightLimit = if (fitsSide) sideCapacity else availableHeight
     val height = requestedHeight.coerceIn(1, heightLimit.coerceAtLeast(1))
     val maxX = (windowWidth - width - inset).coerceAtLeast(inset)
     val maxY = (windowHeight - height - inset).coerceAtLeast(inset)
     val x = anchor?.let { (it.left + it.right) / 2 - width / 2 } ?: ((windowWidth - width) / 2)
     val y = when {
-        anchor == null -> (windowHeight - height) / 2
+        !fitsSide || anchor == null -> (windowHeight - height) / 2
         placeBelow -> anchor.bottom + inset
         else -> anchor.top - inset - height
     }
-    // If neither side fits the fixed controls plus a useful body, bounded overlap is unavoidable.
+    // Short sides intentionally overlap the source: the answer is the primary content.
     return PopupGeometry(x.coerceIn(inset, maxX), y.coerceIn(inset, maxY), width, height)
 }

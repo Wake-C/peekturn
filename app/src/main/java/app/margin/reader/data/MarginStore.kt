@@ -17,11 +17,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 
-class MarginStore(private val context: Context) {
+class MarginStore internal constructor(private val context: Context, private val vault: CredentialVault) {
+    constructor(context: Context) : this(context, AndroidCredentialVault())
     private val db = Database(context)
     private val prefs = context.getSharedPreferences("margin", Context.MODE_PRIVATE)
-    private val vault = CredentialVault()
+    private val profileKeyPrefix = "profile_key_cipher:"
     private val gson = Gson()
     private val writes = Mutex()
     private val _error = MutableStateFlow<String?>(null)
@@ -94,14 +96,13 @@ class MarginStore(private val context: Context) {
     }
     suspend fun updateSettings(transform: (AppSettings) -> AppSettings) = withContext(Dispatchers.IO) {
         writes.withLock {
-            val settings = transform(_settings.value)
-            val normalized = settings.copy(accent = if (settings.accent == "UK") "UK" else "US")
-            val key = normalized.model.apiKey
-            val encrypted = if (key.isBlank()) "" else vault.encrypt(key)
-            val safe = normalized.copy(model = normalized.model.copy(apiKey = ""))
-            check(prefs.edit().putString("settings", gson.toJson(safe)).putString("model_key_cipher", encrypted).commit()) {
-                "Could not save preferences"
-            }
+            val transformed = transform(_settings.value)
+            val replacement = if (transformed.profiles.isEmpty()) LlmProfile(UUID.randomUUID().toString(), ModelConfig()) else null
+            val normalized = normalizeSettings(
+                if (replacement == null) transformed
+                else transformed.copy(profiles = listOf(replacement), activeProfileId = replacement.id)
+            )
+            persistSettings(normalized, previous = _settings.value)
             _settings.value = normalized
         }
     }
@@ -118,46 +119,151 @@ class MarginStore(private val context: Context) {
             refreshStats()
         }
     }
+    private fun normalizeSettings(settings: AppSettings): AppSettings {
+        val profiles = settings.profiles.filter { it.id.isNotBlank() }.distinctBy { it.id }
+            .ifEmpty { AppSettings().profiles }
+        return settings.copy(
+            profiles = profiles.map { profile ->
+                val temperature = profile.config.temperature
+                val sanitized = ModelConfig.sanitizeTemperature(temperature)
+                if (sanitized == temperature) profile else profile.copy(config = profile.config.copy(temperature = sanitized))
+            },
+            activeProfileId = settings.activeProfileId.takeIf { id -> profiles.any { it.id == id } } ?: profiles.first().id,
+            accent = if (settings.accent == "UK") "UK" else "US",
+            appTheme = when (settings.appTheme) { "dark", "light", "warm" -> settings.appTheme; else -> "dark" }
+        )
+    }
+
+    private fun persistSettings(
+        settings: AppSettings,
+        preservedCiphers: Map<String, String> = emptyMap(),
+        previous: AppSettings? = null
+    ) {
+        val safe = gson.toJsonTree(settings).asJsonObject
+        val editor = prefs.edit()
+        val retainedKeys = settings.profiles.map { profileKeyPrefix + it.id }.toSet()
+        prefs.all.keys.filter { it.startsWith(profileKeyPrefix) && it !in retainedKeys }.forEach(editor::remove)
+        settings.profiles.forEachIndexed { index, profile ->
+            safe.getAsJsonArray("profiles")[index].asJsonObject.getAsJsonObject("config").remove("apiKey")
+            val key = profile.config.apiKey
+            val unchanged = previous?.profiles?.any { it.id == profile.id && it.config.apiKey == key } == true
+            val cipher = preservedCiphers[profile.id]
+                ?: (if (unchanged) prefs.getString(profileKeyPrefix + profile.id, null) else null)
+                ?: key.takeIf { it.isNotBlank() }?.let(vault::encrypt)
+            if (cipher == null) editor.remove(profileKeyPrefix + profile.id)
+            else editor.putString(profileKeyPrefix + profile.id, cipher)
+        }
+        check(editor.putString("settings", gson.toJson(safe)).remove("model_key_cipher").commit()) {
+            "Could not save preferences"
+        }
+    }
+
     private fun readSettings(): AppSettings {
-        val saved = try {
-            prefs.getString("settings", null)?.let { json ->
-                val restored = gson.toJsonTree(AppSettings()).asJsonObject
-                var invalid = false
-                fun restoreFields(target: JsonObject, source: JsonObject) {
-                    for ((name, fallback) in target.entrySet()) {
-                        val value = source.get(name) ?: continue
-                        if (fallback.isJsonObject && value.isJsonObject) {
-                            restoreFields(fallback.asJsonObject, value.asJsonObject)
-                        } else if (fallback.isJsonPrimitive && value.isJsonPrimitive) {
-                            val expected = fallback.asJsonPrimitive
-                            val actual = value.asJsonPrimitive
-                            val compatible = when {
-                                expected.isBoolean -> actual.isBoolean
-                                expected.isString -> actual.isString
-                                expected.isNumber -> actual.isNumber && actual.asDouble.isFinite()
-                                else -> false
-                            }
-                            if (compatible) target.add(name, value) else invalid = true
-                        } else invalid = true
+        var invalid = false
+        var rewriteProfiles = false
+        fun restoreFields(target: JsonObject, source: JsonObject) {
+            for ((name, fallback) in target.entrySet()) {
+                val value = source.get(name) ?: continue
+                if (fallback.isJsonObject && value.isJsonObject) {
+                    restoreFields(fallback.asJsonObject, value.asJsonObject)
+                } else if (fallback.isJsonPrimitive && value.isJsonPrimitive) {
+                    val expected = fallback.asJsonPrimitive
+                    val actual = value.asJsonPrimitive
+                    val compatible = when {
+                        expected.isBoolean -> actual.isBoolean
+                        expected.isString -> actual.isString
+                        expected.isNumber -> actual.isNumber && actual.asDouble.isFinite()
+                        else -> false
                     }
-                }
-                restoreFields(restored, JsonParser.parseString(json).asJsonObject)
-                if (invalid) _error.value = "Some preferences could not be restored. Please check Settings."
-                gson.fromJson(restored, AppSettings::class.java)
-            } ?: AppSettings()
+                    if (compatible) target.add(name, value) else invalid = true
+                } else invalid = true
+            }
+        }
+        val source = try {
+            prefs.getString("settings", null)?.let { JsonParser.parseString(it).asJsonObject }
         } catch (e: Exception) {
             Log.w("MarginStore", "Invalid preferences: ${e.javaClass.simpleName}")
-            _error.value = "Preferences could not be restored. Please check Settings."
-            AppSettings()
+            invalid = true
+            null
         }
-        val key = try {
-            prefs.getString("model_key_cipher", null)?.takeIf { it.isNotBlank() }?.let(vault::decrypt).orEmpty()
-        } catch (e: Exception) {
-            Log.w("MarginStore", "Credential unavailable: ${e.javaClass.simpleName}")
-            _error.value = "Your saved API key could not be unlocked. Enter it again in Settings."
-            ""
+        val restored = gson.toJsonTree(AppSettings()).asJsonObject
+        restored.remove("profiles")
+        source?.let { restoreFields(restored, it) }
+        val legacyReading = source?.get("reading")?.takeIf { it.isJsonObject }?.asJsonObject
+        if (legacyReading != null && !legacyReading.has("immersive")) {
+            fun legacyBarHidden(name: String): Boolean {
+                val value = legacyReading.get(name) ?: return true
+                if (value.isJsonPrimitive && value.asJsonPrimitive.isBoolean) return value.asBoolean
+                invalid = true
+                return true
+            }
+            val hideStatus = legacyBarHidden("hideStatusBar")
+            val hideNavigation = legacyBarHidden("hideNavigationBar")
+            restored.getAsJsonObject("reading").addProperty("immersive", hideStatus && hideNavigation)
         }
-        return saved.copy(model = saved.model.copy(apiKey = key))
+        var saved = gson.fromJson(restored, AppSettings::class.java)
+        val profiles = mutableListOf<LlmProfile>()
+        // Obsolete thinking flags and unusable stored temperatures are rewritten from the current contract.
+        fun invalidTemperature(raw: JsonObject): Boolean {
+            val value = raw.get("temperature") ?: return false
+            if (!value.isJsonPrimitive || !value.asJsonPrimitive.isNumber) return true
+            return !ModelConfig.validTemperature(value.asJsonPrimitive.asDouble)
+        }
+        val profileValues = source?.get("profiles")
+        if (profileValues != null && profileValues.isJsonArray) {
+            for (value in profileValues.asJsonArray) {
+                if (!value.isJsonObject) { invalid = true; continue }
+                val entry = value.asJsonObject
+                val id = entry.get("id")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+                if (id.isNullOrBlank() || profiles.any { it.id == id }) { invalid = true; continue }
+                val config = gson.toJsonTree(ModelConfig()).asJsonObject
+                config.remove("apiKey")
+                val rawConfig = entry.get("config")?.takeIf { it.isJsonObject }?.asJsonObject
+                if (rawConfig != null) {
+                    restoreFields(config, rawConfig)
+                    if (rawConfig.has("thinking")) rewriteProfiles = true
+                    if (invalidTemperature(rawConfig)) { invalid = true; rewriteProfiles = true }
+                } else invalid = true
+                profiles.add(LlmProfile(id, gson.fromJson(config, ModelConfig::class.java).copy(apiKey = "")))
+            }
+        } else if (profileValues != null) invalid = true
+        val legacyCipher = prefs.getString("model_key_cipher", null)?.takeIf { it.isNotBlank() }
+        val migrating = (source != null && profileValues == null) || (profiles.isEmpty() && legacyCipher != null)
+        if (migrating) {
+            val config = gson.toJsonTree(ModelConfig()).asJsonObject
+            config.remove("apiKey")
+            val legacy = source?.get("model")
+            if (legacy?.isJsonObject == true) restoreFields(config, legacy.asJsonObject)
+            else if (legacy != null) invalid = true
+            profiles.add(LlmProfile("default", gson.fromJson(config, ModelConfig::class.java).copy(apiKey = "")))
+        }
+        val ciphers = mutableMapOf<String, String>()
+        saved = normalizeSettings(saved.copy(profiles = profiles))
+        saved = saved.copy(profiles = saved.profiles.map { profile ->
+            val cipher = (if (migrating && profile.id == "default") legacyCipher else null)
+                ?: prefs.getString(profileKeyPrefix + profile.id, null)
+            if (!cipher.isNullOrBlank()) ciphers[profile.id] = cipher
+            val key = try {
+                cipher?.takeIf { it.isNotBlank() }?.let(vault::decrypt).orEmpty()
+            } catch (e: Exception) {
+                Log.w("MarginStore", "Credential unavailable: ${e.javaClass.simpleName}")
+                _error.value = "A saved API key could not be unlocked. Edit its profile in Settings."
+                ""
+            }
+            profile.copy(config = profile.config.copy(apiKey = key))
+        })
+        if (invalid) _error.value = "Some preferences could not be restored. Please check Settings."
+        if (migrating || rewriteProfiles || source?.has("model") == true ||
+            profileValues?.takeIf { it.isJsonArray }?.asJsonArray?.any {
+                it.isJsonObject && it.asJsonObject.get("config")?.takeIf { config -> config.isJsonObject }
+                    ?.asJsonObject?.has("apiKey") == true
+            } == true
+        ) {
+            try { persistSettings(saved, ciphers) } catch (_: Exception) {
+                _error.value = "Preferences could not be migrated. Please save them again in Settings."
+            }
+        }
+        return saved
     }
     private fun refresh() { refreshBooks(); refreshStats() }
     private fun refreshBooks() {

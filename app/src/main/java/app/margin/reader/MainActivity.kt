@@ -2,6 +2,7 @@ package app.margin.reader
 
 import android.content.Intent
 import android.net.Uri
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -19,10 +20,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.margin.reader.model.AppSettings
 import app.margin.reader.reader.ReaderActivity
 import app.margin.reader.ui.*
 
@@ -33,21 +36,33 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-        )
+        applyAppTheme(graph.store.settings.value.appTheme)
         val incoming = extractIncoming(intent)
         intent = Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN)
         vm.initialize(reopen = savedInstanceState == null, incoming = incoming)
         setContent {
-            MarginTheme {
-                MarginHome(vm,
+            val settings by graph.store.settings.collectAsStateWithLifecycle()
+            DisposableEffect(settings.appTheme) {
+                applyAppTheme(settings.appTheme)
+                onDispose { }
+            }
+            MarginTheme(theme = settings.appTheme) {
+                MarginHome(vm, settings,
                     onImport = { pickEpub.launch(arrayOf("application/epub+zip", "application/zip", "application/octet-stream")) },
                     onOpen = { id -> startActivity(ReaderActivity.intent(this, id)) }
                 )
             }
         }
+    }
+    private fun applyAppTheme(theme: String) {
+        val background = marginColorScheme(theme).background.toArgb()
+        window.setBackgroundDrawable(ColorDrawable(background))
+        val style = if (theme == "light" || theme == "warm") {
+            SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+        } else {
+            SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        }
+        enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -69,10 +84,9 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun MarginHome(vm: MainViewModel, onImport: () -> Unit, onOpen: (Long) -> Unit) {
+private fun MarginHome(vm: MainViewModel, settings: AppSettings, onImport: () -> Unit, onOpen: (Long) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val books by vm.graph.store.books.collectAsStateWithLifecycle()
-    val settings by vm.graph.store.settings.collectAsStateWithLifecycle()
     val stats by vm.graph.store.stats.collectAsStateWithLifecycle()
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val snackbar = remember { SnackbarHostState() }

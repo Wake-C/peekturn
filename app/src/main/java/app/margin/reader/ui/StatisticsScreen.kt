@@ -11,11 +11,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import app.margin.reader.model.Book
 import app.margin.reader.model.ReadingStats
@@ -62,46 +62,51 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
     val recent = remember(books, totals) { books.filter { (totals[it.id] ?: 0L) > 0 }.sortedByDescending { it.lastReadAt } }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        item {
-            Text("Statistics", style = MaterialTheme.typography.headlineLarge)
-            Text("Your time with books, made visible.", Modifier.padding(top = 8.dp), color = FocusColors.Muted)
-        }
+        item { MarginScreenHeader("Statistics") }
         item {
             HorizontalDivider()
-            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                TimeMetric("Today", summary.today)
-                TimeMetric("This week · Monday onward", summary.week)
-                TimeMetric("All reading time", summary.total)
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
+                val horizontal = maxWidth / LocalDensity.current.fontScale >= 300.dp
+                if (horizontal) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        TimeMetric("Today", summary.today, Modifier.weight(1f), compact = true)
+                        TimeMetric("This week", summary.week, Modifier.weight(1f), compact = true)
+                        TimeMetric("Total", summary.total, Modifier.weight(1f), compact = true)
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        TimeMetric("Today", summary.today)
+                        TimeMetric("This week", summary.week)
+                        TimeMetric("Total", summary.total)
+                    }
+                }
             }
             HorizontalDivider()
         }
         item {
-            Text("Daily reading", style = MaterialTheme.typography.titleLarge)
+            Text("Reading time", style = MaterialTheme.typography.titleLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(7, 30).forEach { days ->
                     FilterChip(selected = period == days, onClick = { period = days }, label = { Text("$days days") },
                         modifier = Modifier.heightIn(min = 48.dp))
                 }
             }
-            Text("${readingDuration(summary.daily.sumOf { it.second })} in the last $period days", color = FocusColors.Muted,
+            Text("${readingDuration(summary.daily.sumOf { it.second })} in the last $period days", color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium)
         }
         item { ReadingChart(summary.daily) }
         if (summary.total == 0L) item {
             Text("No reading time yet", style = MaterialTheme.typography.titleMedium)
-            Text("Time appears here as you read and interact with a book. No estimates or backfilled activity.",
-                Modifier.padding(top = 8.dp), color = FocusColors.Muted)
         }
-        item { Text("Recent books", style = MaterialTheme.typography.titleLarge) }
-        if (recent.isEmpty()) item { Text("Books with recorded reading time will appear here.", color = FocusColors.Muted) }
+        if (recent.isNotEmpty()) item { Text("Recent books", style = MaterialTheme.typography.titleLarge) }
         items(recent, key = { it.id }) { book ->
             Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "Read ${book.title}") { onOpen(book) }.padding(vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 BookCover(book, Modifier.width(56.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(book.title, style = MaterialTheme.typography.titleMedium)
-                    Text(book.author.ifBlank { "Unknown author" }, color = FocusColors.Muted, style = MaterialTheme.typography.bodySmall)
-                    Text(readingDuration(totals[book.id] ?: 0L), color = FocusColors.Accent, style = MaterialTheme.typography.bodyMedium)
+                    Text(book.author.ifBlank { "Unknown author" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Text(readingDuration(totals[book.id] ?: 0L), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
                 }
             }
             HorizontalDivider()
@@ -110,39 +115,50 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
 }
 
 @Composable
-private fun TimeMetric(label: String, seconds: Long) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, color = FocusColors.Muted, style = MaterialTheme.typography.bodySmall)
-        Text(readingDuration(seconds), style = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = "tnum"))
+private fun TimeMetric(label: String, seconds: Long, modifier: Modifier = Modifier, compact: Boolean = false) {
+    val duration = readingDuration(seconds)
+    val accessibleLabel = when (label) {
+        "This week" -> "This week, Monday onward"
+        "Total" -> "All reading time"
+        else -> label
+    }
+    Column(modifier.clearAndSetSemantics { contentDescription = "$accessibleLabel: $duration" },
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Text(duration, style = (if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
+            .copy(fontFeatureSettings = "tnum"))
     }
 }
 
 @Composable
 private fun ReadingChart(days: List<Pair<LocalDate, Long>>) {
-    val accent = FocusColors.Accent
+    val accent = MaterialTheme.colorScheme.primary
     val grid = MaterialTheme.colorScheme.outlineVariant
     val max = days.maxOfOrNull { it.second }?.coerceAtLeast(1L) ?: 1L
     val dateFormat = remember { DateTimeFormatter.ofPattern("MMM d") }
-    val description = days.joinToString("; ") { (day, seconds) -> "${day.format(dateFormat)}: ${readingDuration(seconds)}" }
+    val description = remember(days, dateFormat) {
+        days.joinToString("; ") { (day, seconds) -> "${day.format(dateFormat)}: ${readingDuration(seconds)}" }
+    }
     Column {
-        Text("Peak day: ${readingDuration(days.maxOfOrNull { it.second } ?: 0L)}", style = MaterialTheme.typography.bodySmall, color = FocusColors.Muted)
+        Text("Peak day: ${readingDuration(days.maxOfOrNull { it.second } ?: 0L)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Canvas(Modifier.fillMaxWidth().height(168.dp).padding(vertical = 12.dp).semantics { contentDescription = "Daily reading chart. $description" }) {
             for (line in 0..2) {
                 val y = size.height * line / 2f
                 drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
             }
-            val path = Path()
+            val slot = size.width / days.size.coerceAtLeast(1)
+            val barWidth = slot * .55f
             days.forEachIndexed { index, (_, seconds) ->
-                val x = size.width * index / (days.size - 1).coerceAtLeast(1)
-                val y = size.height * (1f - seconds.toFloat() / max)
-                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                if (seconds > 0) drawCircle(accent, 2.dp.toPx(), Offset(x, y))
+                if (seconds > 0L) {
+                    val height = size.height * (seconds.toDouble() / max).toFloat()
+                    drawRect(accent, topLeft = Offset(slot * index + (slot - barWidth) / 2f, size.height - height),
+                        size = androidx.compose.ui.geometry.Size(barWidth, height))
+                }
             }
-            drawPath(path, accent, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(days.first().first.format(dateFormat), style = MaterialTheme.typography.bodySmall, color = FocusColors.Muted)
-            Text(days.last().first.format(dateFormat), style = MaterialTheme.typography.bodySmall, color = FocusColors.Muted)
+            Text(days.first().first.format(dateFormat), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(days.last().first.format(dateFormat), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

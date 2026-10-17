@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import app.margin.reader.model.AppSettings
 import app.margin.reader.model.BookReadingTime
 import app.margin.reader.model.ModelConfig
+import app.margin.reader.model.LlmProfile
 import app.margin.reader.model.ReaderPreferences
 import app.margin.reader.model.ReadingDay
 import app.margin.reader.model.ReadingStats
@@ -111,11 +112,27 @@ class MarginStoreTest {
     @Test fun preferencesAndModelConfigurationSurviveWithoutAnApiKey() = runBlocking {
         val settings = AppSettings(
             quickExplain = true, autoPronounce = true, accent = "UK",
-            model = ModelConfig(name = "Local provider", endpoint = "http://127.0.0.1:8080/v1", model = "reader-model", apiKey = "", thinking = true),
-            reading = ReaderPreferences(fontSize = 130.0, fontFamily = "sans-serif", lineHeight = 1.8, pageMargins = 1.2, paragraphSpacing = 0.9, scroll = true, theme = "warm")
+            profiles = listOf(LlmProfile("default", ModelConfig(name = "Local provider", endpoint = "http://127.0.0.1:8080/v1", model = "reader-model", apiKey = "", temperature = 1.2))),
+            reading = ReaderPreferences(fontSize = 130.0, fontFamily = "sans-serif", lineHeight = 1.8, pageMargins = 1.2, paragraphSpacing = 0.9, scroll = true, topPaddingDp = 42.0, bottomPaddingDp = 66.0),
+            appTheme = "warm"
         )
         store.updateSettings { settings }
         assertEquals(settings, MarginStore(context).settings.value)
+    }
+
+    @Test fun immersiveAndIndependentTextDistancesSurviveRestartAndTypographyUpdates() = runBlocking {
+        store.updateSettings { it.copy(reading = it.reading.copy(immersive = false, topPaddingDp = 48.0, bottomPaddingDp = 72.0)) }
+        store.updateSettings { it.copy(reading = it.reading.copy(fontSize = 145.0)) }
+        val restored = MarginStore(context)
+        assertFalse(restored.settings.value.reading.immersive)
+        assertEquals(48.0, restored.settings.value.reading.topPaddingDp, 0.0)
+        assertEquals(72.0, restored.settings.value.reading.bottomPaddingDp, 0.0)
+        assertEquals(145.0, restored.settings.value.reading.fontSize, 0.0)
+        restored.updateSettings { it.copy(reading = it.reading.copy(immersive = true, bottomPaddingDp = 96.0)) }
+        val again = MarginStore(context).settings.value.reading
+        assertTrue(again.immersive)
+        assertEquals(48.0, again.topPaddingDp, 0.0)
+        assertEquals(96.0, again.bottomPaddingDp, 0.0)
     }
 
     @Test fun queuedDifferentFieldUpdatesPreserveBothPreferencesAfterRestart() = runBlocking {
@@ -146,16 +163,37 @@ class MarginStoreTest {
 
     @Test fun malformedPreferenceFieldsKeepValidChoicesAndRestoreOnlyInvalidDefaults() {
         context.getSharedPreferences("margin", Context.MODE_PRIVATE).edit()
-            .putString("settings", """{"quickExplain":true,"accent":"UK","model":{"name":"My provider","endpoint":null,"thinking":true},"reading":{"fontSize":140,"fontFamily":null},"autoPronounce":"wrong type"}""")
+            .putString("settings", """{"quickExplain":true,"accent":"UK","model":{"name":"My provider","endpoint":null,"temperature":"hot"},"reading":{"fontSize":140,"fontFamily":null},"autoPronounce":"wrong type"}""")
             .commit()
 
         val restored = MarginStore(context)
         assertTrue(restored.settings.value.quickExplain)
         assertFalse(restored.settings.value.autoPronounce)
         assertEquals("UK", restored.settings.value.accent)
-        assertEquals(ModelConfig(name = "My provider", thinking = true), restored.settings.value.model)
+        assertEquals(ModelConfig(name = "My provider"), restored.settings.value.model)
+        assertEquals(0.3, restored.settings.value.model.temperature, 0.0)
         assertEquals(ReaderPreferences(fontSize = 140.0), restored.settings.value.reading)
         assertNotNull(restored.error.value)
+    }
+
+    @Test fun obsoleteAndUnusableStoredProfileValuesAreRepairedWithoutLosingTheCredential() {
+        context.getSharedPreferences("margin", Context.MODE_PRIVATE).edit()
+            .putString("settings", """{"activeProfileId":"one","profiles":[{"id":"one","config":{"name":"Personal","model":"reader","thinking":true,"temperature":9.5}}]}""")
+            .putString("profile_key_cipher:one", "protected:kept-secret")
+            .commit()
+
+        val restored = MarginStore(context, TestVault())
+        assertEquals("one", restored.settings.value.activeProfileId)
+        assertEquals(ModelConfig(name = "Personal", model = "reader", apiKey = "kept-secret", temperature = 0.3), restored.settings.value.model)
+        assertNotNull(restored.error.value)
+        val prefs = context.getSharedPreferences("margin", Context.MODE_PRIVATE)
+        assertEquals("protected:kept-secret", prefs.getString("profile_key_cipher:one", null))
+        val json = prefs.getString("settings", "")!!
+        assertTrue("Repaired temperature must be persisted", json.contains("\"temperature\":0.3"))
+        assertFalse(json.contains("thinking"))
+        assertFalse(json.contains("9.5"))
+        assertFalse(json.contains("kept-secret"))
+        assertEquals("kept-secret", MarginStore(context, TestVault()).settings.value.model.apiKey)
     }
 
     @Test fun structurallyInvalidSavedModelFallsBackToUsableSettingsInsteadOfCrashingStartup() {
@@ -165,6 +203,183 @@ class MarginStoreTest {
         val restored = MarginStore(context)
         assertEquals(AppSettings(), restored.settings.value)
         assertNotNull(restored.error.value)
+    }
+
+    @Test fun legacyConfigurationAndProtectedKeyMigrateOnceWithoutPlaintextInSettings() {
+        val prefs = context.getSharedPreferences("margin", Context.MODE_PRIVATE)
+        prefs.edit().putString("settings", """{"quickExplain":true,"model":{"name":"Personal","endpoint":"https://provider.example/v1","model":"reader","thinking":true}}""")
+            .putString("model_key_cipher", "protected:legacy-secret").commit()
+        val restored = MarginStore(context, TestVault())
+        assertEquals("default", restored.settings.value.activeProfileId)
+        assertEquals(ModelConfig("Personal", "https://provider.example/v1", "reader", "legacy-secret", 0.3), restored.settings.value.model)
+        assertEquals(0.3, restored.settings.value.model.temperature, 0.0)
+        assertFalse(prefs.contains("model_key_cipher"))
+        assertFalse(prefs.getString("settings", "")!!.contains("legacy-secret"))
+        assertFalse(prefs.getString("settings", "")!!.contains("apiKey"))
+        assertFalse(prefs.getString("settings", "")!!.contains("thinking"))
+        assertEquals(restored.settings.value, MarginStore(context, TestVault()).settings.value)
+    }
+
+    @Test fun switchingEditingAndDeletingProfilesPreserveIndividualProtectedKeys() = runBlocking {
+        val secureStore = MarginStore(context, TestVault())
+        val first = LlmProfile("first", ModelConfig("First", "https://first.example", "first-model", "first-secret", 0.7))
+        val second = LlmProfile("second", ModelConfig("Second", "https://second.example", "second-model", "second-secret", 1.2))
+        secureStore.updateSettings { it.copy(profiles = listOf(first, second), activeProfileId = first.id) }
+        secureStore.updateSettings { it.copy(activeProfileId = second.id) }
+        secureStore.updateSettings { latest -> latest.copy(profiles = latest.profiles.map {
+            if (it.id == second.id) it.copy(config = it.config.copy(temperature = 1.9)) else it
+        }) }
+        val restored = MarginStore(context, TestVault())
+        assertEquals(second.config.copy(temperature = 1.9), restored.settings.value.model)
+        assertEquals(1.9, restored.settings.value.model.temperature, 0.0)
+        assertEquals("second-secret", restored.settings.value.model.apiKey)
+        restored.updateSettings { it.copy(activeProfileId = first.id) }
+        assertEquals(first.config, restored.settings.value.model)
+        assertEquals(0.7, restored.settings.value.model.temperature, 0.0)
+        assertEquals("first-secret", restored.settings.value.model.apiKey)
+        assertEquals(1.9, restored.settings.value.profiles.last().config.temperature, 0.0)
+        assertFalse(context.getSharedPreferences("margin", Context.MODE_PRIVATE).getString("settings", "")!!.contains("secret"))
+        restored.updateSettings { it.copy(profiles = it.profiles.filterNot { profile -> profile.id == first.id }) }
+        assertEquals(second.id, restored.settings.value.activeProfileId)
+        assertFalse(context.getSharedPreferences("margin", Context.MODE_PRIVATE).contains("profile_key_cipher:first"))
+        restored.updateSettings { it.copy(profiles = emptyList()) }
+        assertEquals(ModelConfig(), restored.settings.value.profiles.single().config)
+        assertEquals(restored.settings.value.profiles.single().id, restored.settings.value.activeProfileId)
+        assertEquals("", restored.settings.value.model.apiKey)
+    }
+
+    @Test fun queuedProfileAndPreferenceTransformsUseLatestSelectionWithoutLosingKeys() = runBlocking {
+        val secureStore = MarginStore(context, TestVault())
+        val first = LlmProfile("first", ModelConfig(apiKey = "first-secret"))
+        val second = LlmProfile("second", ModelConfig(apiKey = "second-secret"))
+        secureStore.updateSettings { it.copy(profiles = listOf(first, second), activeProfileId = first.id) }
+        val updates = kotlinx.coroutines.channels.Channel<(AppSettings) -> AppSettings>(3)
+        updates.send { it.copy(activeProfileId = second.id) }
+        updates.send { latest -> latest.copy(profiles = latest.profiles.map {
+            if (it.id == latest.activeProfileId) it.copy(config = it.config.copy(temperature = 1.2)) else it
+        }) }
+        updates.send { it.copy(quickExplain = true) }
+        repeat(3) { secureStore.updateSettings(updates.receive()) }
+        updates.close()
+        val restored = MarginStore(context, TestVault()).settings.value
+        assertEquals(second.id, restored.activeProfileId)
+        assertEquals("second-secret", restored.model.apiKey)
+        assertEquals(1.2, restored.model.temperature, 0.0)
+        assertEquals(0.3, restored.profiles.first().config.temperature, 0.0)
+        assertTrue(restored.quickExplain)
+        val json = context.getSharedPreferences("margin", Context.MODE_PRIVATE).getString("settings", "")!!
+        assertFalse(json.contains("secret"))
+        assertFalse(json.contains("apiKey"))
+    }
+
+    @Test fun malformedProfilesRetainValidFieldsAndChooseFirstRemainingProfile() {
+        context.getSharedPreferences("margin", Context.MODE_PRIVATE).edit().putString("settings",
+            """{"quickExplain":true,"activeProfileId":"missing","profiles":[null,{"id":"one","config":{"name":"Personal","endpoint":null,"model":"reader","temperature":1.2}},{"id":"one","config":{"name":"Duplicate"}},{"id":"two","config":{"name":"Backup","temperature":8}}]}"""
+        ).commit()
+        val restored = MarginStore(context, TestVault())
+        assertEquals(listOf("one", "two"), restored.settings.value.profiles.map { it.id })
+        assertEquals("one", restored.settings.value.activeProfileId)
+        assertEquals(ModelConfig(name = "Personal", model = "reader", temperature = 1.2), restored.settings.value.model)
+        assertEquals("Backup", restored.settings.value.profiles.last().config.name)
+        assertEquals(0.3, restored.settings.value.profiles.last().config.temperature, 0.0)
+        assertTrue(restored.settings.value.quickExplain)
+        assertNotNull(restored.error.value)
+    }
+
+    @Test fun temporarilyUnavailableKeysSurviveAppearanceAndProfileSelectionUpdates() = runBlocking {
+        val first = LlmProfile("first", ModelConfig(apiKey = "first-secret"))
+        val second = LlmProfile("second", ModelConfig(apiKey = "second-secret"))
+        MarginStore(context, TestVault()).updateSettings {
+            it.copy(profiles = listOf(first, second), activeProfileId = first.id)
+        }
+        val lockedStore = MarginStore(context, object : CredentialVault {
+            override fun encrypt(value: String): String = error("Credential vault locked")
+            override fun decrypt(value: String): String = error("Credential vault locked")
+        })
+        assertEquals("", lockedStore.settings.value.model.apiKey)
+        assertNotNull(lockedStore.error.value)
+        lockedStore.updateSettings { it.copy(appTheme = "warm") }
+        lockedStore.updateSettings { it.copy(activeProfileId = second.id) }
+
+        val unlocked = MarginStore(context, TestVault()).settings.value
+        assertEquals("warm", unlocked.appTheme)
+        assertEquals(second.id, unlocked.activeProfileId)
+        assertEquals(listOf(first, second), unlocked.profiles)
+        assertEquals("second-secret", unlocked.model.apiKey)
+    }
+
+    @Test fun deletingLastProfileWhileVaultLockedNeverRestoresItsCredential() = runBlocking {
+        MarginStore(context, TestVault()).updateSettings {
+            it.copy(profiles = listOf(LlmProfile("default", ModelConfig(apiKey = "deleted-secret"))))
+        }
+        val lockedStore = MarginStore(context, object : CredentialVault {
+            override fun encrypt(value: String): String = error("Credential vault locked")
+            override fun decrypt(value: String): String = error("Credential vault locked")
+        })
+        assertEquals("", lockedStore.settings.value.model.apiKey)
+        lockedStore.updateSettings { latest ->
+            latest.copy(profiles = latest.profiles.filterNot { it.id == latest.activeProfileId })
+        }
+        val restored = MarginStore(context, TestVault()).settings.value
+        assertEquals(1, restored.profiles.size)
+        assertEquals("", restored.model.apiKey)
+        assertNotEquals("default", restored.activeProfileId)
+        assertFalse(context.getSharedPreferences("margin", Context.MODE_PRIVATE).contains("profile_key_cipher:default"))
+    }
+
+    @Test fun unusableDraftTemperatureIsStoredAsTheDefaultAndKeepsTheProtectedKey() = runBlocking {
+        val secureStore = MarginStore(context, TestVault())
+        secureStore.updateSettings { latest ->
+            latest.copy(profiles = latest.profiles.map {
+                it.copy(config = it.config.copy(apiKey = "draft-secret", temperature = Double.NaN))
+            })
+        }
+        val restored = MarginStore(context, TestVault()).settings.value
+        assertEquals(0.3, restored.model.temperature, 0.0)
+        assertEquals("draft-secret", restored.model.apiKey)
+        val prefs = context.getSharedPreferences("margin", Context.MODE_PRIVATE)
+        assertEquals("protected:draft-secret", prefs.getString("profile_key_cipher:default", null))
+        val json = prefs.getString("settings", "")!!
+        assertFalse(json.contains("draft-secret"))
+        assertFalse(json.contains("NaN"))
+    }
+
+    @Test fun malformedSettingsStillRecoverIndependentLegacyCredentialAcrossUpdates() = runBlocking {
+        context.getSharedPreferences("margin", Context.MODE_PRIVATE).edit()
+            .putString("settings", "{malformed-json")
+            .putString("model_key_cipher", "protected:legacy-secret").commit()
+        val restored = MarginStore(context, TestVault())
+        assertEquals("legacy-secret", restored.settings.value.model.apiKey)
+        assertNotNull(restored.error.value)
+        restored.updateSettings { it.copy(appTheme = "warm") }
+        val restarted = MarginStore(context, TestVault()).settings.value
+        assertEquals("warm", restarted.appTheme)
+        assertEquals("legacy-secret", restarted.model.apiKey)
+    }
+
+    @Test fun retiringReasoningSettingDoesNotReportValidProfilesAsCorrupt() {
+        val prefs = context.getSharedPreferences("margin", Context.MODE_PRIVATE)
+        prefs.edit().putString("settings",
+            """{"activeProfileId":"saved","profiles":[{"id":"saved","config":{"name":"Personal","thinking":false}}]}"""
+        ).putString("profile_key_cipher:saved", "protected:saved-secret").commit()
+        val restored = MarginStore(context, TestVault())
+        assertEquals("saved-secret", restored.settings.value.model.apiKey)
+        assertEquals("Personal", restored.settings.value.model.name)
+        assertNull(restored.error.value)
+        assertFalse(prefs.getString("settings", "")!!.contains("thinking"))
+
+        prefs.edit().putString("settings",
+            """{"profiles":[{"id":"saved","config":{"temperature":9.5}}]}"""
+        ).commit()
+        assertNotNull(MarginStore(context, TestVault()).error.value)
+    }
+
+    private class TestVault : CredentialVault {
+        override fun encrypt(value: String) = "protected:$value"
+        override fun decrypt(value: String): String {
+            require(value.startsWith("protected:"))
+            return value.removePrefix("protected:")
+        }
     }
 
     private suspend fun addBook(title: String) = store.addBook(
