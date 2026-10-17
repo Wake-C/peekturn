@@ -40,9 +40,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.margin.reader.model.AppSettings
 import app.margin.reader.model.LlmProfile
 import app.margin.reader.model.ModelConfig
+import app.margin.reader.speech.AUDIO_SOURCE_NOTICE
 import app.margin.reader.speech.PronunciationPlayer
 import app.margin.reader.speech.SpeechState
-import app.margin.reader.speech.WORD_AUDIO_NOTICE
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -238,7 +238,7 @@ private fun PronunciationSection(
         }
         if (details) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(WORD_AUDIO_NOTICE, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(AUDIO_SOURCE_NOTICE, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { speech.openSystemSettings() }, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(if (playback.error != null) "Install or choose a system voice" else "System speech settings")
                 }

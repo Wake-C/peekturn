@@ -29,8 +29,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Playing includes pending lookups and initialization, so the same speaker button can always stop it.
- * [credit] describes the provider audio currently used for a word and stays until the next request or
- * stop.
+ * [credit] describes the online provider audio currently used for the request and stays until the next
+ * request or stop.
  */
 data class SpeechState(
     val text: String = "",
@@ -44,19 +44,21 @@ internal const val ACCENT_NOT_GUARANTEED = "Using system English; requested acce
 private const val MISSING_ENGLISH_DATA = "English voice data is missing. Open system speech settings to download it, then try again."
 private const val NO_ENGLISH_VOICE = "English speech is unavailable from the installed engines. Check system speech settings."
 private const val NO_SPEECH_ENGINE = "No working speech engine. Open system speech settings to install one."
-private const val WORD_AUDIO_UNAVAILABLE = "No word audio is available; using system speech."
+private const val NO_ONLINE_AUDIO = "No online audio is available for this text; using system speech."
 private const val LOOKUP_TIMEOUT_MS = 10_000L
 private const val PREPARE_TIMEOUT_MS = 8_000L
 private const val INITIALIZE_TIMEOUT_MS = 8_000L
 
 /**
- * Main-thread serialized, latest-only pronunciation. A word prefers its free provider audio, installed
- * English speech always remains the fallback, and nothing about a superseded request may still reach
- * the speaker. Call shutdown when its owner is destroyed.
+ * Main-thread serialized, latest-only pronunciation. A word prefers its free dictionary audio, then
+ * the key-free speech service, which also voices every phrase and example; installed device speech
+ * always remains the fallback, and nothing about a superseded request may still reach the speaker.
+ * Call shutdown when its owner is destroyed.
  */
 class PronunciationPlayer(
     context: Context,
-    private val provider: WordAudioSource = YoudaoWordAudioClient(),
+    private val wordAudio: WordAudioSource = YoudaoWordAudioClient(),
+    private val sentenceAudio: SentenceAudioSource = TranslateSpeechClient(),
     private val engines: (Context) -> List<String> = ::installedSpeechEngines
 ) {
     private val app = context.applicationContext
@@ -88,16 +90,17 @@ class PronunciationPlayer(
 
     private data class Request(val text: String, val locale: Locale, val id: Long)
 
+    /** Where the current request is playing: online provider bytes through the decoder, or device speech. */
     private enum class Path { Speech, Audio }
 
     /** What stopped an engine, worst last: the final error names the most actionable of these. */
     private enum class EngineTrouble { Init, Unsupported, MissingData }
 
-    /** A single word: the requested accent's provider audio when available, otherwise installed English speech. */
-    fun speakWord(text: String, accent: String) = onMain { begin(text, accent, lookupAudio = true) }
+    /** A single word: its dictionary recording, then the speech service, then installed device speech. */
+    fun speakWord(text: String, accent: String) = onMain { begin(text, accent, word = true) }
 
-    /** A phrase, sentence or example: installed English system speech only. */
-    fun speakExample(text: String, accent: String) = onMain { begin(text, accent, lookupAudio = false) }
+    /** A phrase, sentence or example: the speech service, then installed device speech. */
+    fun speakExample(text: String, accent: String) = onMain { begin(text, accent, word = false) }
 
     fun stop() = onMain { stopInternal() }
 
@@ -131,7 +134,7 @@ class PronunciationPlayer(
         fail("System speech settings are unavailable on this device.")
     }
 
-    private fun begin(text: String, accent: String, lookupAudio: Boolean) {
+    private fun begin(text: String, accent: String, word: Boolean) {
         if (closed) return
         stopInternal()
         val locale = speechLocale(accent)
@@ -147,34 +150,41 @@ class PronunciationPlayer(
         pending = request
         path = Path.Speech
         mutableState.value = SpeechState(text, playing = true)
-        // Only one plain word may leave the device; anything else speaks locally.
-        val term = if (lookupAudio) wordLookupTerm(text) else null
-        if (term == null) requestSpeech(request, null) else lookupWordAudio(request, term, accent)
+        // Only the text asked to be heard may leave the device, and only a single plain word may try
+        // the dictionary's own recording before the speech service.
+        lookupOnline(request, accent, if (word) wordLookupTerm(text) else null)
     }
 
-    private fun lookupWordAudio(request: Request, term: String, accent: String) {
+    /**
+     * The online routes for this request, in order: the dictionary's recording of a single word first
+     * where the endpoint accepts one, then the speech service, which voices arbitrary text. The first
+     * route with audio plays it; a route that has nothing, fails or redirects only moves on, and
+     * installed device speech speaks when none of them can.
+     */
+    private fun lookupOnline(request: Request, accent: String, term: String?) {
         path = Path.Audio
         lookup = scope.launch {
-            val clip = try {
-                withTimeoutOrNull(LOOKUP_TIMEOUT_MS) { provider.lookup(term, accent) }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                null
-            }
+            val clip = (term?.let { word -> onlineClip(LOOKUP_TIMEOUT_MS) { wordAudio.lookup(word, accent) } })
+                ?: onlineClip(LOOKUP_TIMEOUT_MS) { sentenceAudio.lookup(request.text, accent) }
             if (!isCurrent(request)) return@launch
-            if (clip == null) {
-                requestSpeech(request, WORD_AUDIO_UNAVAILABLE)
-            } else {
-                playClip(clip, request)
-            }
+            if (clip == null) requestSpeech(request, NO_ONLINE_AUDIO) else playClip(clip, request)
         }
     }
+
+    /** One route's attempt, bounded by its own timeout and cancelled with the coroutine that made it. */
+    private suspend fun onlineClip(timeoutMs: Long, lookup: suspend () -> AudioClip?): AudioClip? =
+        try {
+            withTimeoutOrNull(timeoutMs) { lookup() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
 
     /** Only the newest request may still reach the speaker; superseded ones are ignored entirely. */
     private fun isCurrent(request: Request) = !closed && request.id == generation && pending === request
 
-    private fun playClip(clip: WordAudioClip, request: Request) {
+    private fun playClip(clip: AudioClip, request: Request) {
         if (!requestFocus(request)) return
         val player = try { MediaPlayer() } catch (_: RuntimeException) { null }
         if (player == null) {
@@ -217,10 +227,10 @@ class PronunciationPlayer(
         }, PREPARE_TIMEOUT_MS)
     }
 
-    /** Audio the decoder cannot play is never an error while installed English speech can speak instead. */
+    /** Online audio that no route could supply is never an error while device speech can speak instead. */
     private fun fallbackToSpeech(request: Request) {
         releaseMedia()
-        requestSpeech(request, WORD_AUDIO_UNAVAILABLE)
+        requestSpeech(request, NO_ONLINE_AUDIO)
     }
 
     /**

@@ -288,3 +288,50 @@ A test that pinned the selection tint's exact rgba string while re-deriving the 
 same production expression was deleted: it could not fail for a wrong colour, and the rendered
 screenshot is the real check. Remaining known gaps: audible and motion behaviour, and any surface at
 display sizes beyond those captured.
+
+## Online sentence speech (2026-10-16)
+
+Sentences and phrases no longer depend on the device's speech engine. A selected phrase or a generated
+example is spoken by a public, key-free speech endpoint (Google Translate's `translate_tts`), requested
+with the preferred US or UK locale; words gained that same endpoint as a middle tier, so a word the
+dictionary has no recording for still speaks instead of falling silent. Device speech remains the
+fallback on every path.
+
+Measured on the API 35 emulator with a controlled network, per-track frame counts from
+`dumpsys media.audio_flinger`, client `app.margin.reader`:
+
+- phrase "reluctant to leave the familiar streets behind. A new city meant new" - 135360 frames at 24000 Hz = 5.640 s
+- example, UK - 184320 frames at 24000 Hz = 7.680 s; the same example, US - 190656 frames at 24000 Hz = 7.944 s
+- settings sentence preview, UK - 85248 frames at 24000 Hz = 3.552 s, credit "Audio: Google Translate" visible
+- settings word preview "hello", UK - 63825 frames at 48000 Hz = 1.330 s, credit "Audio: Youdao Dictionary"; US - 60096 frames
+
+Online plays carry no TextToSpeech or GoogleTTSService log line and the audio belongs to the app's own
+client; the offline plays carry eight TTS lines and the audio belongs to com.google.android.tts. The
+en-GB payload is 61440 bytes at 64 kbps = 7.680 s, matching its frame count exactly, and the two
+accents differ by the service's own 2112-byte and 264 ms margin for that text, so the accent was
+honoured rather than substituted.
+
+With networking removed, both a word and an example showed the notice "No online audio is available for
+this text; using system speech. Using system English; requested accent is not guaranteed." with no
+provider credit, no stale credit and no error, and playback came from the installed engine.
+
+Attribution persists after playback ends: with the popup open after a completed word clip the credit row
+still read "Audio: Youdao Dictionary" (checked directly on the device). The settings disclosure now
+names every route and was read back from the rendered screen: "The text you ask to hear is sent to a
+public speech service: recorded word audio comes from Youdao Dictionary when it has one, and Google
+Translate speech supplies the rest. Both are free and key-free, unofficial and unlicensed, and neither
+is guaranteed to stay available. Only the text you ask to hear is sent, never the book's context, and
+system speech is the fallback."
+
+Verified: 203 unit tests with no failures, errors or skips; lint and isolated assembly. A security and
+standards review of this change found only wording and disclosure gaps, all corrected before the
+commit: the settings paragraph that still described the old preview chain, and the in-app notice that
+named only the word service while a word could also travel to the speech service.
+
+Evidence limits: this host and emulator have no direct route to Google (the device reaches the
+dictionary service directly but receives no packet from translate.google.com), so the online sentence
+path was exercised through the machine's own local proxy and, without it, correctly fell back to device
+speech. A phone with ordinary internet is not affected by that environment. The word middle tier could
+not be exercised because the bundled dictionary contains every word of the fixture and the dictionary
+recording service answered for every word probed, so no fixture word triggers it. The service is
+undocumented and unendorsed; availability, coverage and voice quality are not guaranteed.

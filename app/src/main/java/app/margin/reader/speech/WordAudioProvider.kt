@@ -15,8 +15,8 @@ import okhttp3.Response
 
 /**
  * Attribution the app can show for audio that came from a public provider: where it was fetched from.
- * The one source this app reads states no creator and no licence, so none is modelled here and none
- * is ever invented; the source name and link are the whole credit.
+ * Neither source this app reads states a creator or a licence, so none is modelled here and none is
+ * ever invented; the source name and link are the whole credit.
  */
 data class AudioCredit(val sourceName: String, val sourceUrl: String)
 
@@ -25,35 +25,37 @@ private const val WORD_AUDIO_SOURCE = "Youdao Dictionary"
 private const val WORD_AUDIO_SOURCE_URL = "https://dict.youdao.com"
 
 /**
- * What Settings tells users about the word-audio route: free and key-free, but an unofficial public
- * endpoint with no availability guarantee, and it is never used for phrases. The app claims no
- * licence for the provider's bytes.
+ * What Settings tells users about every online audio route: which service receives the text, that it
+ * is free and key-free, that both endpoints are unofficial and unlicensed, and that system speech
+ * speaks whenever they have nothing. The app claims no licence for either provider's bytes.
  */
-internal const val WORD_AUDIO_NOTICE =
-    "Word audio comes from the public Youdao Dictionary service: free and key-free, but unofficial and not guaranteed to stay available. Only the word itself is sent; phrases and examples use device speech."
+internal const val AUDIO_SOURCE_NOTICE =
+    "The text you ask to hear is sent to a public speech service: recorded word audio comes from Youdao Dictionary when it has one, and Google Translate speech supplies the rest. Both are free and key-free, unofficial and unlicensed, and neither is guaranteed to stay available. Only the text you ask to hear is sent, never the book's context, and system speech is the fallback."
 
-/** Bounded audio for one word and the attribution that must accompany it. */
-class WordAudioClip(val audio: ByteArray, val credit: AudioCredit)
+/** Bounded audio for one request, and the attribution that must accompany it. */
+class AudioClip(val audio: ByteArray, val credit: AudioCredit)
 
-/** Audio for one word and accent; null means no usable audio, so installed system speech speaks. */
+/** Audio for one word and accent; null means no usable audio, so the next route speaks instead. */
 fun interface WordAudioSource {
-    suspend fun lookup(term: String, accent: String): WordAudioClip?
+    suspend fun lookup(term: String, accent: String): AudioClip?
 }
 
 /** The endpoint is unofficial; this names the app without inventing a contact address. */
 private val USER_AGENT = "Margin/${app.margin.reader.BuildConfig.VERSION_NAME} (Android ${android.os.Build.VERSION.RELEASE})"
 private const val VOICE_PATH = "dictvoice"
 private const val MAX_LOOKUP_TERM_LENGTH = 48
-private const val MAX_AUDIO_BYTES = 2L * 1024 * 1024
+
+/** No answer from either audio service may hold more than this in memory. */
+internal const val MAX_AUDIO_BYTES = 2L * 1024 * 1024
 private val plainWord = Regex("[A-Za-z]+(?:['-][A-Za-z]+)*")
 private const val TERM_EDGES = "\"'.,;:!?()[]{}<>«»„“”‘’—–…·"
 
-/** The credit for every clip from the single source this app reads: source name and address only. */
+/** The credit for every clip from the dictionary service: source name and address only. */
 private val WORD_AUDIO_CREDIT = AudioCredit(WORD_AUDIO_SOURCE, WORD_AUDIO_SOURCE_URL)
 
 /**
- * The only text this app sends to a pronunciation service: one plain English word. Phrases, sentences
- * and surrounding book text never leave the device.
+ * The only word this app sends to the dictionary service: one plain English word. Phrases, sentences
+ * and surrounding book text never reach it.
  */
 internal fun wordLookupTerm(text: String): String? {
     val term = text.trim().trim { it in TERM_EDGES }.replace('\u2019', '\'').replace('\u2018', '\'')
@@ -80,7 +82,7 @@ internal fun mpegAudio(bytes: ByteArray): Boolean = bytes.size >= 3 && (
 /**
  * Single-word audio from the public Youdao Dictionary voice endpoint: one bounded, key-free request
  * per word, cancelled with its coroutine. Unavailable, oversized, malformed or unexpected answers all
- * mean "no audio", so the caller speaks with installed system speech instead.
+ * mean "no audio", so the next route — the speech service, then installed device speech — speaks.
  */
 class YoudaoWordAudioClient(
     client: OkHttpClient = OkHttpClient.Builder()
@@ -91,7 +93,7 @@ class YoudaoWordAudioClient(
     /** A redirect must never carry the requested word to a host the app did not choose to send it to. */
     private val http = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
 
-    override suspend fun lookup(term: String, accent: String): WordAudioClip? = withContext(Dispatchers.IO) {
+    override suspend fun lookup(term: String, accent: String): AudioClip? = withContext(Dispatchers.IO) {
         val word = wordLookupTerm(term) ?: return@withContext null
         val type = voiceType(accent) ?: return@withContext null
         val url = baseUrl.newBuilder()
@@ -103,35 +105,38 @@ class YoudaoWordAudioClient(
             .header("Accept", "audio/mpeg")
             .header("User-Agent", USER_AGENT)
             .build()
-        val audio = fetch(request) { response -> response.boundedBytes(MAX_AUDIO_BYTES)?.takeIf(::mpegAudio) }
+        val audio = fetchAudio(http, request) { response -> response.boundedBytes(MAX_AUDIO_BYTES)?.takeIf(::mpegAudio) }
             ?: return@withContext null
-        WordAudioClip(audio, WORD_AUDIO_CREDIT)
+        AudioClip(audio, WORD_AUDIO_CREDIT)
     }
+}
 
-    /** Bounded by the client timeouts and cancelled with its coroutine; any problem means "no audio". */
-    @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
-    private suspend fun <T : Any> fetch(request: Request, read: (Response) -> T?): T? {
-        val call = http.newCall(request)
-        val job = currentCoroutineContext()[Job]!!
-        val cancellation = job.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { cause ->
-            if (cause != null) call.cancel()
-        }
-        return try {
-            call.execute().use { response -> if (response.isSuccessful) read(response) else null }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            currentCoroutineContext().ensureActive()
-            null
-        } finally {
-            cancellation.dispose()
-            call.cancel()
-        }
+/**
+ * One bounded GET shared by both audio routes: cancelled with its coroutine, and any problem at all
+ * means "no audio" so the caller keeps the text and speaks it another way.
+ */
+@OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
+internal suspend fun <T : Any> fetchAudio(http: OkHttpClient, request: Request, read: (Response) -> T?): T? {
+    val call = http.newCall(request)
+    val job = currentCoroutineContext()[Job]!!
+    val cancellation = job.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { cause ->
+        if (cause != null) call.cancel()
+    }
+    return try {
+        call.execute().use { response -> if (response.isSuccessful) read(response) else null }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        currentCoroutineContext().ensureActive()
+        null
+    } finally {
+        cancellation.dispose()
+        call.cancel()
     }
 }
 
 /** Reads at most [max] bytes: the body is never buffered past the limit, whatever the service sends. */
-private fun Response.boundedBytes(max: Long): ByteArray? {
+internal fun Response.boundedBytes(max: Long): ByteArray? {
     val body = body ?: return null
     if (body.contentLength() > max) return null
     val source = body.source()

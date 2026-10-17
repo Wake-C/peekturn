@@ -32,7 +32,7 @@ Design provenance: the accepted Focus direction is preserved on the local Git br
 4. Read to a noninitial location; the bottom toolbar offers chapter contents, search and appearance with usable touch targets; background/force-stop/relaunch: last book opens at that location without briefly persisting the first page. Return to Library remains there until a fresh launch or explicit book open.
 5. Select repeated words and a multiword phrase; requests contain the selected location's snippets and titles, within the 30-word-per-side cap.
 6. Normal/Quick Explain behavior works relative to gesture release, including Adjust in both Quick modes, old-request isolation, partial failures, explicit retry, missing credentials and real connection testing.
-7. Offline dictionary works with network disabled. Pronunciation handles both available and unavailable US/UK voices without misleading fallback, and word audio never sends more than the word.
+7. Offline dictionary works with network disabled. Pronunciation handles both available and unavailable US/UK voices without misleading fallback: word audio sends only the word, sentence audio sends only the text asked for, and device speech remains the fallback when a service is unavailable.
 8. Anchored popup remains in usable phone bounds; long answers scroll independently and word/example speech actions are reachable.
 9. Reading-time collection uses actual foreground/idle behavior; restart retains totals; empty stats are honest.
 10. Build/install/launch the APK; exercise controlled-provider success/error scenarios and document live-provider/physical-device gaps separately. Unit tests cover uncertain boundaries, not source wording.

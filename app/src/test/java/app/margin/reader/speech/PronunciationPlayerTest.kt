@@ -29,15 +29,34 @@ import org.robolectric.shadows.util.DataSource
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [28])
 class PronunciationPlayerTest {
-    /** Records what the player asks for and can hold one lookup open to test superseded requests. */
+    /** Records what the player asks the dictionary and can hold one lookup open to test supersession. */
     private class FakeSource : WordAudioSource {
         val calls = mutableListOf<Pair<String, String>>()
         var cancelled = 0
-        var gate: CompletableDeferred<WordAudioClip?>? = null
-        var clip: WordAudioClip? = null
+        var gate: CompletableDeferred<AudioClip?>? = null
+        var clip: AudioClip? = null
 
-        override suspend fun lookup(term: String, accent: String): WordAudioClip? {
+        override suspend fun lookup(term: String, accent: String): AudioClip? {
             calls += term to accent
+            val open = gate ?: return clip
+            return try {
+                open.await()
+            } catch (failure: CancellationException) {
+                cancelled++
+                throw failure
+            }
+        }
+    }
+
+    /** The speech service, the second online route: same recording contract as the dictionary. */
+    private class FakeSpeechSource : SentenceAudioSource {
+        val calls = mutableListOf<Pair<String, String>>()
+        var cancelled = 0
+        var gate: CompletableDeferred<AudioClip?>? = null
+        var clip: AudioClip? = null
+
+        override suspend fun lookup(text: String, accent: String): AudioClip? {
+            calls += text to accent
             val open = gate ?: return clip
             return try {
                 open.await()
@@ -64,32 +83,128 @@ class PronunciationPlayerTest {
         settle()
     }
 
-    private fun player(source: WordAudioSource, engines: List<String> = emptyList()) =
-        PronunciationPlayer(ApplicationProvider.getApplicationContext<Context>(), source) { engines }
+    private fun player(
+        source: WordAudioSource,
+        sentence: SentenceAudioSource = FakeSpeechSource(),
+        engines: List<String> = emptyList()
+    ) = PronunciationPlayer(ApplicationProvider.getApplicationContext<Context>(), source, sentence) { engines }
 
     private fun settle() = shadowOf(Looper.getMainLooper()).idle()
 
     /** Audio whose bytes never came from the network, so a leaked playback attempt stays local. */
-    private fun providerAudio() = WordAudioClip(
+    private fun wordAudio() = AudioClip(
         ByteArray(64) { it.toByte() },
         AudioCredit("Youdao Dictionary", "https://dict.youdao.com")
     )
 
-    @Test fun examplesUseNoProviderAudio() {
+    /** The speech service's own answer for a phrase, sentence or example. */
+    private fun sentenceAudio() = AudioClip(
+        ByteArray(64) { (it + 1).toByte() },
+        AudioCredit("Google Translate", "https://translate.google.com")
+    )
+
+    /** Lets the shadow decoder actually start a provider clip, so playback can be asserted. */
+    private fun playableClips() {
+        ShadowMediaPlayer.resetStaticState()
+        ShadowMediaPlayer.addMediaInfo(DataSource.toDataSource("MediaDataSource"), ShadowMediaPlayer.MediaInfo(20_000, 0))
+    }
+
+    @Test fun examplesUseTheSpeechServiceAndNeverTheDictionary() {
         val source = FakeSource()
-        val player = player(source)
+        val sentence = FakeSpeechSource()
+        val player = player(source, sentence)
         player.speakExample("A little further, one page at a time.", "UK")
         assertTrue(source.calls.isEmpty())
+        assertEquals(listOf("A little further, one page at a time." to "UK"), sentence.calls)
         assertEquals("A little further, one page at a time.", player.state.value.text)
         player.shutdown()
     }
 
-    @Test fun phrasesAreNeverSentToTheProvider() {
+    @Test fun phrasesAreNeverSentToTheDictionary() {
         val source = FakeSource()
-        val player = player(source)
+        val sentence = FakeSpeechSource()
+        val player = player(source, sentence)
         player.speakWord("A sentence from the book", "US")
         assertTrue(source.calls.isEmpty())
+        assertEquals(listOf("A sentence from the book" to "US"), sentence.calls)
         assertEquals("A sentence from the book", player.state.value.text)
+        player.shutdown()
+    }
+
+    /**
+     * A word the dictionary cannot voice still gets online audio: the speech service voices it, and
+     * device speech is never asked at all.
+     */
+    @Test fun aWordWithoutDictionaryAudioIsVoicedByTheSpeechService() {
+        playableClips()
+        ShadowTextToSpeech.reset()
+        val word = FakeSource().apply { clip = null }
+        val sentence = FakeSpeechSource().apply { clip = sentenceAudio() }
+        val player = player(word, sentence)
+
+        player.speakWord("hello", "UK")
+        settle()
+
+        assertEquals(listOf("hello" to "UK"), word.calls)
+        assertEquals("The dictionary's gap is covered by the speech service",
+            listOf("hello" to "UK"), sentence.calls)
+        assertEquals(AudioCredit("Google Translate", "https://translate.google.com"), player.state.value.credit)
+        assertTrue("The service's own bytes are what plays", player.state.value.playing)
+        assertNull(player.state.value.error)
+        assertNull("Online audio needs no device speech", player.state.value.notice)
+        player.shutdown()
+        ShadowMediaPlayer.resetStaticState()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** The speech service is asked before device speech, and its silence is announced as the fallback. */
+    @Test fun deviceSpeechWaitsForTheSpeechServiceAndIsAnnouncedAsTheFallback() {
+        ShadowTextToSpeech.reset()
+        ShadowMediaPlayer.resetStaticState()
+        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
+        val word = FakeSource().apply { clip = null }
+        val sentence = FakeSpeechSource()
+        val gate = CompletableDeferred<AudioClip?>()
+        sentence.gate = gate
+        val player = player(word, sentence)
+
+        player.speakWord("hello", "US")
+        assertEquals(listOf("hello" to "US"), sentence.calls)
+        assertTrue(player.state.value.playing)
+        assertNull("Device speech waits for the online route", ShadowTextToSpeech.getLastTextToSpeechInstance())
+
+        gate.complete(null)
+        settle()
+        engineInitialization(TextToSpeech.SUCCESS)
+
+        assertNull("A service that has nothing is not a missing engine", player.state.value.error)
+        assertNotNull("The fallback to device speech is announced", player.state.value.notice)
+        assertEquals("hello", lastEngine().lastSpokenText)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** A stopped sentence request is cancelled with its coroutine, and its late audio stays silent. */
+    @Test fun stopCancelsTheSentenceLookupAndKeepsLateAudioSilent() {
+        val word = FakeSource()
+        val sentence = FakeSpeechSource()
+        val gate = CompletableDeferred<AudioClip?>()
+        sentence.gate = gate
+        val player = player(word, sentence)
+
+        player.speakExample("A little further, one page at a time.", "UK")
+        assertEquals(listOf("A little further, one page at a time." to "UK"), sentence.calls)
+        assertTrue(player.state.value.playing)
+
+        player.stop()
+        settle()
+        assertFalse(player.state.value.playing)
+        assertEquals(1, sentence.cancelled)
+
+        gate.complete(sentenceAudio())
+        settle()
+        assertFalse("A stopped lookup must not play later", player.state.value.playing)
+        assertNull(player.state.value.credit)
         player.shutdown()
     }
 
@@ -105,17 +220,19 @@ class PronunciationPlayerTest {
 
     @Test fun accentNamesTheAppDoesNotOfferAreRejectedWithoutAnyLookup() {
         val source = FakeSource()
-        val player = player(source)
+        val sentence = FakeSpeechSource()
+        val player = player(source, sentence)
         player.speakWord("hello", "AU")
         assertNotNull(player.state.value.error)
         assertFalse(player.state.value.playing)
         assertTrue(source.calls.isEmpty())
+        assertTrue(sentence.calls.isEmpty())
         player.shutdown()
     }
 
     @Test fun stopCancelsTheLookupInFlightAndKeepsLateAudioSilent() {
         val source = FakeSource()
-        val gate = CompletableDeferred<WordAudioClip?>()
+        val gate = CompletableDeferred<AudioClip?>()
         source.gate = gate
         val player = player(source)
         player.speakWord("hello", "UK")
@@ -130,7 +247,7 @@ class PronunciationPlayerTest {
         assertNull(player.state.value.notice)
         assertNull(player.state.value.error)
 
-        gate.complete(providerAudio())
+        gate.complete(wordAudio())
         settle()
         assertFalse("A stopped lookup must not play later", player.state.value.playing)
         assertNull(player.state.value.credit)
@@ -139,18 +256,18 @@ class PronunciationPlayerTest {
 
     @Test fun aNewWordSupersedesTheEarlierLookup() {
         val source = FakeSource()
-        val first = CompletableDeferred<WordAudioClip?>()
+        val first = CompletableDeferred<AudioClip?>()
         source.gate = first
         val player = player(source)
         player.speakWord("hello", "UK")
 
-        val second = CompletableDeferred<WordAudioClip?>()
+        val second = CompletableDeferred<AudioClip?>()
         source.gate = second
         player.speakWord("water", "UK")
         assertEquals(listOf("hello" to "UK", "water" to "UK"), source.calls)
         assertEquals(1, source.cancelled)
 
-        first.complete(providerAudio())
+        first.complete(wordAudio())
         settle()
         assertEquals("water", player.state.value.text)
         assertNull(player.state.value.credit)
@@ -163,7 +280,7 @@ class PronunciationPlayerTest {
 
     @Test fun shutdownStopsLookupsAndRefusesFurtherRequests() {
         val source = FakeSource()
-        val gate = CompletableDeferred<WordAudioClip?>()
+        val gate = CompletableDeferred<AudioClip?>()
         source.gate = gate
         val player = player(source)
         player.speakWord("hello", "UK")
@@ -192,7 +309,7 @@ class PronunciationPlayerTest {
     }
 
     @Test fun focusLossStopsTheCurrentPlayback() {
-        val source = FakeSource().apply { clip = providerAudio() }
+        val source = FakeSource().apply { clip = wordAudio() }
         val player = player(source)
         player.speakWord("hello", "UK")
         assertTrue("Speaking holds audio focus until it stops", player.state.value.playing)
@@ -216,7 +333,7 @@ class PronunciationPlayerTest {
     @Test fun aTimedOutPreparationCannotStartAReleasedPlayerOrClaimCredit() {
         ShadowMediaPlayer.resetStaticState()
         ShadowMediaPlayer.addMediaInfo(DataSource.toDataSource("MediaDataSource"), ShadowMediaPlayer.MediaInfo(20_000, 8_000))
-        val source = FakeSource().apply { clip = providerAudio() }
+        val source = FakeSource().apply { clip = wordAudio() }
         val player = player(source)
         player.speakWord("hello", "UK")
         assertTrue(player.state.value.playing)
@@ -233,7 +350,7 @@ class PronunciationPlayerTest {
     @Test fun aSupersededEngineFailureCannotKillTheWordThatReplacedSystemSpeech() {
         ShadowTextToSpeech.reset()
         val source = FakeSource()
-        val gate = CompletableDeferred<WordAudioClip?>()
+        val gate = CompletableDeferred<AudioClip?>()
         val player = player(source)
 
         player.speakExample("A little further, one page at a time.", "US")
@@ -253,7 +370,7 @@ class PronunciationPlayerTest {
     @Test fun aBrokenDefaultEngineGivesWayToAnotherInstalledEngine() {
         ShadowTextToSpeech.reset()
         ShadowTextToSpeech.addLanguageAvailability(Locale.US)
-        val player = player(FakeSource(), listOf("com.example.other-engine"))
+        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
         player.speakExample("A little further, one page at a time.", "US")
         val brokenDefault = lastEngine()
 
@@ -275,7 +392,7 @@ class PronunciationPlayerTest {
     @Test fun anEngineThatNeverInitializesGivesWayToTheNextOne() {
         ShadowTextToSpeech.reset()
         ShadowTextToSpeech.addLanguageAvailability(Locale.US)
-        val player = player(FakeSource(), listOf("com.example.other-engine"))
+        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
         player.speakExample("A little further, one page at a time.", "US")
         val silent = lastEngine()
         assertTrue("The request waits while its engine initializes", player.state.value.playing)
@@ -297,7 +414,7 @@ class PronunciationPlayerTest {
     /** Every installed engine is tried before a request fails, so the failure is about English, not one engine. */
     @Test fun enginesWithoutEnglishAreAllTriedBeforeTheRequestFails() {
         ShadowTextToSpeech.reset()
-        val player = player(FakeSource(), listOf("com.example.other-engine"))
+        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
         player.speakExample("A little further, one page at a time.", "US")
         val firstEngine = lastEngine()
 
@@ -320,7 +437,7 @@ class PronunciationPlayerTest {
         ShadowMediaPlayer.resetStaticState()
         ShadowTextToSpeech.reset()
         ShadowTextToSpeech.addLanguageAvailability(Locale.US)
-        val source = FakeSource().apply { clip = providerAudio() }
+        val source = FakeSource().apply { clip = wordAudio() }
         val manager = audioManager()
         val player = player(source)
 
