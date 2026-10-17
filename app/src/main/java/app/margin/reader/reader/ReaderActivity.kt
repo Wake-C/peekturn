@@ -54,7 +54,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import org.readium.r2.navigator.Selection
 import org.json.JSONObject
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
@@ -441,7 +440,7 @@ class ReaderActivity : AppCompatActivity() {
                     val nav = navigator ?: return@launch
                     // The live native range decides, never a remembered one: a handle drag can revise
                     // the selection without any Activity touch event.
-                    val selection = when (val read = readNativeSelection(nav, token)) {
+                    val selection = when (val read = readNativeSelection(nav, token, requireReleasedPointer = false)) {
                         is NativeSelectionRead.Confirmed -> read.selection
                         is NativeSelectionRead.Unconfirmed -> read.selection
                         NativeSelectionRead.Empty -> return@launch reportSelectionUnreadable("No text is selected.")
@@ -500,64 +499,28 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /**
-     * Readium reads the selection through the WebView, so the value right after a release can still
-     * be the previous one. Returns [NativeSelectionRead.Confirmed] only when repeated reads agree;
-     * a native state that kept moving within the bounded budget is reported as
-     * [NativeSelectionRead.Unconfirmed] and only an explicit action may still use it. "Nothing
-     * selected" and "could not read" are separate answers, and no answer is ever replaced by a
-     * remembered range.
+     * The reader's own read of the live native selection. The automatic release path additionally
+     * requires that no pointer is down, because a native range may still be moving under a held
+     * finger; an explicit action is the user's own command, so it may read while a finger rests on
+     * the page or on a selection handle.
      */
-    private suspend fun readNativeSelection(nav: EpubNavigatorFragment, token: Long): NativeSelectionRead {
-        val reads = ReleasedSelectionReads(NATIVE_SELECTION_READS)
-        repeat(NATIVE_SELECTION_READS) { attempt ->
-            if (!releaseReadIsCurrent(nav, token)) return NativeSelectionRead.Unavailable
-            val read = withTimeoutOrNull(NATIVE_SELECTION_READ_TIMEOUT_MS) { nav.currentSelection() }
-                ?: return NativeSelectionRead.Unavailable
-            if (!releaseReadIsCurrent(nav, token)) return NativeSelectionRead.Unavailable
-            // Agreement is decided right after each read, so the last two agreeing reads confirm the
-            // range even when a different value was reported earlier in the sequence.
-            when (reads.accept(read.identity())) {
-                ReleasedSelectionReads.Outcome.Confirmed -> return NativeSelectionRead.Confirmed(read)
-                ReleasedSelectionReads.Outcome.Empty -> return NativeSelectionRead.Empty
-                ReleasedSelectionReads.Outcome.Unconfirmed ->
-                    return NativeSelectionRead.Unconfirmed(read)
-                null -> Unit
-            }
-            if (attempt < NATIVE_SELECTION_READS - 1) delay(NATIVE_SELECTION_SETTLE_MS)
-        }
-        return NativeSelectionRead.Empty
-    }
+    private suspend fun readNativeSelection(
+        nav: EpubNavigatorFragment,
+        token: Long,
+        requireReleasedPointer: Boolean = true
+    ): NativeSelectionRead = readLiveSelection(
+        budget = NATIVE_SELECTION_READS,
+        timeoutMs = NATIVE_SELECTION_READ_TIMEOUT_MS,
+        settleMs = NATIVE_SELECTION_SETTLE_MS,
+        isCurrent = { readIsCurrent(nav, token, requireReleasedPointer) },
+        read = { nav.currentSelection() },
+        wait = { delay(it) }
+    )
 
-    /** Outcome of reading the native selection; an unreadable state is not "nothing selected". */
-    private sealed interface NativeSelectionRead {
-        val traceName: String
-
-        /** Repeated reads agreed on this range: the one automatic explanation accepts. */
-        data class Confirmed(val selection: Selection) : NativeSelectionRead {
-            override val traceName = "confirmed"
-        }
-        /** The last read only; the native state was still moving, so it is not release-proof. */
-        data class Unconfirmed(val selection: Selection) : NativeSelectionRead {
-            override val traceName = "unconfirmed"
-        }
-        object Empty : NativeSelectionRead {
-            override val traceName = "empty"
-        }
-        object Unavailable : NativeSelectionRead {
-            override val traceName = "unavailable"
-        }
-    }
-
-    private fun releaseReadIsCurrent(nav: EpubNavigatorFragment, token: Long): Boolean =
-        selectionSession.isCurrent(token) && !selectionSession.pointerHeld &&
+    /** A read may only be used while it still belongs to this reader, session and gesture state. */
+    private fun readIsCurrent(nav: EpubNavigatorFragment, token: Long, requireReleasedPointer: Boolean): Boolean =
+        selectionSession.isCurrent(token) && (!requireReleasedPointer || !selectionSession.pointerHeld) &&
             navigator === nav && resumed && !isFinishing && !isDestroyed
-
-    private fun Selection.identity(): SelectionSession.Identity? {
-        val text = locator.text
-        val highlight = text.highlight.orEmpty()
-        if (highlight.isBlank()) return null
-        return SelectionSession.Identity(highlight, text.before.orEmpty(), text.after.orEmpty())
-    }
 
     private suspend fun showLookup(dictionary: Boolean, token: Long, captured: Selection? = null) {
         val nav = navigator ?: return
@@ -566,7 +529,7 @@ class ReaderActivity : AppCompatActivity() {
         // reads the live native range here - Android can drag handles in their own native window, so
         // nothing is ever explained from a remembered range, and an unconfirmed live range is still
         // the user's current selection rather than an older one.
-        val selection = captured ?: when (val read = readNativeSelection(nav, token)) {
+        val selection = captured ?: when (val read = readNativeSelection(nav, token, requireReleasedPointer = false)) {
             is NativeSelectionRead.Confirmed -> read.selection
             is NativeSelectionRead.Unconfirmed -> read.selection
             NativeSelectionRead.Empty -> return reportSelectionUnreadable("No text is selected.")

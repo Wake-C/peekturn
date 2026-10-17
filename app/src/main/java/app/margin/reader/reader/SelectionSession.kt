@@ -1,6 +1,9 @@
 package app.margin.reader.reader
 
 import android.view.MotionEvent
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
+import org.readium.r2.navigator.Selection
 
 /**
  * One reader's selection ownership: the native toolbar lifetime, the physical pointer gesture and
@@ -145,6 +148,78 @@ internal class SelectionSession {
 }
 
 internal enum class ReaderPaddingAction { Ignore, ClearSelection, Navigate }
+
+/**
+ * Outcome of one bounded read of the live native selection. Losing the read (it timed out, or the
+ * reader stopped being current) is a different answer from a readable state that simply has nothing
+ * selected, and neither is ever replaced by a remembered range.
+ */
+internal sealed interface NativeSelectionRead {
+    val traceName: String
+
+    /** Repeated reads agreed on this range: the one automatic explanation accepts. */
+    data class Confirmed(val selection: Selection) : NativeSelectionRead {
+        override val traceName = "confirmed"
+    }
+
+    /** The last read only; the native state was still moving, so it is not release-proof. */
+    data class Unconfirmed(val selection: Selection) : NativeSelectionRead {
+        override val traceName = "unconfirmed"
+    }
+
+    data object Empty : NativeSelectionRead {
+        override val traceName = "empty"
+    }
+
+    data object Unavailable : NativeSelectionRead {
+        override val traceName = "unavailable"
+    }
+}
+
+/** The identity of one native selection, or null when it holds no usable text. */
+internal fun Selection.identity(): SelectionSession.Identity? {
+    val text = locator.text
+    val highlight = text.highlight.orEmpty()
+    if (highlight.isBlank()) return null
+    return SelectionSession.Identity(highlight, text.before.orEmpty(), text.after.orEmpty())
+}
+
+/**
+ * Reads the live native selection under a bounded budget: repeated reads that agree confirm a range,
+ * a range that keeps moving is unconfirmed once the budget ends, an answer without a selection means
+ * nothing is selected, and a read that times out or stopped being current cannot be answered at all.
+ * The navigator stays outside so the distinction between these answers is testable.
+ */
+internal suspend fun readLiveSelection(
+    budget: Int,
+    timeoutMs: Long,
+    settleMs: Long,
+    isCurrent: () -> Boolean,
+    read: suspend () -> Selection?,
+    wait: suspend (Long) -> Unit
+): NativeSelectionRead {
+    val reads = ReleasedSelectionReads(budget)
+    repeat(budget) { attempt ->
+        if (!isCurrent()) return NativeSelectionRead.Unavailable
+        val selection = try {
+            withTimeout(timeoutMs) { read() }
+        } catch (_: TimeoutCancellationException) {
+            return NativeSelectionRead.Unavailable
+        }
+        if (!isCurrent()) return NativeSelectionRead.Unavailable
+        if (selection == null) return NativeSelectionRead.Empty
+        // Agreement is decided right after each read, so the last two agreeing reads confirm the
+        // range even when a different value was reported earlier in the sequence.
+        when (reads.accept(selection.identity())) {
+            ReleasedSelectionReads.Outcome.Confirmed -> return NativeSelectionRead.Confirmed(selection)
+            ReleasedSelectionReads.Outcome.Empty -> return NativeSelectionRead.Empty
+            ReleasedSelectionReads.Outcome.Unconfirmed -> return NativeSelectionRead.Unconfirmed(selection)
+            null -> Unit
+        }
+        if (attempt < budget - 1) wait(settleMs)
+    }
+    return NativeSelectionRead.Empty
+}
 
 /**
  * How the reader's gesture stream ended. Android reports both a real release and a cancellation:

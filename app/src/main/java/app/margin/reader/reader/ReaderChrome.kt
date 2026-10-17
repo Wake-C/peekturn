@@ -57,8 +57,9 @@ internal fun readerPaper(theme: String) = when (theme) {
 }
 
 /**
- * A temporary compact tool rail. Its visibility never changes navigator measurement, and the rail
- * itself swallows taps so gestures near the controls cannot reach the book underneath.
+ * A temporary compact tool rail. Its visibility never changes navigator measurement, and a tap on the
+ * rail's own bounds is consumed so it cannot also reach the book underneath; the page area around
+ * the rail stays page area.
  */
 @Composable internal fun ReaderChrome(
     theme: String, onContents: () -> Unit, onSearch: () -> Unit, onAppearance: () -> Unit
