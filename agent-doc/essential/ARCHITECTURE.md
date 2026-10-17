@@ -2,7 +2,7 @@
 
 ## Actors and flow
 
-The reader imports an original EPUB into the local library, resumes a stable book location, and selects language for optional assistance. Readium presents the publication. The app supplies nearby selected-text context to the configured model, or queries the offline dictionary. Single words can use public online dictionary audio, and phrases, examples and words without it can use a public online speech service; Android system speech speaks the fallback. Local statistics aggregate actual reading activity.
+The reader imports an original EPUB into the local library, resumes a stable book location, and selects language for optional assistance. Readium presents the publication. The app supplies nearby selected-text context to the configured model, or queries the offline dictionary. Single words can use public online dictionary audio, and phrases, examples and words without it can use public online speech services; Android system speech speaks the fallback. Local statistics aggregate actual reading activity.
 
 ```mermaid
 flowchart LR
@@ -39,7 +39,7 @@ Native Kotlin/Compose app shell with the unmodified Readium Fragment navigator. 
 
 Original EPUBs remain in app-private storage. SQLite persists library metadata, locator JSON and daily reading time. Settings are local; API credentials are encrypted with Android Keystore and excluded from backup. The UI observes repository state, not direct database queries.
 
-LLM network access belongs to model actions; publication content is local-only. A word-audio action sends only a single selected word to a public dictionary audio service, and a phrase, example or word without dictionary audio sends only that exact text to a public speech service — never source context, book or chapter titles or model credentials — and the returned audio is memory-only. Book reading and dictionary lookup remain offline. System speech is the fallback when no online service answers, and engines may use their own network voices if no usable offline English is available.
+LLM network access belongs to model actions; publication content is local-only. A word-audio action sends only a single selected word to a public dictionary audio service, and a phrase, example or word without dictionary audio sends only that exact text to a public speech service — never source context, book or chapter titles or model credentials — and, when that service answers nothing, retries the same text once against a second key-free speech service; the returned audio is memory-only. Book reading and dictionary lookup remain offline. System speech is the fallback when no online service answers, and engines may use their own network voices if no usable offline English is available.
 
 Toolchain setup, wrapper behavior and Android build/install commands belong to [README: Build and run](../../README.md#build-and-run).
 

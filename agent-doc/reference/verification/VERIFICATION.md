@@ -335,3 +335,51 @@ speech. A phone with ordinary internet is not affected by that environment. The 
 not be exercised because the bundled dictionary contains every word of the fixture and the dictionary
 recording service answered for every word probed, so no fixture word triggers it. The service is
 undocumented and unendorsed; availability, coverage and voice quality are not guaranteed.
+
+## Microsoft read-aloud sentences and device-speech diagnosis (2026-10-17)
+
+The Google sentence route was removed: it is unreachable from the reader's network, which is why
+sentences still did not speak after the previous round. Measured from the development host and from the
+emulator: direct requests to `translate.google.com` fail (no response, 100% packet loss from the guest)
+while `speech.platform.bing.com` answers directly (voice list HTTP 200, 171 KB). Sentences, phrases and
+words with no dictionary recording now go to Microsoft's read-aloud service, which is the service the
+widely used open-source Edge client wraps; Baidu's translate speech GET is the second online fallback and
+device speech the last one.
+
+The handshake needed an independent Kotlin implementation: a plain SHA-256 token is refused with HTTP 403,
+and the service now requires a two-part token whose second half mixes a non-standard digest state with the
+standard round function. The port is asserted against five reference tokens produced by the established
+client implementation, plus thirteen further timestamps checked during development.
+
+Emulator evidence, no proxy (this network reaches Bing directly and Google not at all):
+
+- Settings sentence preview: 70848 frames at 48000 Hz = 1.476 s, credit "Audio: Microsoft Read Aloud",
+  zero TextToSpeech lines in the log for that window.
+- Popup phrase speaker: 129024 frames at 48000 Hz = 2.688 s, credit "Audio: Microsoft Read Aloud", tunnel
+  `CONNECT speech.platform.bing.com:443` with 50440 bytes answered, no TextToSpeech synthesis.
+- Offline: sentence and word both showed "No online audio is available for this text; using system
+  speech.", no stale credit, no error, and the installed engine produced 24434 frames for the word.
+- The popup's example speaker was not exercised because the local explanation provider stopped answering
+  during that session; the same popup's phrase speaker did play.
+- The US/UK frame pair could not be captured: the emulator's data path wedged mid-session (connections
+  opened while payloads stopped moving in both directions, unaffected by an adb restart, an airplane
+  cycle or a reboot). The build maps the accent to `en-US-AriaNeural` and `en-GB-SoniaNeural`, and the
+  reference service produces distinct audio per voice, but that pair is not claimed as device-verified.
+
+A real defect was found and fixed while making the device-speech tests honest: one utterance listener was
+shared by every engine, so a released engine that delivered a callback late could cancel a request that
+had already been handed to the next engine - on a device, silence with no error. Every listener now
+requires its own engine as well as the request identity.
+
+Device speech itself was also made less presumptuous, because a Chinese OEM phone was reported as having
+no English voice while its engine demonstrably spoke: after the documented per-engine probes, engines that
+did start get one final attempt with their own current voice (English text only, labelled as a substituted
+voice), and a request that still fails now carries a short report of what each engine said - engine names,
+whether voices were listed, each language probe's answer and the verdict. "Not installed" is reported only
+when an engine says so. On this emulator the engine reported a usable English voice, so the failure report
+was not exercised; the user's phone is the device that will show it.
+
+Verified: 232 unit tests with no failures, errors or skips; lint and isolated assembly. A security and
+standards review of this round found that the new WebSocket route followed redirects (the text could have
+been re-sent to another host) and that a single oversized frame was copied before the size check; both are
+fixed, and the shared classification message is no longer duplicated as a literal.

@@ -3,6 +3,7 @@ package app.margin.reader.speech
 import android.app.Application
 import android.content.Context
 import android.media.AudioManager
+import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import androidx.test.core.app.ApplicationProvider
@@ -48,8 +49,8 @@ class PronunciationPlayerTest {
         }
     }
 
-    /** The speech service, the second online route: same recording contract as the dictionary. */
-    private class FakeSpeechSource : SentenceAudioSource {
+    /** One online sentence route — the read-aloud service, then the simple GET: same contract, holdable. */
+    private class FakeSentenceSource : SentenceAudioSource {
         val calls = mutableListOf<Pair<String, String>>()
         var cancelled = 0
         var gate: CompletableDeferred<AudioClip?>? = null
@@ -85,11 +86,28 @@ class PronunciationPlayerTest {
 
     private fun player(
         source: WordAudioSource,
-        sentence: SentenceAudioSource = FakeSpeechSource(),
+        sentence: List<SentenceAudioSource> = listOf(FakeSentenceSource()),
         engines: List<String> = emptyList()
     ) = PronunciationPlayer(ApplicationProvider.getApplicationContext<Context>(), source, sentence) { engines }
 
     private fun settle() = shadowOf(Looper.getMainLooper()).idle()
+
+    /**
+     * The id the player passes to speak() for the first request of a fresh player. A test fails that
+     * utterance by handing the engine's own listener an error, which is how a real engine reports one.
+     */
+    private val UTTERANCE_ID = "1"
+
+    /**
+     * Reports a failed utterance the way an engine does: while it is still in flight. Robolectric's
+     * engine completes every utterance as soon as the looper runs, so the error is queued right behind
+     * the initialization that makes the player speak, before that completion is delivered.
+     */
+    private fun failUtterance(engine: ShadowTextToSpeech, errorCode: Int) {
+        Handler(Looper.getMainLooper()).post {
+            engine.utteranceProgressListener.onError(UTTERANCE_ID, errorCode)
+        }
+    }
 
     /** Audio whose bytes never came from the network, so a leaked playback attempt stays local. */
     private fun wordAudio() = AudioClip(
@@ -97,10 +115,17 @@ class PronunciationPlayerTest {
         AudioCredit("Youdao Dictionary", "https://dict.youdao.com")
     )
 
-    /** The speech service's own answer for a phrase, sentence or example. */
-    private fun sentenceAudio() = AudioClip(
+    /** The read-aloud service's own answer for a phrase, sentence or example. */
+    private fun bingAudio() = AudioClip(
         ByteArray(64) { (it + 1).toByte() },
-        AudioCredit("Google Translate", "https://translate.google.com")
+        AudioCredit("Microsoft Read Aloud", "https://speech.platform.bing.com")
+    )
+
+    /** The fallback's answer: one English voice only, so its clip carries that caveat with it. */
+    private fun baiduAudio() = AudioClip(
+        ByteArray(64) { (it + 2).toByte() },
+        AudioCredit("Baidu Translate", "https://fanyi.baidu.com"),
+        BAIDU_ACCENT_NOTICE
     )
 
     /** Lets the shadow decoder actually start a provider clip, so playback can be asserted. */
@@ -109,10 +134,10 @@ class PronunciationPlayerTest {
         ShadowMediaPlayer.addMediaInfo(DataSource.toDataSource("MediaDataSource"), ShadowMediaPlayer.MediaInfo(20_000, 0))
     }
 
-    @Test fun examplesUseTheSpeechServiceAndNeverTheDictionary() {
+    @Test fun examplesUseTheOnlineSpeechRoutesAndNeverTheDictionary() {
         val source = FakeSource()
-        val sentence = FakeSpeechSource()
-        val player = player(source, sentence)
+        val sentence = FakeSentenceSource()
+        val player = player(source, listOf(sentence))
         player.speakExample("A little further, one page at a time.", "UK")
         assertTrue(source.calls.isEmpty())
         assertEquals(listOf("A little further, one page at a time." to "UK"), sentence.calls)
@@ -122,8 +147,8 @@ class PronunciationPlayerTest {
 
     @Test fun phrasesAreNeverSentToTheDictionary() {
         val source = FakeSource()
-        val sentence = FakeSpeechSource()
-        val player = player(source, sentence)
+        val sentence = FakeSentenceSource()
+        val player = player(source, listOf(sentence))
         player.speakWord("A sentence from the book", "US")
         assertTrue(source.calls.isEmpty())
         assertEquals(listOf("A sentence from the book" to "US"), sentence.calls)
@@ -132,41 +157,105 @@ class PronunciationPlayerTest {
     }
 
     /**
-     * A word the dictionary cannot voice still gets online audio: the speech service voices it, and
+     * A word the dictionary cannot voice still gets online audio: the read-aloud service voices it, and
      * device speech is never asked at all.
      */
-    @Test fun aWordWithoutDictionaryAudioIsVoicedByTheSpeechService() {
+    @Test fun aWordWithoutDictionaryAudioIsVoicedByTheFirstOnlineRoute() {
         playableClips()
         ShadowTextToSpeech.reset()
         val word = FakeSource().apply { clip = null }
-        val sentence = FakeSpeechSource().apply { clip = sentenceAudio() }
-        val player = player(word, sentence)
+        val sentence = FakeSentenceSource().apply { clip = bingAudio() }
+        val player = player(word, listOf(sentence))
 
         player.speakWord("hello", "UK")
         settle()
 
         assertEquals(listOf("hello" to "UK"), word.calls)
-        assertEquals("The dictionary's gap is covered by the speech service",
+        assertEquals("The dictionary's gap is covered by the read-aloud service",
             listOf("hello" to "UK"), sentence.calls)
-        assertEquals(AudioCredit("Google Translate", "https://translate.google.com"), player.state.value.credit)
+        assertEquals(AudioCredit("Microsoft Read Aloud", "https://speech.platform.bing.com"), player.state.value.credit)
         assertTrue("The service's own bytes are what plays", player.state.value.playing)
         assertNull(player.state.value.error)
-        assertNull("Online audio needs no device speech", player.state.value.notice)
+        assertNull("A service that honours the accent carries no caveat", player.state.value.notice)
         player.shutdown()
         ShadowMediaPlayer.resetStaticState()
         ShadowTextToSpeech.reset()
     }
 
-    /** The speech service is asked before device speech, and its silence is announced as the fallback. */
-    @Test fun deviceSpeechWaitsForTheSpeechServiceAndIsAnnouncedAsTheFallback() {
+    /** The first online route is asked before the second, and the second's clip keeps its own credit. */
+    @Test fun aSentenceTheReadAloudServiceCannotVoiceFallsBackToTheSecondRoute() {
+        playableClips()
+        ShadowTextToSpeech.reset()
+        val first = FakeSentenceSource().apply { clip = null }
+        val second = FakeSentenceSource().apply { clip = baiduAudio() }
+        val player = player(FakeSource(), listOf(first, second))
+
+        player.speakExample("A little further, one page at a time.", "UK")
+        settle()
+
+        assertEquals(listOf("A little further, one page at a time." to "UK"), first.calls)
+        assertEquals("The route with nothing hands the text on", first.calls, second.calls)
+        assertEquals(AudioCredit("Baidu Translate", "https://fanyi.baidu.com"), player.state.value.credit)
+        assertEquals("The fallback's single accent is disclosed with its audio", BAIDU_ACCENT_NOTICE, player.state.value.notice)
+        assertTrue(player.state.value.playing)
+        assertNull(player.state.value.error)
+        player.shutdown()
+        ShadowMediaPlayer.resetStaticState()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** A word tries the dictionary, then both online routes in turn, before any device speech. */
+    @Test fun aWordTriesEveryOnlineRouteBeforeDeviceSpeech() {
+        playableClips()
+        ShadowTextToSpeech.reset()
+        val word = FakeSource().apply { clip = null }
+        val first = FakeSentenceSource().apply { clip = null }
+        val second = FakeSentenceSource().apply { clip = baiduAudio() }
+        val player = player(word, listOf(first, second))
+
+        player.speakWord("hello", "US")
+        settle()
+
+        assertEquals(listOf("hello" to "US"), word.calls)
+        assertEquals(listOf("hello" to "US"), first.calls)
+        assertEquals(listOf("hello" to "US"), second.calls)
+        assertEquals(AudioCredit("Baidu Translate", "https://fanyi.baidu.com"), player.state.value.credit)
+        assertNull("Device speech was never needed", ShadowTextToSpeech.getLastTextToSpeechInstance())
+        player.shutdown()
+        ShadowMediaPlayer.resetStaticState()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** A dictionary recording that answers ends the request, so neither online route is asked at all. */
+    @Test fun aDictionaryRecordingEndsTheRequestBeforeAnySpeechRoute() {
+        playableClips()
+        ShadowTextToSpeech.reset()
+        val word = FakeSource().apply { clip = wordAudio() }
+        val first = FakeSentenceSource().apply { clip = bingAudio() }
+        val second = FakeSentenceSource().apply { clip = baiduAudio() }
+        val player = player(word, listOf(first, second))
+
+        player.speakWord("hello", "UK")
+        settle()
+
+        assertTrue("Only the dictionary is asked for a word it can voice", first.calls.isEmpty())
+        assertTrue(second.calls.isEmpty())
+        assertEquals(AudioCredit("Youdao Dictionary", "https://dict.youdao.com"), player.state.value.credit)
+        player.shutdown()
+        ShadowMediaPlayer.resetStaticState()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** Every online route is asked before device speech, and their silence is announced as the fallback. */
+    @Test fun deviceSpeechWaitsForEveryOnlineRouteAndIsAnnouncedAsTheFallback() {
         ShadowTextToSpeech.reset()
         ShadowMediaPlayer.resetStaticState()
         ShadowTextToSpeech.addLanguageAvailability(Locale.US)
         val word = FakeSource().apply { clip = null }
-        val sentence = FakeSpeechSource()
+        val sentence = FakeSentenceSource()
         val gate = CompletableDeferred<AudioClip?>()
         sentence.gate = gate
-        val player = player(word, sentence)
+        val player = player(word, listOf(sentence))
 
         player.speakWord("hello", "US")
         assertEquals(listOf("hello" to "US"), sentence.calls)
@@ -187,10 +276,10 @@ class PronunciationPlayerTest {
     /** A stopped sentence request is cancelled with its coroutine, and its late audio stays silent. */
     @Test fun stopCancelsTheSentenceLookupAndKeepsLateAudioSilent() {
         val word = FakeSource()
-        val sentence = FakeSpeechSource()
+        val sentence = FakeSentenceSource()
         val gate = CompletableDeferred<AudioClip?>()
         sentence.gate = gate
-        val player = player(word, sentence)
+        val player = player(word, listOf(sentence))
 
         player.speakExample("A little further, one page at a time.", "UK")
         assertEquals(listOf("A little further, one page at a time." to "UK"), sentence.calls)
@@ -201,7 +290,7 @@ class PronunciationPlayerTest {
         assertFalse(player.state.value.playing)
         assertEquals(1, sentence.cancelled)
 
-        gate.complete(sentenceAudio())
+        gate.complete(bingAudio())
         settle()
         assertFalse("A stopped lookup must not play later", player.state.value.playing)
         assertNull(player.state.value.credit)
@@ -220,8 +309,8 @@ class PronunciationPlayerTest {
 
     @Test fun accentNamesTheAppDoesNotOfferAreRejectedWithoutAnyLookup() {
         val source = FakeSource()
-        val sentence = FakeSpeechSource()
-        val player = player(source, sentence)
+        val sentence = FakeSentenceSource()
+        val player = player(source, listOf(sentence))
         player.speakWord("hello", "AU")
         assertNotNull(player.state.value.error)
         assertFalse(player.state.value.playing)
@@ -411,23 +500,184 @@ class PronunciationPlayerTest {
         ShadowTextToSpeech.reset()
     }
 
-    /** Every installed engine is tried before a request fails, so the failure is about English, not one engine. */
-    @Test fun enginesWithoutEnglishAreAllTriedBeforeTheRequestFails() {
+    /**
+     * Text in another script never goes to the device's own voice, because the app cannot call that voice
+     * English, so every installed engine is still asked before the failure reports what it saw.
+     */
+    @Test fun textInAnotherScriptNeverUsesTheDeviceVoiceAndEveryEngineIsStillAsked() {
         ShadowTextToSpeech.reset()
         val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
-        player.speakExample("A little further, one page at a time.", "US")
+        player.speakExample("你好，世界", "US")
         val firstEngine = lastEngine()
 
         engineInitialization(TextToSpeech.SUCCESS)
 
         val alternative = lastEngine()
-        assertTrue("An English-less engine gives way to the next one", firstEngine.isShutdown)
-        assertTrue("The next installed engine was tried", alternative !== firstEngine)
+        assertTrue("An engine that may not substitute gives way", firstEngine.isShutdown)
+        assertTrue("The next installed engine is asked", alternative !== firstEngine)
         alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
         settle()
 
-        assertNotNull("No installed engine could speak English", player.state.value.error)
+        assertNull("Another script is never spoken by a voice the app cannot name", alternative.lastSpokenText)
+        assertEquals(NO_ENGLISH_VOICE, player.state.value.error)
+        val report = player.state.value.diagnostic
+        assertNotNull("The reader can send back what the engines answered", report)
+        assertTrue("Every engine that was asked is named", report!!.contains("com.example.other-engine"))
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** An engine that never starts is a different failure, and the report says which engines were asked. */
+    @Test fun aDeviceWhoseEnginesNeverStartReportsTheEnginesItAsked() {
+        ShadowTextToSpeech.reset()
+        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
+        player.speakExample("A little further, one page at a time.", "US")
+
+        engineInitialization(TextToSpeech.ERROR)
+        lastEngine().onInitListener.onInit(TextToSpeech.ERROR)
+        settle()
+
+        assertEquals(NO_SPEECH_ENGINE, player.state.value.error)
+        val report = player.state.value.diagnostic
+        assertNotNull(report)
+        assertTrue("The engine that was asked is named", report!!.contains("com.example.other-engine"))
+        assertTrue("An engine that never started gives no language answers to report",
+            report.contains(DeviceSpeechFailure.NotStarted.verdict))
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /**
+     * An engine that does offer English keeps the request through the documented probes: the voice it was
+     * asked for is the one that is set, and no substitute notice is attached.
+     */
+    @Test fun anOfferedEnglishVoiceKeepsBeingTheVoiceThatSpeaks() {
+        ShadowTextToSpeech.reset()
+        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
+        val player = player(FakeSource())
+        player.speakExample("A little further, one page at a time.", "US")
+
+        engineInitialization(TextToSpeech.SUCCESS)
+
+        val engine = lastEngine()
+        assertEquals("A little further, one page at a time.", engine.lastSpokenText)
+        assertNotNull("The English voice that was offered is the voice that is set", engine.getCurrentVoice())
+        assertFalse("An offered English voice carries no substitute notice",
+            player.state.value.notice?.contains(DEVICE_DEFAULT_VOICE_NOTICE) == true)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /**
+     * The final device attempt comes only after every installed engine has declined, and it uses the voice
+     * the engine already holds, untouched and labelled: the reader's own engine choice, a vendor engine's
+     * own voice, may be the only English-capable one on the device, but a real English voice found on any
+     * engine was still worth more than a substituted one.
+     */
+    @Test fun everyEngineDeclinesBeforeTheDeviceOwnVoiceIsUsed() {
+        ShadowTextToSpeech.reset()
+        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
+        player.speakExample("A little further, one page at a time.", "US")
+        val defaultEngine = lastEngine()
+
+        engineInitialization(TextToSpeech.SUCCESS)
+
+        assertFalse("A substitute is not used while another engine may still have English",
+            player.state.value.notice?.contains(DEVICE_DEFAULT_VOICE_NOTICE) == true)
+        val alternative = lastEngine()
+        assertTrue("The other installed engine is asked first", alternative !== defaultEngine)
+
+        alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
+        settle()
+
+        val substituting = lastEngine()
+        assertTrue("The final pass starts with the engine the reader chose",
+            substituting !== alternative && substituting !== defaultEngine)
+        substituting.onInitListener.onInit(TextToSpeech.SUCCESS)
+        settle()
+
+        assertEquals("A little further, one page at a time.", substituting.lastSpokenText)
+        assertNull("Nothing about the engine's own voice is changed", substituting.getCurrentVoice())
+        assertNull("A voice the engine could speak with is not an installation error", player.state.value.error)
+        assertTrue("A substituted voice is labelled as one",
+            player.state.value.notice?.contains(DEVICE_DEFAULT_VOICE_NOTICE) == true)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /**
+     * A substituted voice is not a promise. An engine that accepts the utterance and then fails it hands
+     * the request to the next engine of the final pass, and only the end of that pass reports, with
+     * everything the engines answered.
+     */
+    @Test fun aSubstitutedVoiceThatFailsHandsTheRequestToTheNextEngineOfTheFinalPass() {
+        ShadowTextToSpeech.reset()
+        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
+        player.speakExample("A little further, one page at a time.", "US")
+        engineInitialization(TextToSpeech.SUCCESS)
+        val alternative = lastEngine()
+        alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
+        settle()
+
+        val firstSubstitute = lastEngine()
+        firstSubstitute.onInitListener.onInit(TextToSpeech.SUCCESS)
+        failUtterance(firstSubstitute, TextToSpeech.ERROR_SYNTHESIS)
+        settle()
+
+        assertNull("A failed substituted voice is not the end of the story", player.state.value.error)
+        val secondSubstitute = lastEngine()
+        assertTrue("The next engine of the final pass was asked", secondSubstitute !== firstSubstitute)
+
+        // Only the end of the final pass reports, and the report keeps what every engine answered.
+        secondSubstitute.onInitListener.onInit(TextToSpeech.SUCCESS)
+        failUtterance(secondSubstitute, TextToSpeech.ERROR_SYNTHESIS)
+        settle()
+
+        assertEquals("Only the end of the pass reports", NO_ENGLISH_VOICE, player.state.value.error)
+        assertNotNull("That report carries what the engines answered", player.state.value.diagnostic)
         assertFalse(player.state.value.playing)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** An engine that cannot speak its own voice has its own words end the report. */
+    @Test fun anEngineThatCannotSpeakItsOwnVoiceReportsWhatItSaid() {
+        ShadowTextToSpeech.reset()
+        val player = player(FakeSource())
+        player.speakExample("A little further, one page at a time.", "US")
+        // The only engine declines the voice pass, and the final pass asks it again.
+        engineInitialization(TextToSpeech.SUCCESS)
+
+        val substituting = lastEngine()
+        substituting.onInitListener.onInit(TextToSpeech.SUCCESS)
+        failUtterance(substituting, TextToSpeech.ERROR_NOT_INSTALLED_YET)
+        settle()
+
+        assertEquals(MISSING_ENGLISH_DATA, player.state.value.error)
+        assertNotNull(player.state.value.diagnostic)
+        assertFalse(player.state.value.playing)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /**
+     * A voice the engine offered and set is a real answer: its playback failure is reported as one, and
+     * the request is not handed to another engine behind the reader's back.
+     */
+    @Test fun anOfferedVoiceIsNotGivenAwayWhenItsPlaybackFails() {
+        ShadowTextToSpeech.reset()
+        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
+        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
+        player.speakExample("A little further, one page at a time.", "US")
+        val engine = lastEngine()
+
+        engine.onInitListener.onInit(TextToSpeech.SUCCESS)
+        failUtterance(engine, TextToSpeech.ERROR_SYNTHESIS)
+        settle()
+
+        assertNotNull(player.state.value.error)
+        assertFalse(player.state.value.playing)
+        assertSame("An offered voice's failure is not handed to another engine", engine, lastEngine())
         player.shutdown()
         ShadowTextToSpeech.reset()
     }

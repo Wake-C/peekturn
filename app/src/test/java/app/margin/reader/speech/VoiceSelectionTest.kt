@@ -11,6 +11,7 @@ import androidx.test.core.app.ApplicationProvider
 import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -288,5 +289,122 @@ class VoiceSelectionTest {
         manager.addIntentFilterForService(component, IntentFilter(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE).apply {
             addCategory(Intent.CATEGORY_DEFAULT)
         })
+    }
+
+    /**
+     * Every answer the engine gives is recorded, in the order it was asked, so a failure can report what
+     * the engine said instead of guessing at what it must have meant.
+     */
+    @Test fun everyEngineAnswerIsRecordedInTheOrderItWasAsked() {
+        val answers = mutableListOf<SpeechObservation>()
+        val availability = configureSpeech(
+            Locale.UK, { emptySet() }, { TextToSpeech.ERROR },
+            { TextToSpeech.LANG_NOT_SUPPORTED }, { null }) { answers += it }
+        assertEquals(SpeechAvailability.Unsupported, availability)
+        assertEquals(
+            listOf(
+                SpeechObservation.VoicesListed(0),
+                SpeechObservation.LanguageProbed(Locale.UK, TextToSpeech.LANG_NOT_SUPPORTED),
+                SpeechObservation.LanguageProbed(Locale.US, TextToSpeech.LANG_NOT_SUPPORTED),
+                SpeechObservation.LanguageProbed(Locale.ENGLISH, TextToSpeech.LANG_NOT_SUPPORTED)
+            ),
+            answers
+        )
+    }
+
+    /** An engine that refuses to enumerate has not said it lists no voices, and the record keeps the two apart. */
+    @Test fun anEnumerationThatFailsIsNotRecordedAsAnEmptyList() {
+        val answers = mutableListOf<SpeechObservation>()
+        configureSpeech(
+            Locale.US, { throw IllegalStateException("This engine will not list voices") },
+            { TextToSpeech.ERROR }, { TextToSpeech.LANG_NOT_SUPPORTED }, { null }) { answers += it }
+        assertEquals(listOf(SpeechObservation.VoicesListed(null)), answers.take(1))
+        assertNotEquals(SpeechObservation.VoicesListed(0), answers.first())
+    }
+
+    /**
+     * The device's own voice is the last resort, so it is offered only when no English route worked, and
+     * only for text another voice could read honestly: the app cannot name that voice, and it says so.
+     */
+    @Test fun theDeviceOwnVoiceIsOfferedOnlyAfterEveryEnglishRouteFails() {
+        assertNull("An offered English voice is never bypassed", substitutedDeviceVoiceNotice(SpeechAvailability.Available(), "hello"))
+        assertNotNull("A substituted device voice is labelled", substitutedDeviceVoiceNotice(SpeechAvailability.Unsupported, "hello"))
+        assertNotNull("A missing-data engine may still hold a working voice", substitutedDeviceVoiceNotice(SpeechAvailability.MissingData, "hello"))
+        assertNull("Another script is never handed to a voice the app cannot name",
+            substitutedDeviceVoiceNotice(SpeechAvailability.Unsupported, "你好"))
+        assertNull(substitutedDeviceVoiceNotice(SpeechAvailability.Unsupported, "Привет"))
+        assertNull(substitutedDeviceVoiceNotice(SpeechAvailability.Unsupported, "123"))
+    }
+
+    /** English is recognised by its own script, so an accented Latin sentence stays English. */
+    @Test fun englishTextIsRecognisedByItsOwnScript() {
+        assertTrue(isEnglishText("hello"))
+        assertTrue(isEnglishText("A café's menu, 5 items."))
+        assertFalse(isEnglishText("你好"))
+        assertFalse(isEnglishText("Привет"))
+        assertFalse(isEnglishText("1234"))
+    }
+
+    /**
+     * The three device-speech failures are different device facts and read differently: an engine that
+     * never started, one that offered no English voice, and one whose own voice data it says is missing.
+     */
+    @Test fun eachDeviceSpeechFailureKeepsItsOwnMessage() {
+        val neverStarted = deviceSpeechFailure(engineStarted = false, missingEnglishData = false)
+        val noEnglish = deviceSpeechFailure(engineStarted = true, missingEnglishData = false)
+        val missingData = deviceSpeechFailure(engineStarted = true, missingEnglishData = true)
+
+        assertEquals(DeviceSpeechFailure.NotStarted, neverStarted)
+        assertEquals(DeviceSpeechFailure.NoEnglishVoice, noEnglish)
+        assertEquals(DeviceSpeechFailure.MissingData, missingData)
+        assertEquals(3, setOf(neverStarted.message, noEnglish.message, missingData.message).size)
+        assertEquals(3, setOf(neverStarted.verdict, noEnglish.verdict, missingData.verdict).size)
+    }
+
+    /** A report names every observed fact, so the reader can send it back without adding anything. */
+    @Test fun theReportNamesTheEnginesTheAnswersAndTheResult() {
+        val evidence = SpeechEvidence()
+        evidence.addEngine("com.example.vendor")
+        evidence.observe(SpeechObservation.VoicesListed(4))
+        evidence.observe(SpeechObservation.LanguageProbed(Locale.US, TextToSpeech.LANG_MISSING_DATA))
+        evidence.observe(SpeechObservation.LanguageProbed(Locale.UK, TextToSpeech.LANG_NOT_SUPPORTED))
+        evidence.observe(SpeechObservation.LanguageProbed(Locale.ENGLISH, TextToSpeech.LANG_COUNTRY_AVAILABLE))
+
+        val report = evidence.report(DeviceSpeechFailure.MissingData)
+
+        assertTrue("The engine that was asked belongs in the report", report.contains("com.example.vendor"))
+        assertTrue(report.contains(probeName(Locale.US)))
+        assertTrue(report.contains(languageAnswer(TextToSpeech.LANG_MISSING_DATA)))
+        assertTrue(report.contains(languageAnswer(TextToSpeech.LANG_NOT_SUPPORTED)))
+        assertTrue(report.contains(DeviceSpeechFailure.MissingData.verdict))
+    }
+
+    /** An engine that would not list voices must not read like one that listed none. */
+    @Test fun aRefusedEnumerationDoesNotReadLikeAnEmptyOne() {
+        val refused = SpeechEvidence().apply { observe(SpeechObservation.VoicesListed(null)) }
+        val empty = SpeechEvidence().apply { observe(SpeechObservation.VoicesListed(0)) }
+        assertNotEquals(
+            empty.report(DeviceSpeechFailure.NoEnglishVoice),
+            refused.report(DeviceSpeechFailure.NoEnglishVoice)
+        )
+    }
+
+    /** The engine the reader chose speaks first, so its answers are the report's language answers. */
+    @Test fun theReportKeepsTheAnswersOfTheEngineThatWasAskedFirst() {
+        val first = SpeechEvidence()
+        val later = SpeechEvidence()
+        for (evidence in listOf(first, later)) {
+            evidence.addEngine("com.example.chosen")
+            evidence.observe(SpeechObservation.VoicesListed(0))
+            for (probe in listOf(Locale.US, Locale.UK, Locale.ENGLISH)) {
+                evidence.observe(SpeechObservation.LanguageProbed(probe, TextToSpeech.LANG_NOT_SUPPORTED))
+            }
+        }
+        later.observe(SpeechObservation.LanguageProbed(Locale.FRENCH, TextToSpeech.LANG_MISSING_DATA))
+
+        assertEquals(
+            first.report(DeviceSpeechFailure.NoEnglishVoice),
+            later.report(DeviceSpeechFailure.NoEnglishVoice)
+        )
     }
 }

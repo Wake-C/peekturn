@@ -1,5 +1,7 @@
 package app.margin.reader.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -7,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.Stop
@@ -21,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.graphics.Color
@@ -230,6 +234,7 @@ private fun PronunciationSection(
         }
         playback.error?.let { message -> Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         playback.notice?.let { message -> Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
+        playback.diagnostic?.let { report -> SpeechReport(report) }
         playback.credit?.let { AudioAttribution(it) }
         TextButton(onClick = { details = !details }, modifier = Modifier.heightIn(min = 48.dp)) {
             Icon(if (details) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null)
@@ -243,6 +248,29 @@ private fun PronunciationSection(
                     Text(if (playback.error != null) "Install or choose a system voice" else "System speech settings")
                 }
             }
+        }
+    }
+}
+
+/**
+ * What device speech answered when it could not speak, in the reader's own words: shown only with a
+ * failure, next to it, and copyable, because a reader who sends this back is the only way to settle
+ * what their engine actually reports.
+ */
+@Composable
+private fun SpeechReport(report: String) {
+    val context = LocalContext.current
+    var copied by remember(report) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        SelectionContainer {
+            Text(report, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        TextButton(onClick = {
+            context.getSystemService(ClipboardManager::class.java)
+                ?.setPrimaryClip(ClipData.newPlainText("Speech details", report))
+            copied = true
+        }, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(if (copied) "Copied" else "Copy details")
         }
     }
 }

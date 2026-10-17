@@ -26,14 +26,18 @@ private const val WORD_AUDIO_SOURCE_URL = "https://dict.youdao.com"
 
 /**
  * What Settings tells users about every online audio route: which service receives the text, that it
- * is free and key-free, that both endpoints are unofficial and unlicensed, and that system speech
- * speaks whenever they have nothing. The app claims no licence for either provider's bytes.
+ * is free and key-free, that every endpoint is unofficial and unlicensed, and that system speech
+ * speaks whenever they have nothing. The app claims no licence for any provider's bytes.
  */
 internal const val AUDIO_SOURCE_NOTICE =
-    "The text you ask to hear is sent to a public speech service: recorded word audio comes from Youdao Dictionary when it has one, and Google Translate speech supplies the rest. Both are free and key-free, unofficial and unlicensed, and neither is guaranteed to stay available. Only the text you ask to hear is sent, never the book's context, and system speech is the fallback."
+    "The text you ask to hear is sent to a public speech service: recorded word audio comes from Youdao Dictionary when it has one, Microsoft Read Aloud voices sentences, phrases and words it has no recording for, and Baidu Translate answers when Microsoft's service does not. All are free and key-free, unofficial and unlicensed, and none is guaranteed to stay available. Only the text you ask to hear is sent, never the book's context, and system speech is the fallback."
 
-/** Bounded audio for one request, and the attribution that must accompany it. */
-class AudioClip(val audio: ByteArray, val credit: AudioCredit)
+/**
+ * Bounded audio for one request, and the attribution that must accompany it. [notice] carries anything
+ * about the clip the reader should be told — the fallback's single English accent, for instance — so an
+ * honest caveat travels with the bytes rather than being guessed from the credit.
+ */
+class AudioClip(val audio: ByteArray, val credit: AudioCredit, val notice: String? = null)
 
 /** Audio for one word and accent; null means no usable audio, so the next route speaks instead. */
 fun interface WordAudioSource {
@@ -82,7 +86,7 @@ internal fun mpegAudio(bytes: ByteArray): Boolean = bytes.size >= 3 && (
 /**
  * Single-word audio from the public Youdao Dictionary voice endpoint: one bounded, key-free request
  * per word, cancelled with its coroutine. Unavailable, oversized, malformed or unexpected answers all
- * mean "no audio", so the next route — the speech service, then installed device speech — speaks.
+ * mean "no audio", so the next route — the speech services, then installed device speech — speaks.
  */
 class YoudaoWordAudioClient(
     client: OkHttpClient = OkHttpClient.Builder()
@@ -112,7 +116,7 @@ class YoudaoWordAudioClient(
 }
 
 /**
- * One bounded GET shared by both audio routes: cancelled with its coroutine, and any problem at all
+ * One bounded GET shared by the key-free fetch routes, word audio and the sentence fallback: cancelled with its coroutine, and any problem at all
  * means "no audio" so the caller keeps the text and speaks it another way.
  */
 @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
