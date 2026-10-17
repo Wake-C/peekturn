@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,6 +41,7 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.margin.reader.R
 import app.margin.reader.data.OfflineDictionary
 import app.margin.reader.model.*
 import app.margin.reader.speech.PronunciationPlayer
@@ -101,7 +103,7 @@ fun LearningPopup(
         try {
             entry = dictionary.lookup(context.selection)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { dictionaryError = "The offline dictionary could not be opened. Try again." }
+        catch (_: Exception) { dictionaryError = androidContext.getString(R.string.reader_lookup_dictionary_error) }
         finally { dictionaryLoading = false }
     }
     val density = LocalDensity.current
@@ -156,7 +158,7 @@ fun LearningPopup(
                         speech.speakWord(context.selection, accent)
                     }
                     IconButton(onClick = { close() }, modifier = Modifier.size(48.dp)) {
-                        Icon(popupClose, contentDescription = "Close explanation", modifier = Modifier.size(20.dp))
+                        Icon(popupClose, contentDescription = stringResource(R.string.reader_lookup_close_description), modifier = Modifier.size(20.dp))
                     }
                 }
                 val details = listOf(phonetic.takeIf { it.isNotBlank() }, partOfSpeech.takeIf { it.isNotBlank() })
@@ -165,10 +167,10 @@ fun LearningPopup(
                     fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.fillMaxWidth().selectableGroup()) {
-                    LookupTab("Explain", !dictionaryTab, Modifier.weight(1f)) {
+                    LookupTab(stringResource(R.string.reader_lookup_tab_explain), !dictionaryTab, Modifier.weight(1f)) {
                         explanationRequested = true; dictionaryTab = false
                     }
-                    LookupTab("Dictionary", dictionaryTab, Modifier.weight(1f)) { dictionaryTab = true }
+                    LookupTab(stringResource(R.string.reader_lookup_tab_dictionary), dictionaryTab, Modifier.weight(1f)) { dictionaryTab = true }
                 }
                 HorizontalDivider()
                 key(context, dictionaryTab) {
@@ -179,11 +181,11 @@ fun LearningPopup(
                             fontSize = 17.sp, lineHeight = 23.sp)
                         if (!dictionaryTab) {
                             if (answer.context.isNotBlank()) Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Text("Context", fontSize = 12.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.primary)
+                                Text(stringResource(R.string.reader_lookup_section_context), fontSize = 12.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.primary)
                                 Text(answer.context, fontSize = 15.sp, lineHeight = 21.sp)
                             }
                             if (answer.examples.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text("Examples", fontSize = 12.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.primary)
+                                Text(stringResource(R.string.reader_lookup_section_examples), fontSize = 12.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.primary)
                                 answer.examples.forEach { example ->
                                     // Both examples share one trailing icon column, and each speaker
                                     // stays on its own first line: a wrapped example can no longer
@@ -200,18 +202,18 @@ fun LearningPopup(
                         if (loading) Row(verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                            Text(if (dictionaryTab) "Looking up…" else "Explaining…", fontSize = 13.sp,
+                            Text(stringResource(if (dictionaryTab) R.string.reader_lookup_loading_dictionary else R.string.reader_lookup_loading_explanation), fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (dictionaryTab && !loading && entry == null && error == null) {
-                            Text("No offline entry for this selection.", fontSize = 15.sp)
+                            Text(stringResource(R.string.reader_lookup_empty_dictionary), fontSize = 15.sp)
                         }
                         error?.let {
                             Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
                             TextButton(onClick = {
                                 if (dictionaryTab) dictionaryRetry++
                                 else session.retry(context, latestSettings.activeProfileId, latestSettings.model)
-                            }, enabled = !loading) { Text("Retry") }
+                            }, enabled = !loading) { Text(stringResource(R.string.reader_lookup_retry)) }
                         }
                         playback.notice?.let {
                             Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 17.sp)
@@ -221,8 +223,8 @@ fun LearningPopup(
                             Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
                             playback.diagnostic?.let { report -> SpeechReport(report) }
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                TextButton(onClick = speech::openSystemSettings) { Text("Speech settings") }
-                                TextButton(onClick = speech::dismissFailure) { Text("Dismiss") }
+                                TextButton(onClick = speech::openSystemSettings) { Text(stringResource(R.string.reader_lookup_speech_settings)) }
+                                TextButton(onClick = speech::dismissFailure) { Text(stringResource(R.string.reader_lookup_dismiss_failure)) }
                             }
                         }
                     }
@@ -230,10 +232,10 @@ fun LearningPopup(
                 HorizontalDivider()
                 Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = { speech.stop(); onAdjust() }, modifier = Modifier.weight(1f)) {
-                        Text("Adjust", fontSize = 13.sp, maxLines = 1)
+                        Text(stringResource(R.string.reader_lookup_adjust), fontSize = 13.sp, maxLines = 1)
                     }
                     TextButton(onClick = { close() }, modifier = Modifier.weight(1f)) {
-                        Text("Close", fontSize = 13.sp, maxLines = 1)
+                        Text(stringResource(R.string.reader_lookup_close), fontSize = 13.sp, maxLines = 1)
                     }
                 }
             }
@@ -265,7 +267,7 @@ private fun SpeakButton(
         Box(Modifier.fillMaxSize(),
             contentAlignment = if (firstLine) Alignment.TopCenter else Alignment.Center) {
             Icon(if (active) Icons.Outlined.Stop else Icons.AutoMirrored.Outlined.VolumeUp,
-                contentDescription = if (active) "Stop pronunciation" else "Pronounce",
+                contentDescription = stringResource(if (active) R.string.reader_lookup_stop_pronouncing else R.string.reader_lookup_pronounce),
                 modifier = Modifier.size(20.dp))
         }
     }

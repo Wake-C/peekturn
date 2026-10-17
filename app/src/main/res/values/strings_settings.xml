@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings owned by SettingsScreen.kt. Other screens keep their own resource files/prefixes. -->
+<resources>
+    <string name="settings_title">Settings</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme_dark">Focus Dark</string>
+    <string name="settings_theme_light">Classic White</string>
+    <string name="settings_theme_warm">Warm Paper</string>
+    <string name="settings_theme_oled">Midnight</string>
+    <string name="settings_theme_sage">Sage</string>
+    <string name="settings_language">Language</string>
+    <!-- %1$s is the language the app would use on the current system setting. -->
+    <string name="settings_language_system">Follow system (%1$s)</string>
+    <string name="settings_language_en">English</string>
+    <string name="settings_language_zh">简体中文</string>
+    <string name="settings_ai_profiles">AI profiles</string>
+    <string name="settings_add">Add</string>
+    <string name="settings_unnamed_profile">Unnamed profile</string>
+    <string name="settings_not_configured">Not configured</string>
+    <string name="settings_edit_profile">Edit %1$s</string>
+    <string name="settings_delete_profile">Delete %1$s</string>
+    <string name="settings_quick_explain">Quick Explain</string>
+    <string name="settings_quick_explain_detail">Explain a selection once you release it. Off keeps Explain as an explicit action.</string>
+    <string name="settings_delete_profile_title">Delete %1$s?</string>
+    <string name="settings_delete">Delete</string>
+    <string name="settings_cancel">Cancel</string>
+    <string name="settings_pronunciation">Pronunciation</string>
+    <string name="settings_auto_pronounce">Auto-pronounce</string>
+    <string name="settings_auto_pronounce_detail">Speak the selected word or phrase once when a lookup opens.</string>
+    <string name="settings_us_english">US English</string>
+    <string name="settings_uk_english">UK English</string>
+    <string name="settings_word">Word</string>
+    <string name="settings_sentence">Sentence</string>
+    <string name="settings_stop">Stop</string>
+    <string name="settings_hide_audio_details">Hide audio details</string>
+    <string name="settings_audio_details">Audio details</string>
+    <string name="settings_install_voice">Install or choose a system voice</string>
+    <string name="settings_system_speech_settings">System speech settings</string>
+    <string name="settings_ai_profile">AI profile</string>
+    <string name="settings_profile_name">Profile name</string>
+    <string name="settings_base_url">Base URL</string>
+    <string name="settings_model_identifier">Model identifier</string>
+    <string name="settings_api_key">API key</string>
+    <string name="settings_temperature">Temperature</string>
+    <string name="settings_temperature_detail">Temperature sets how random the answers are, not how fast they arrive. Allowed values are 0 to 2; lower is more predictable. Provider support varies.</string>
+    <string name="settings_test_charge_detail">Connection testing sends a short real request and may incur provider charges.</string>
+    <string name="settings_connection_test_failed">The connection test failed.</string>
+    <string name="settings_connection_test_incomplete">The connection test could not complete. Check your configuration and connection.</string>
+    <string name="settings_testing_connection">Testing connection</string>
+    <string name="settings_test_connection">Test connection</string>
+    <string name="settings_save_profile">Save profile</string>
+</resources>

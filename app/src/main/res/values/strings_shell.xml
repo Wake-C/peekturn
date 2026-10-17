@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shell_app_name">Margin</string>
+
+    <!-- Library -->
+    <string name="shell_library_title">Library</string>
+    <string name="shell_add_book">Add book</string>
+    <string name="shell_empty_library">No books yet</string>
+    <string name="shell_continue_book">Continue %1$s</string>
+    <string name="shell_unknown_author">Unknown author</string>
+    <string name="shell_progress_label">Progress: %1$s</string>
+    <string name="shell_continue">Continue</string>
+    <string name="shell_shelf_heading">Shelf</string>
+    <string name="shell_search_books_hint">Search books</string>
+    <string name="shell_search_books_description">Search by title or author</string>
+    <string name="shell_open_book">Open %1$s</string>
+    <string name="shell_book_options">Options for %1$s</string>
+    <string name="shell_filter_all">All</string>
+    <string name="shell_filter_reading">Reading</string>
+    <string name="shell_filter_unread">Unread</string>
+    <string name="shell_filter_finished">Finished</string>
+    <string name="shell_no_matching_books">No matching books</string>
+    <string name="shell_remove_book_title">Remove book?</string>
+    <string name="shell_remove_book_message">Remove “%1$s”, its reading position, and its reading-time records from Margin? Your original EPUB is not changed.</string>
+    <string name="shell_remove">Remove</string>
+    <string name="shell_keep_book">Keep book</string>
+    <string name="shell_progress_finished">Finished</string>
+    <string name="shell_progress_not_started">Not started</string>
+    <string name="shell_progress_reading">Reading</string>
+    <string name="shell_progress_percent">%1$d%% read</string>
+
+    <!-- Statistics -->
+    <string name="shell_statistics_title">Statistics</string>
+    <string name="shell_metric_today">Today</string>
+    <string name="shell_metric_week">This week</string>
+    <string name="shell_metric_total">Total</string>
+    <string name="shell_metric_week_description">This week, Monday onward</string>
+    <string name="shell_metric_total_description">All reading time</string>
+    <string name="shell_metric_description">%1$s: %2$s</string>
+    <string name="shell_reading_time">Reading time</string>
+    <string name="shell_days">%1$d days</string>
+    <string name="shell_reading_time_last_days">%1$s in the last %2$d days</string>
+    <string name="shell_no_reading_time">No reading time yet</string>
+    <string name="shell_recent_books">Recent books</string>
+    <string name="shell_read_book">Read %1$s</string>
+    <string name="shell_peak_day">Peak day: %1$s</string>
+    <string name="shell_chart_description">Daily reading chart. %1$s</string>
+    <string name="shell_chart_day">%1$s: %2$s</string>
+    <string name="shell_chart_date_pattern">MMM d</string>
+    <string name="shell_list_separator">"; "</string>
+
+    <!-- Durations -->
+    <string name="shell_duration_zero">0 min</string>
+    <string name="shell_duration_seconds">%1$d sec</string>
+    <string name="shell_duration_minutes">%1$d min</string>
+    <string name="shell_duration_hours">%1$d hr</string>
+    <string name="shell_duration_hours_minutes">%1$d hr %2$d min</string>
+    <string name="shell_compact_duration_zero">0m</string>
+    <string name="shell_compact_duration_seconds">%1$ds</string>
+    <string name="shell_compact_duration_minutes">%1$dm</string>
+    <string name="shell_compact_duration_hours">%1$dh</string>
+    <string name="shell_compact_duration_hours_minutes">%1$dh %2$dm</string>
+
+    <!-- Book search -->
+    <string name="shell_search_title">Search book</string>
+    <string name="shell_search_placeholder">Word or phrase</string>
+    <string name="shell_search_this_book">Search this book</string>
+    <string name="shell_search_busy">Searching…</string>
+    <string name="shell_search_no_matches">No matches.</string>
+    <string name="shell_search_failed">Search failed. Submit the query to try again.</string>
+    <string name="shell_search_matches">%1$d matches</string>
+    <string name="shell_search_matches_more">%1$d matches loaded</string>
+    <string name="shell_more_results">More results</string>
+    <string name="shell_open_match">Open match</string>
+    <string name="shell_close">Close</string>
+</resources>

@@ -54,7 +54,9 @@ data class AppSettings(
     val profiles: List<LlmProfile> = listOf(LlmProfile("default", ModelConfig())),
     val activeProfileId: String = "default",
     val reading: ReaderPreferences = ReaderPreferences(),
-    val appTheme: String = "dark"
+    val appTheme: String = "dark",
+    /** "system", "en" or "zh"; stored as the in-app choice, never inferred from the current locale. */
+    val uiLanguage: String = "system"
 ) {
     val model: ModelConfig
         get() = profiles.firstOrNull { it.id == activeProfileId }?.config ?: ModelConfig()

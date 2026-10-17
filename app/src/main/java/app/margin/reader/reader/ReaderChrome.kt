@@ -22,20 +22,17 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.margin.reader.ui.isDarkTheme
 import app.margin.reader.ui.marginColorScheme
 import kotlin.math.roundToInt
 
-internal fun readerPaper(theme: String) = when (theme) {
-    "warm" -> Color(0xFFEEE5D3)
-    "light" -> Color(0xFFFAF9F4)
-    else -> Color(0xFF171E23)
-}
+internal fun readerPaper(theme: String) = marginColorScheme(theme).background
 
 /**
  * The tint the navigator paints behind selected book text. Readium CSS draws `::selection` from
  * `--RS__selectionBackgroundColor`, whose stock #b4d8fe is the platform blue that fights the warm
- * palette; the theme's own accent at one alpha keeps the highlight inside the palette in all three
- * themes while selected text keeps its ink colour.
+ * palette; the theme's own accent at one alpha keeps the highlight inside the palette in every
+ * theme while selected text keeps its ink colour.
  */
 internal fun readerSelectionBackground(theme: String): String {
     val accent = marginColorScheme(theme).primary
@@ -54,8 +51,9 @@ private const val SELECTION_ALPHA = 0.32f
  * title visible for large-text readers at the cost of a label that stays 11dp tall.
  */
 @Composable internal fun ReaderPosition(chapter: String, progress: String, theme: String, immersive: Boolean) {
-    val ink = if (theme == "dark") Color(0xFFE9E8DF) else Color(0xFF262B2C)
-    val labelInk = ink.copy(alpha = if (theme == "dark") 0.62f else 0.72f)
+    val scheme = marginColorScheme(theme)
+    val ink = scheme.onBackground
+    val labelInk = ink.copy(alpha = if (isDarkTheme(theme)) 0.62f else 0.72f)
     val stableInsets = WindowInsets.displayCutout.union(
         if (immersive) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBarsIgnoringVisibility
     )
@@ -91,7 +89,7 @@ private const val SELECTION_ALPHA = 0.32f
 @Composable internal fun ReaderChrome(
     theme: String, onContents: () -> Unit, onSearch: () -> Unit, onAppearance: () -> Unit
 ) {
-    val ink = if (theme == "dark") Color(0xFFE9E8DF) else Color(0xFF262B2C)
+    val ink = marginColorScheme(theme).onBackground
     Box(Modifier.fillMaxSize()) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, contentColor = ink,
             shape = MaterialTheme.shapes.medium,

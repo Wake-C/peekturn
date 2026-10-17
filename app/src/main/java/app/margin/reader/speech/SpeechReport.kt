@@ -17,7 +17,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import app.margin.reader.R
 
 /**
  * What the speech routes answered when they could not speak, in the reader's own words: shown only
@@ -38,10 +40,10 @@ fun SpeechReport(report: String) {
         }
         TextButton(onClick = {
             context.getSystemService(ClipboardManager::class.java)
-                ?.setPrimaryClip(ClipData.newPlainText("Speech details", report))
+                ?.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.speech_report_clip_label), report))
             copied = true
         }, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text(if (copied) "Copied" else "Copy details")
+            Text(stringResource(if (copied) R.string.speech_report_copied else R.string.speech_report_copy_details))
         }
     }
 }

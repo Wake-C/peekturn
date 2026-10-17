@@ -34,17 +34,20 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.FragmentContainerView
 import androidx.lifecycle.lifecycleScope
 import app.margin.reader.MarginApp
+import app.margin.reader.R
 import app.margin.reader.data.ReadingTracker
 import app.margin.reader.learning.LearningPopup
 import app.margin.reader.learning.LearningSession
 import app.margin.reader.model.*
 import app.margin.reader.ui.BookSearchDialog
 import app.margin.reader.ui.BookSearchState
+import app.margin.reader.ui.BookSearchStatus
 import app.margin.reader.ui.MarginTheme
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -86,7 +89,7 @@ class ReaderActivity : AppCompatActivity() {
     private var searchIterator: SearchIterator? = null
     private var searchQuery by mutableStateOf("")
     private var searchResults by mutableStateOf<List<Locator>>(emptyList())
-    private var searchMessage by mutableStateOf("")
+    private var searchStatus by mutableStateOf<BookSearchStatus>(BookSearchStatus.Idle)
     private var searchBusy by mutableStateOf(false)
     private var searchEnded by mutableStateOf(false)
     private var latestQueued: String? = null
@@ -213,7 +216,7 @@ class ReaderActivity : AppCompatActivity() {
                             graph.store.savePosition(loaded.id, locator.toJSON().toString(), locator.locations.totalProgression ?: loaded.progression)
                         } catch (e: CancellationException) { throw e }
                         catch (_: Exception) {
-                            runOnUiThread { Toast.makeText(this@ReaderActivity, "Reading position could not be saved.", Toast.LENGTH_LONG).show() }
+                            runOnUiThread { Toast.makeText(this@ReaderActivity, getString(R.string.reader_toast_position_not_saved), Toast.LENGTH_LONG).show() }
                         }
                     }
                 }
@@ -221,7 +224,7 @@ class ReaderActivity : AppCompatActivity() {
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) {
                 graph.store.clearLastBook()
-                Toast.makeText(this@ReaderActivity, "This book cannot be opened. Please import a readable EPUB again.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@ReaderActivity, getString(R.string.reader_toast_book_cannot_open), Toast.LENGTH_LONG).show()
                 finish()
             }
         }
@@ -244,14 +247,14 @@ class ReaderActivity : AppCompatActivity() {
                     try { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
                     catch (e: android.content.ActivityNotFoundException) {
                         android.util.Log.w("MarginReader", "No external browser available")
-                        Toast.makeText(this@ReaderActivity, "No browser is available to open this link.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@ReaderActivity, getString(R.string.reader_toast_no_browser), Toast.LENGTH_SHORT).show()
                     }
                 }
                 override fun onResourceLoadFailed(href: org.readium.r2.shared.util.Url, error: org.readium.r2.shared.util.data.ReadError) {
                     if (!shouldExitForResourceFailure(href.removeQuery().removeFragment().toString(), spineHtmlHrefs)) return
                     lifecycleScope.launch {
                         graph.store.clearLastBook()
-                        Toast.makeText(this@ReaderActivity, "A chapter could not be loaded. Please import a readable EPUB again.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this@ReaderActivity, getString(R.string.reader_toast_chapter_load_failed), Toast.LENGTH_LONG).show()
                         finish()
                     }
                 }
@@ -397,7 +400,7 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun goSafely(link: Link) {
         if (!isSafeNavigationLink(link)) {
-            Toast.makeText(this, "This link has an unsafe location identifier.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.reader_toast_unsafe_link), Toast.LENGTH_SHORT).show()
             return
         }
         navigate { it.go(link) }
@@ -405,7 +408,7 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun goSafely(locator: Locator) {
         if (!isSafeReaderLocator(locator)) {
-            Toast.makeText(this, "This location has an unsafe identifier.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.reader_toast_unsafe_location), Toast.LENGTH_SHORT).show()
             return
         }
         navigate { it.go(locator) }
@@ -663,17 +666,17 @@ class ReaderActivity : AppCompatActivity() {
 
     @Composable private fun ContentsDialog() {
         val chapters = remember(publication) { flattenContents(publication?.tableOfContents.orEmpty()) }
-        AlertDialog(onDismissRequest = { panel = null }, title = { Text("Chapters") },
+        AlertDialog(onDismissRequest = { panel = null }, title = { Text(stringResource(R.string.reader_contents_title)) },
             text = {
                 LazyColumn(Modifier.heightIn(max = 480.dp)) {
-                    if (chapters.isEmpty()) item { Text("This book has no table of contents.") }
+                    if (chapters.isEmpty()) item { Text(stringResource(R.string.reader_contents_empty)) }
                     items(chapters) { (depth, link) ->
                         TextButton(onClick = { panel = null; goSafely(link) }, modifier = Modifier.fillMaxWidth().padding(start = (depth.coerceAtMost(5) * 12).dp)) {
-                            Text(link.title ?: "Untitled chapter", Modifier.fillMaxWidth())
+                            Text(link.title ?: stringResource(R.string.reader_chapter_untitled), Modifier.fillMaxWidth())
                         }
                     }
                 }
-            }, confirmButton = { TextButton(onClick = { panel = null }) { Text("Close") } })
+            }, confirmButton = { TextButton(onClick = { panel = null }) { Text(stringResource(R.string.reader_close)) } })
     }
 
     @Composable private fun SearchDialog() {
@@ -682,8 +685,7 @@ class ReaderActivity : AppCompatActivity() {
             state = BookSearchState(
                 query = searchQuery,
                 results = searchResults,
-                message = searchMessage,
-                busy = searchBusy,
+                status = searchStatus,
                 hasMore = !searchEnded && searchIterator != null
             ),
             chapterTitle = { locator -> chapterTitles?.titleFor(locator).orEmpty() },
@@ -698,15 +700,15 @@ class ReaderActivity : AppCompatActivity() {
     private fun startSearch(query: String) {
         closeSearch()
         searchResults = emptyList()
-        searchMessage = ""
         searchEnded = false
         searchBusy = true
+        searchStatus = BookSearchStatus.Busy
         searchJob = lifecycleScope.launch {
             try {
                 searchIterator = publication?.search(query.trim()) ?: error("Search unavailable")
                 readSearchPage()
             } catch (e: CancellationException) { throw e }
-            catch (_: Exception) { searchMessage = "This book could not be searched." }
+            catch (_: Exception) { searchStatus = BookSearchStatus.Failed }
             finally { searchBusy = false }
         }
     }
@@ -717,7 +719,7 @@ class ReaderActivity : AppCompatActivity() {
         searchJob = lifecycleScope.launch {
             try { readSearchPage() }
             catch (e: CancellationException) { throw e }
-            catch (_: Exception) { searchMessage = "Search failed. Submit the query to try again." }
+            catch (_: Exception) { searchStatus = BookSearchStatus.Failed }
             finally { searchBusy = false }
         }
     }
@@ -726,7 +728,8 @@ class ReaderActivity : AppCompatActivity() {
         val page = searchIterator?.next()?.getOrElse { throw IllegalStateException("Search failed") }
         searchEnded = page == null
         if (page != null) searchResults = searchResults + page.locators
-        searchMessage = if (searchResults.isEmpty() && searchEnded) "No matches." else "${searchResults.size} matches${if (searchEnded) "" else " loaded"}"
+        searchStatus = if (searchResults.isEmpty() && searchEnded) BookSearchStatus.NoMatches
+            else BookSearchStatus.Loaded(searchResults.size, searchEnded)
     }
 
     private fun closeSearch() {
@@ -739,25 +742,25 @@ class ReaderActivity : AppCompatActivity() {
 
     @Composable private fun TypographyDialog(settings: AppSettings) {
         var preferences by remember { mutableStateOf(settings.reading) }
-        AlertDialog(onDismissRequest = { panel = null }, title = { Text("Reading appearance") }, text = {
+        AlertDialog(onDismissRequest = { panel = null }, title = { Text(stringResource(R.string.reader_appearance_title)) }, text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("Typeface")
+                Text(stringResource(R.string.reader_appearance_typeface))
                 Row {
-                    TextButton(onClick = { preferences = preferences.copy(fontFamily = "serif") }) { Text(if (preferences.fontFamily == "serif") "✓ Serif" else "Serif") }
-                    TextButton(onClick = { preferences = preferences.copy(fontFamily = "sans-serif") }) { Text(if (preferences.fontFamily != "serif") "✓ Sans" else "Sans") }
+                    TextButton(onClick = { preferences = preferences.copy(fontFamily = "serif") }) { val serif = stringResource(R.string.reader_appearance_typeface_serif); Text(if (preferences.fontFamily == "serif") stringResource(R.string.reader_appearance_typeface_selected, serif) else serif) }
+                    TextButton(onClick = { preferences = preferences.copy(fontFamily = "sans-serif") }) { val sans = stringResource(R.string.reader_appearance_typeface_sans); Text(if (preferences.fontFamily != "serif") stringResource(R.string.reader_appearance_typeface_selected, sans) else sans) }
                 }
-                PreferenceSlider("Font size", "${preferences.fontSize.toInt()}%", preferences.fontSize, 100f..180f) { preferences = preferences.copy(fontSize = it) }
-                PreferenceSlider("Line height", String.format(java.util.Locale.US, "%.2f×", preferences.lineHeight), preferences.lineHeight, 1f..2.4f) { preferences = preferences.copy(lineHeight = it) }
-                PreferenceSlider("Paragraph spacing", String.format(java.util.Locale.US, "%.2f em", preferences.paragraphSpacing), preferences.paragraphSpacing, 0f..2f) { preferences = preferences.copy(paragraphSpacing = it) }
-                PreferenceSlider("Side margins", String.format(java.util.Locale.US, "%.2f×", preferences.pageMargins), preferences.pageMargins, 0.3f..2.5f) { preferences = preferences.copy(pageMargins = it) }
-                PreferenceSlider("Top text distance", "${preferences.topPaddingDp.toInt()} dp", preferences.topPaddingDp, 16f..120f) { preferences = preferences.copy(topPaddingDp = it) }
-                PreferenceSlider("Bottom text distance", "${preferences.bottomPaddingDp.toInt()} dp", preferences.bottomPaddingDp, 24f..140f) { preferences = preferences.copy(bottomPaddingDp = it) }
+                PreferenceSlider(stringResource(R.string.reader_appearance_font_size), stringResource(R.string.reader_appearance_font_size_value, preferences.fontSize.toInt()), preferences.fontSize, 100f..180f) { preferences = preferences.copy(fontSize = it) }
+                PreferenceSlider(stringResource(R.string.reader_appearance_line_height), stringResource(R.string.reader_appearance_line_height_value, preferences.lineHeight), preferences.lineHeight, 1f..2.4f) { preferences = preferences.copy(lineHeight = it) }
+                PreferenceSlider(stringResource(R.string.reader_appearance_paragraph_spacing), stringResource(R.string.reader_appearance_paragraph_spacing_value, preferences.paragraphSpacing), preferences.paragraphSpacing, 0f..2f) { preferences = preferences.copy(paragraphSpacing = it) }
+                PreferenceSlider(stringResource(R.string.reader_appearance_side_margins), stringResource(R.string.reader_appearance_side_margins_value, preferences.pageMargins), preferences.pageMargins, 0.3f..2.5f) { preferences = preferences.copy(pageMargins = it) }
+                PreferenceSlider(stringResource(R.string.reader_appearance_top_distance), stringResource(R.string.reader_appearance_distance_value, preferences.topPaddingDp.toInt()), preferences.topPaddingDp, 16f..120f) { preferences = preferences.copy(topPaddingDp = it) }
+                PreferenceSlider(stringResource(R.string.reader_appearance_bottom_distance), stringResource(R.string.reader_appearance_distance_value, preferences.bottomPaddingDp.toInt()), preferences.bottomPaddingDp, 24f..140f) { preferences = preferences.copy(bottomPaddingDp = it) }
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Text("Continuous scrolling", Modifier.padding(top = 12.dp))
+                    Text(stringResource(R.string.reader_appearance_continuous), Modifier.padding(top = 12.dp))
                     Switch(checked = preferences.scroll, onCheckedChange = { preferences = preferences.copy(scroll = it) })
                 }
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Text("Immersive reading", Modifier.weight(1f).padding(top = 12.dp))
+                    Text(stringResource(R.string.reader_appearance_immersive), Modifier.weight(1f).padding(top = 12.dp))
                     Switch(checked = preferences.immersive, onCheckedChange = { preferences = preferences.copy(immersive = it) })
                 }
             }
@@ -767,8 +770,8 @@ class ReaderActivity : AppCompatActivity() {
                 // The settings observer applies typography and viewport geometry together.
                 graph.scope.launch { graph.store.updateSettings { latest -> latest.copy(reading = changed) } }
                 panel = null
-            }) { Text("Apply") }
-        }, dismissButton = { TextButton(onClick = { panel = null }) { Text("Cancel") } })
+            }) { Text(stringResource(R.string.reader_apply)) }
+        }, dismissButton = { TextButton(onClick = { panel = null }) { Text(stringResource(R.string.reader_cancel)) } })
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {

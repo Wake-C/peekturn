@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reading, lookup and speech copy. Technical identifiers in the diagnostic report stay English. -->
+<resources>
+    <!-- Lookup popup -->
+    <string name="reader_lookup_tab_explain">Explain</string>
+    <string name="reader_lookup_tab_dictionary">Dictionary</string>
+    <string name="reader_lookup_section_context">Context</string>
+    <string name="reader_lookup_section_examples">Examples</string>
+    <string name="reader_lookup_loading_dictionary">Looking up…</string>
+    <string name="reader_lookup_loading_explanation">Explaining…</string>
+    <string name="reader_lookup_empty_dictionary">No offline entry for this selection.</string>
+    <string name="reader_lookup_retry">Retry</string>
+    <string name="reader_lookup_speech_settings">Speech settings</string>
+    <string name="reader_lookup_dismiss_failure">Dismiss</string>
+    <string name="reader_lookup_adjust">Adjust</string>
+    <string name="reader_lookup_close">Close</string>
+    <string name="reader_lookup_close_description">Close explanation</string>
+    <string name="reader_lookup_pronounce">Pronounce</string>
+    <string name="reader_lookup_stop_pronouncing">Stop pronunciation</string>
+    <string name="reader_lookup_dictionary_error">The offline dictionary could not be opened. Try again.</string>
+
+    <!-- Reader dialogs -->
+    <string name="reader_contents_title">Chapters</string>
+    <string name="reader_contents_empty">This book has no table of contents.</string>
+    <string name="reader_chapter_untitled">Untitled chapter</string>
+    <string name="reader_close">Close</string>
+    <string name="reader_appearance_title">Reading appearance</string>
+    <string name="reader_appearance_typeface">Typeface</string>
+    <string name="reader_appearance_typeface_serif">Serif</string>
+    <string name="reader_appearance_typeface_sans">Sans</string>
+    <string name="reader_appearance_typeface_selected">✓ %1$s</string>
+    <string name="reader_appearance_font_size">Font size</string>
+    <string name="reader_appearance_font_size_value">%1$d%%</string>
+    <string name="reader_appearance_line_height">Line height</string>
+    <string name="reader_appearance_line_height_value">%1$.2f×</string>
+    <string name="reader_appearance_paragraph_spacing">Paragraph spacing</string>
+    <string name="reader_appearance_paragraph_spacing_value">%1$.2f em</string>
+    <string name="reader_appearance_side_margins">Side margins</string>
+    <string name="reader_appearance_side_margins_value">%1$.2f×</string>
+    <string name="reader_appearance_top_distance">Top text distance</string>
+    <string name="reader_appearance_bottom_distance">Bottom text distance</string>
+    <string name="reader_appearance_distance_value">%1$d dp</string>
+    <string name="reader_appearance_continuous">Continuous scrolling</string>
+    <string name="reader_appearance_immersive">Immersive reading</string>
+    <string name="reader_apply">Apply</string>
+    <string name="reader_cancel">Cancel</string>
+
+    <!-- Reader toasts -->
+    <string name="reader_toast_position_not_saved">Reading position could not be saved.</string>
+    <string name="reader_toast_book_cannot_open">This book cannot be opened. Please import a readable EPUB again.</string>
+    <string name="reader_toast_no_browser">No browser is available to open this link.</string>
+    <string name="reader_toast_chapter_load_failed">A chapter could not be loaded. Please import a readable EPUB again.</string>
+    <string name="reader_toast_unsafe_link">This link has an unsafe location identifier.</string>
+    <string name="reader_toast_unsafe_location">This location has an unsafe identifier.</string>
+
+    <!-- Speech notices and failures. The diagnostic report below them stays in English. -->
+    <string name="speech_notice_accent_not_guaranteed">Using system English; requested accent is not guaranteed.</string>
+    <string name="speech_notice_device_default_voice">Using this device\'s own voice instead of an installed English one; the requested accent is not guaranteed.</string>
+    <string name="speech_notice_baidu_accent">Baidu Translate has a single English voice, so the requested accent is not guaranteed.</string>
+    <string name="speech_notice_no_online_audio">No online audio is available for this text; using system speech.</string>
+    <string name="speech_failure_too_long_online">This text is too long for online audio</string>
+    <string name="speech_notice_too_long_online">%1$s; using system speech.</string>
+    <string name="speech_failure_online_failed">Online audio failed</string>
+    <string name="speech_failure_both_online_routes">Both online audio routes failed</string>
+    <string name="speech_failure_all_online_routes">All %1$d online audio routes failed</string>
+    <string name="speech_failure_online_playback">Online audio was found but could not play</string>
+    <string name="speech_failure_online_and_device">%1$s, and %2$s</string>
+    <string name="speech_failure_engine_not_started">The device\'s speech engine did not start. Open system speech settings to check it.</string>
+    <string name="speech_failure_missing_english_data">Your speech engine reports its English voice data is missing. Open system speech settings to download it, then try again.</string>
+    <string name="speech_failure_no_english_voice">None of the device\'s speech engines offered an English voice. Check system speech settings.</string>
+    <string name="speech_failure_engine_playback">Your speech engine accepted English but could not speak it. Check system speech settings, or choose another engine.</string>
+    <string name="speech_failure_too_long_for_system">This text is too long for system speech. Select a shorter phrase.</string>
+    <string name="speech_failure_playback">Speech playback failed. Check system speech settings and try again.</string>
+    <string name="speech_failure_playback_settings">Speech playback failed. Check system speech settings.</string>
+    <string name="speech_failure_settings_unavailable">System speech settings are unavailable on this device.</string>
+    <string name="speech_failure_choose_accent">Choose US or UK pronunciation.</string>
+    <string name="speech_failure_no_text">There is no text to pronounce.</string>
+    <string name="speech_failure_audio_unavailable">Audio is currently unavailable. Try pronunciation again.</string>
+    <string name="speech_source_notice">The text you ask to hear is sent to a public speech service: recorded word audio comes from Youdao Dictionary when it has one, Microsoft Read Aloud voices sentences, phrases and words it has no recording for, and Baidu Translate answers when Microsoft\'s service does not. All are free and key-free, unofficial and unlicensed, and none is guaranteed to stay available. Only the text you ask to hear is sent, never the book\'s context, and system speech is the fallback.</string>
+    <string name="speech_report_copy_details">Copy details</string>
+    <string name="speech_report_copied">Copied</string>
+    <string name="speech_report_clip_label">Speech details</string>
+</resources>

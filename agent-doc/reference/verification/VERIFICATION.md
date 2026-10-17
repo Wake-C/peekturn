@@ -476,3 +476,37 @@ copyable, distinguishes the two online routes, distinguishes a missing engine fr
 carries the clock and version. It cannot prove the reader's own carrier path, the behaviour of their
 OEM engine binary, or audible quality. A fake engine that reports voices and then fails to speak was
 designed but not built; the verdict for that case is covered by unit tests instead.
+
+## Chinese interface, two more themes and chapter naming (2026-10-17)
+
+**Interface language.** Every shell, reading, lookup and speech string now lives in resources with an
+English source and a Simplified Chinese translation (`values-zh`), and Settings offers Follow system /
+English / 中文 through the official per-app locale API with `android:localeConfig`. A Chinese reader gets
+a Chinese interface automatically; a learner can keep the interface in English. Book text, chapter
+titles, dictionary data and IPA are never translated, and the speech diagnostic report stays in English
+on purpose because it is the vocabulary a reader sends back for support.
+
+**Themes.** Appearance now offers five schemes: the existing Focus Dark, Classic White and Warm Paper,
+plus Midnight (true black for AMOLED) and Sage (a soft green-grey paper). Midnight's ink measures
+17.05:1 on its canvas and 16.44:1 on its surface; Sage measures 12.80:1 and 13.76:1, with muted text at
+6.82:1, so both clear the contrast floor the other schemes meet. Reader paper, reader ink, selection tint
+and system-bar icon contrast follow each scheme, and the persistence whitelist accepts the new ids
+instead of silently falling back to dark.
+
+**Chapter naming.** The label resolved a chapter only when the table of contents named that exact
+resource, so a book that titles a part and leaves its chapters untitled showed nothing. A titled part now
+names the untitled chapters beneath it through the table of contents' own hierarchy; a named chapter
+never lends its name to a sibling or another file, and an ambiguous or untitled position still stays
+blank rather than being invented. On the emulator fixture the label continues to read
+"Opening the book" with "1 / 5" beneath it.
+
+Verified on the probe emulator: the app launches in English, switching to 中文 redraws the shell
+(书架/统计/设置) and every Settings label, the choice and theme survive a cold start (persisted
+`appTheme: "sage"`, Chinese interface), and the Follow-system chip names the device's own language
+("跟随系统（英语）") rather than the app's override, which needed reading the platform locale list because
+`Resources.getSystem()` follows the per-app locale.
+
+Verified: 265 unit tests with no failures, errors or skips; lint and isolated assembly. Not verified:
+the Chinese reader dialogs and lookup popup on a screen (the probe device has no book and the fixture
+device was used for the label check), and the five themes at 1.5 text scale in Chinese, which are string-
+and layout-reviewed only.

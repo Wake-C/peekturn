@@ -42,6 +42,23 @@ class ThemePreferencesTest {
         assertEquals(initial.copy(appTheme = "warm"), MarginStore(context).settings.value)
     }
 
+    @Test fun midnightAndSageSurviveAReload() = runBlocking {
+        val store = MarginStore(context)
+        listOf("oled", "sage").forEach { theme ->
+            store.updateSettings { latest -> latest.copy(appTheme = theme) }
+            assertEquals(theme, MarginStore(context).settings.value.appTheme)
+        }
+    }
+
+    @Test fun languageChoiceDefaultsToSystemPersistsAndRejectsUnknownValues() = runBlocking {
+        assertEquals("system", MarginStore(context).settings.value.uiLanguage)
+        val store = MarginStore(context)
+        store.updateSettings { latest -> latest.copy(uiLanguage = "zh") }
+        assertEquals("zh", MarginStore(context).settings.value.uiLanguage)
+        store.updateSettings { latest -> latest.copy(uiLanguage = "fr") }
+        assertEquals("system", MarginStore(context).settings.value.uiLanguage)
+    }
+
     @Test fun existingSettingsWithoutAppAppearanceKeepFocusAndIgnoreObsoleteReaderPaper() {
         context.getSharedPreferences("margin", Context.MODE_PRIVATE).edit().putString(
             "settings",

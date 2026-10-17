@@ -1,5 +1,8 @@
 package app.margin.reader.speech
 
+import androidx.annotation.StringRes
+import app.margin.reader.R
+
 import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
@@ -20,10 +23,11 @@ private const val BAIDU_SPEECH_PATH = "gettts"
 
 /**
  * The fallback voices every request with its one English voice, whatever accent the reader chose, so a
- * clip from here is a substitution and says so. It is also the only English accent it can offer.
+ * clip from here is a substitution and says so. It is also the only English accent it can offer. The
+ * player resolves this id with the application context, so the caveat follows the reader's language.
  */
-internal const val BAIDU_ACCENT_NOTICE =
-    "Baidu Translate has a single English voice, so the requested accent is not guaranteed."
+@StringRes
+internal val BAIDU_ACCENT_NOTICE: Int = R.string.speech_notice_baidu_accent
 
 /** The credit for every clip from the fallback: source name and address only. */
 private val BAIDU_CREDIT = AudioCredit(BAIDU_SOURCE, BAIDU_SOURCE_URL)
@@ -134,7 +138,7 @@ class BaiduSpeechClient(
                         )
                         null
                     }
-                    else -> AudioClip(audio, BAIDU_CREDIT, BAIDU_ACCENT_NOTICE)
+                    else -> AudioClip(audio, BAIDU_CREDIT, noticeRes = BAIDU_ACCENT_NOTICE)
                 }
             }
         } catch (cancelled: CancellationException) {

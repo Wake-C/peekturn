@@ -61,7 +61,7 @@ class BaiduSpeechClientTest {
         assertNotNull(clip)
         assertTrue("The served audio must be returned unchanged", clip!!.audio.contentEquals(audio))
         assertEquals(AudioCredit("Baidu Translate", "https://fanyi.baidu.com"), clip.credit)
-        assertEquals("The fallback has one English voice and says so", BAIDU_ACCENT_NOTICE, clip.notice)
+        assertEquals("The fallback has one English voice and says so", BAIDU_ACCENT_NOTICE, clip.noticeRes)
 
         assertEquals(1, server.requestCount)
         val url = server.takeRequest().requestUrl!!

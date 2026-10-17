@@ -35,7 +35,7 @@ class VoiceSelectionTest {
     /** A substituted accent may speak, but the state must say so instead of claiming the request. */
     private fun assertSubstitutedEnglish(availability: SpeechAvailability) {
         assertTrue("Usable English must speak instead of failing: $availability", availability is SpeechAvailability.Available)
-        assertNotNull("A substituted accent needs a notice", (availability as SpeechAvailability.Available).notice)
+        assertNotNull("A substituted accent needs a notice", (availability as SpeechAvailability.Available).noticeRes)
     }
 
     @Test fun offlineEnglishVoiceIsPreferredOverHigherQualityNetworkVoice() {

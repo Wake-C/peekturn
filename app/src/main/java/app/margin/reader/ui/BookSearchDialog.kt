@@ -34,6 +34,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import app.margin.reader.R
 import org.readium.r2.shared.publication.Locator
 
 /**
@@ -137,11 +139,19 @@ internal fun bookSearchRow(chapter: String?, before: String?, match: String?, af
 }
 
 /** Search state is owned by the reader Activity; this dialog only renders it and reports intent. */
+internal sealed interface BookSearchStatus {
+    data object Idle : BookSearchStatus
+    data object Busy : BookSearchStatus
+    data object NoMatches : BookSearchStatus
+    data object Failed : BookSearchStatus
+    /** [count] matches are loaded; [ended] is true once the iterator is exhausted. */
+    data class Loaded(val count: Int, val ended: Boolean) : BookSearchStatus
+}
+
 internal data class BookSearchState(
     val query: String = "",
     val results: List<Locator> = emptyList(),
-    val message: String = "",
-    val busy: Boolean = false,
+    val status: BookSearchStatus = BookSearchStatus.Idle,
     val hasMore: Boolean = false
 )
 
@@ -166,6 +176,7 @@ internal fun BookSearchDialog(
     onDismiss: () -> Unit
 ) {
     val hasResults = state.results.isNotEmpty()
+    val busy = state.status == BookSearchStatus.Busy
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         // The sheet hangs from the top edge of the window, so a result set that grows or empties cannot
         // move the field under the reader's cursor.
@@ -179,27 +190,27 @@ internal fun BookSearchDialog(
             ) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Search book", style = MaterialTheme.typography.headlineMedium)
+                        Text(stringResource(R.string.shell_search_title), style = MaterialTheme.typography.headlineMedium)
                         OutlinedTextField(
                             value = state.query,
                             onValueChange = onQueryChange,
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Word or phrase") },
+                            placeholder = { Text(stringResource(R.string.shell_search_placeholder)) },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             // Both submit paths require a term: the disabled magnifier and the IME action agree.
                             keyboardActions = KeyboardActions(onSearch = { if (state.query.isNotBlank()) onSearch() }),
                             trailingIcon = {
                                 IconButton(onClick = onSearch, enabled = state.query.isNotBlank()) {
-                                    Icon(Icons.Outlined.Search, contentDescription = "Search this book")
+                                    Icon(Icons.Outlined.Search, contentDescription = stringResource(R.string.shell_search_this_book))
                                 }
                             }
                         )
-                        Text(state.message, style = MaterialTheme.typography.labelMedium,
+                        Text(searchStatusText(state.status), style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 16.dp))
                         // A constant slot keeps the field and the results from moving while a page loads.
-                        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth()) else Spacer(Modifier.height(4.dp))
+                        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth()) else Spacer(Modifier.height(4.dp))
                     }
                     if (hasResults) {
                         Spacer(Modifier.height(12.dp))
@@ -219,24 +230,37 @@ internal fun BookSearchDialog(
                                 if (index < state.results.lastIndex) HorizontalDivider()
                             }
                             if (state.hasMore) item {
-                                TextButton(onClick = onMoreResults, enabled = !state.busy,
+                                TextButton(onClick = onMoreResults, enabled = !busy,
                                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                                    if (state.busy) {
+                                    if (busy) {
                                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                                         Spacer(Modifier.width(8.dp))
                                     }
-                                    Text("More results")
+                                    Text(stringResource(R.string.shell_more_results))
                                 }
                             }
                         }
                         HorizontalDivider()
                     }
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("Close") }
+                        TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.shell_close)) }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun searchStatusText(status: BookSearchStatus): String = when (status) {
+    BookSearchStatus.Idle -> ""
+    BookSearchStatus.Busy -> stringResource(R.string.shell_search_busy)
+    BookSearchStatus.NoMatches -> stringResource(R.string.shell_search_no_matches)
+    BookSearchStatus.Failed -> stringResource(R.string.shell_search_failed)
+    is BookSearchStatus.Loaded -> if (status.ended) {
+        stringResource(R.string.shell_search_matches, status.count)
+    } else {
+        stringResource(R.string.shell_search_matches_more, status.count)
     }
 }
 
@@ -248,7 +272,7 @@ internal fun BookSearchDialog(
 private fun SearchResultRow(row: BookSearchRow, showChapter: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Column(
         modifier = modifier.fillMaxWidth().heightIn(min = 48.dp)
-            .clickable(role = Role.Button, onClickLabel = "Open match", onClick = onClick)
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.shell_open_match), onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {

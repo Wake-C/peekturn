@@ -6,7 +6,7 @@ An Android EPUB reader for people who learn English by reading real books. A qui
 
 - Original EPUB import and rendering through Readium, chapter navigation, in-book search, configurable typography and page/scroll reading.
 - Optional immersive fullscreen reading, enabled by default; center-tap overlay controls, quiet chapter/page indicators, and independently adjustable top/bottom content spacing.
-- One Focus Dark, Classic White or Warm Paper appearance choice across the entire app and reader.
+- One app-wide appearance choice from five: Focus Dark, Classic White, Warm Paper, Midnight (true black) or Sage; plus an interface language choice (follow system, English, 中文) next to the system language.
 - Automatic reopening of the last-read book at its stored Readium locator. Reading positions survive app restarts and typography changes.
 - Structured contextual AI explanations with meaning, contextual usage, UK/US IPA and playable examples. Saved provider profiles switch without repeated setup and have independent temperatures. Successful answers are reused within the reader session; dictionary tabs do not repeat paid requests.
 - Optional Quick Explain, explicit offline dictionary, online word and sentence pronunciation audio with system speech as the fallback, preferred US/UK accent and optional autoplay.

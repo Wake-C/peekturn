@@ -14,6 +14,8 @@ import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
+import androidx.annotation.StringRes
+import app.margin.reader.R
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -45,8 +47,6 @@ data class SpeechState(
     val diagnostic: String? = null
 )
 
-internal const val ACCENT_NOT_GUARANTEED = "Using system English; requested accent is not guaranteed."
-
 /**
  * The online sentence routes in the order they are tried, each one a whole request in its own right:
  * the read-aloud service first, then the simple key-free GET when that service refuses, stalls or has
@@ -56,16 +56,12 @@ internal const val ACCENT_NOT_GUARANTEED = "Using system English; requested acce
 internal val defaultSentenceSources: List<SentenceAudioSource> = listOf(BingSpeechClient(), BaiduSpeechClient())
 
 /**
- * What a device-speech failure tells the reader. Each message names only what the app observed: an
- * engine that offered no English voice, one that says its own English data is missing, and one that
- * never started are different device facts, and none of them is proof that nothing is installed. Which
- * message belongs to which fact is decided in SpeechDiagnosis.kt, where the report is built from it.
+ * What a device-speech failure tells the reader lives in SpeechDiagnosis.kt, where the fact the app
+ * observed and the report's verdict are classified together. Only the human sentence is localized;
+ * the report below it keeps its technical English vocabulary.
  */
-internal const val MISSING_ENGLISH_DATA = "Your speech engine reports its English voice data is missing. Open system speech settings to download it, then try again."
-internal const val NO_ENGLISH_VOICE = "None of the device's speech engines offered an English voice. Check system speech settings."
-internal const val NO_SPEECH_ENGINE = "The device's speech engine did not start. Open system speech settings to check it."
-private const val NO_ONLINE_AUDIO = "No online audio is available for this text; using system speech."
-private const val TOO_LONG_NOTICE = "$TOO_LONG_FOR_ONLINE; using system speech."
+private val NO_ONLINE_AUDIO = R.string.speech_notice_no_online_audio
+private val TOO_LONG_NOTICE = R.string.speech_notice_too_long_online
 /**
  * Every online route — the dictionary recording and each speech service — gets the same short bound,
  * so a phone on a hostile network spends at most a few seconds per route instead of ten. The speech
@@ -135,7 +131,7 @@ class PronunciationPlayer(
     private var clipObtained = false
 
     /** Why no online route was asked at all, when the text is past what the services will voice. */
-    private var onlineUnavailable: String? = null
+    private var onlineUnavailable: Int? = null
     private val attributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_MEDIA)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -189,7 +185,7 @@ class PronunciationPlayer(
                 // Try the public settings activity if an OEM speech activity is private.
             }
         }
-        fail("System speech settings are unavailable on this device.")
+        fail(app.getString(R.string.speech_failure_settings_unavailable))
     }
 
     private fun begin(text: String, accent: String, word: Boolean) {
@@ -197,11 +193,11 @@ class PronunciationPlayer(
         stopInternal()
         val locale = speechLocale(accent)
         if (locale == null) {
-            fail("Choose US or UK pronunciation.")
+            fail(app.getString(R.string.speech_failure_choose_accent))
             return
         }
         if (text.isBlank()) {
-            fail("There is no text to pronounce.")
+            fail(app.getString(R.string.speech_failure_no_text))
             return
         }
         val request = Request(text, locale, generation)
@@ -227,8 +223,8 @@ class PronunciationPlayer(
         // The clients' own contract decides what can be asked, so a text they would decline is
         // declined here, before any route is recorded as having failed.
         if (speechLookupText(request.text) == null) {
-            onlineUnavailable = TOO_LONG_FOR_ONLINE
-            requestSpeech(request, TOO_LONG_NOTICE)
+            onlineUnavailable = R.string.speech_failure_too_long_online
+            requestSpeech(request, app.getString(TOO_LONG_NOTICE, app.getString(onlineUnavailable!!)))
             return
         }
         lookup = scope.launch {
@@ -237,7 +233,7 @@ class PronunciationPlayer(
             }) ?: sentenceClip(request.text, accent)
             if (!isCurrent(request)) return@launch
             if (clip == null) {
-                requestSpeech(request, NO_ONLINE_AUDIO)
+                requestSpeech(request, app.getString(NO_ONLINE_AUDIO))
             } else {
                 clipObtained = true
                 playClip(clip, request)
@@ -350,7 +346,7 @@ class PronunciationPlayer(
                         false
                     }
                     if (started) {
-                        mutableState.value = mutableState.value.copy(notice = clip.notice, credit = clip.credit)
+                        mutableState.value = mutableState.value.copy(notice = clip.noticeRes?.let(app::getString), credit = clip.credit)
                     } else {
                         fallbackToSpeech(request)
                     }
@@ -374,7 +370,7 @@ class PronunciationPlayer(
     /** Online audio that no route could supply is never an error while device speech can speak instead. */
     private fun fallbackToSpeech(request: Request) {
         releaseMedia()
-        requestSpeech(request, NO_ONLINE_AUDIO)
+        requestSpeech(request, app.getString(NO_ONLINE_AUDIO))
     }
 
     /**
@@ -496,14 +492,14 @@ class PronunciationPlayer(
         substituting = false
         try {
             if (request.text.length > TextToSpeech.getMaxSpeechInputLength()) {
-                fail("This text is too long for system speech. Select a shorter phrase.")
+                fail(app.getString(R.string.speech_failure_too_long_for_system))
                 return
             }
             if (substitutionPass) {
                 // The final device attempt, and the only one that does not change the voice: no voice and
                 // no language is selected, so the reader's own engine choice may be the only
                 // English-capable voice on the device. Only text that is itself English reaches this pass.
-                speak(request, tts, DEVICE_DEFAULT_VOICE_NOTICE, substituting = true)
+                speak(request, tts, app.getString(DEVICE_DEFAULT_VOICE_NOTICE), substituting = true)
                 return
             }
             when (val availability = configureSpeech(
@@ -511,7 +507,7 @@ class PronunciationPlayer(
                 { tts.setLanguage(it) }, { tts.voice }, evidence::observe
             )) {
                 is SpeechAvailability.Available ->
-                    speak(request, tts, availability.notice, substituting = false)
+                    speak(request, tts, availability.noticeRes?.let(app::getString), substituting = false)
                 SpeechAvailability.MissingData, SpeechAvailability.Unsupported -> {
                     if (availability == SpeechAvailability.MissingData) missingEnglishData = true
                     // What the engine answered was about the voice that was asked for, not about the voice
@@ -532,7 +528,7 @@ class PronunciationPlayer(
             if (substituting && pending != null) {
                 initialize()
             } else {
-                fail("Speech playback failed. Check system speech settings and try again.")
+                fail(app.getString(R.string.speech_failure_playback))
             }
         }
     }
@@ -555,7 +551,7 @@ class PronunciationPlayer(
         if (!substituting) pending = null
         if (!accepted) {
             releaseEngine()
-            if (substituting) initialize() else fail("Speech playback failed. Check system speech settings.")
+            if (substituting) initialize() else fail(app.getString(R.string.speech_failure_playback_settings))
             return
         }
         speechNotice = null
@@ -574,7 +570,7 @@ class PronunciationPlayer(
         substituting = false
         forgetEngines()
         if (path != Path.Speech || pending == null) return
-        fail(failure.message, evidence.report(failure))
+        fail(app.getString(failure.message), evidence.report(failure))
     }
 
     private fun forgetEngines() {
@@ -625,7 +621,7 @@ class PronunciationPlayer(
         }
         if (errorCode == TextToSpeech.ERROR_NOT_INSTALLED_YET) missingEnglishData = true
         val failure = deviceSpeechFailure(engineStarted, missingEnglishData, utteranceAccepted)
-        fail(failure.message, evidence.report(failure))
+        fail(app.getString(failure.message), evidence.report(failure))
     }
 
     private fun callback(id: String?, action: () -> Unit) {
@@ -680,15 +676,35 @@ class PronunciationPlayer(
     /** What the online routes did, then the device's own answer, each from its own classification. */
     private fun noSpeakerMessage(message: String): String {
         val online = when {
-            clipObtained -> "Online audio was found but could not play"
-            onlineUnavailable != null -> onlineUnavailable
+            clipObtained -> app.getString(R.string.speech_failure_online_playback)
+            onlineUnavailable != null -> app.getString(onlineUnavailable!!)
             onlineOutcomes.isNotEmpty() -> onlineFailureLead(onlineOutcomes)
             else -> null
         }
-        return failureMessage(online, message)
+        return if (online == null) message else app.getString(
+            R.string.speech_failure_online_and_device, online, message.replaceFirstChar { it.lowercase() }
+        )
     }
 
-    /** The online line, the build and clock identity, then the device-speech report when there is one. */
+    /**
+     * How many routes actually ran, so a word's dictionary recording plus both services are not
+     * described as "both". A route that was never attempted is absent from [onlineOutcomes].
+     */
+    private fun onlineFailureLead(outcomes: List<RouteOutcome>): String {
+        val attempts = outcomes.map { it.route }.distinct().size
+        return when (attempts) {
+            0, 1 -> app.getString(R.string.speech_failure_online_failed)
+            2 -> app.getString(R.string.speech_failure_both_online_routes)
+            else -> app.getString(R.string.speech_failure_all_online_routes, attempts)
+        }
+    }
+
+    /**
+     * The report is deliberately not localized: route names, stage words, HTTP statuses, the device
+     * clock and the app version are the support vocabulary the reader copies back, and translating
+     * them would make the same attempt hard to match with the code path that produced it. Only the
+     * human sentence above it ([SpeechState.error]) follows the reader's language.
+     */
     private fun diagnosticReport(deviceReport: String?): String? {
         if (onlineOutcomes.isEmpty() && deviceReport == null) return null
         return buildString {
@@ -753,7 +769,7 @@ class PronunciationPlayer(
             .build()
         focus = focusRequest
         if (audio.requestAudioFocus(focusRequest) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            fail("Audio is currently unavailable. Try pronunciation again.")
+            fail(app.getString(R.string.speech_failure_audio_unavailable))
             return false
         }
         return true
@@ -866,7 +882,7 @@ internal fun englishVoices(voices: Set<Voice>, locale: Locale): List<Voice> =
     )
 
 internal sealed interface SpeechAvailability {
-    data class Available(val notice: String? = null) : SpeechAvailability
+    data class Available(@StringRes val noticeRes: Int? = null) : SpeechAvailability
     data object MissingData : SpeechAvailability
     data object Unsupported : SpeechAvailability
 }
@@ -902,7 +918,9 @@ internal inline fun configureSpeech(
         // fall back to what the accepted voice promised.
         val spokenCountry = actual?.locale?.country?.let(::normalizeCountry)
             ?: normalizeCountry(candidate.locale.country)
-        return SpeechAvailability.Available(if (spokenCountry == country) null else ACCENT_NOT_GUARANTEED)
+        return SpeechAvailability.Available(
+            if (spokenCountry == country) null else R.string.speech_notice_accent_not_guaranteed
+        )
     }
     var missingData = false
     for (probe in listOf(locale, otherEnglishCountry(locale), Locale.ENGLISH)) {
@@ -920,7 +938,9 @@ internal inline fun configureSpeech(
         }
         val spokenCountry = actual?.locale?.country?.let(::normalizeCountry)
             ?: probe.country.takeIf { support >= TextToSpeech.LANG_COUNTRY_AVAILABLE }?.let(::normalizeCountry)
-        return SpeechAvailability.Available(if (spokenCountry == country) null else ACCENT_NOT_GUARANTEED)
+        return SpeechAvailability.Available(
+            if (spokenCountry == country) null else R.string.speech_notice_accent_not_guaranteed
+        )
     }
     return if (missingData) SpeechAvailability.MissingData else SpeechAvailability.Unsupported
 }

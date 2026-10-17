@@ -176,7 +176,7 @@ class BingSpeechClientTest {
         assertTrue("The served audio is returned as it came",
             clip!!.audio.contentEquals(audio + ByteArray(40) { (it + 7).toByte() }))
         assertEquals(AudioCredit("Microsoft Read Aloud", "https://speech.platform.bing.com"), clip.credit)
-        assertNull("A service that honours the accent carries no caveat", clip.notice)
+        assertNull("A service that honours the accent carries no caveat", clip.noticeRes)
     }
 
     /** A turn that yields no audio, a frame that is not audio and a payload that is not MPEG mean nothing. */

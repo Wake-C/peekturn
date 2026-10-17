@@ -1,5 +1,7 @@
 package app.margin.reader.speech
 
+import androidx.annotation.StringRes
+import app.margin.reader.R
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -29,15 +31,20 @@ private const val WORD_AUDIO_SOURCE_URL = "https://dict.youdao.com"
  * is free and key-free, that every endpoint is unofficial and unlicensed, and that system speech
  * speaks whenever they have nothing. The app claims no licence for any provider's bytes.
  */
-internal const val AUDIO_SOURCE_NOTICE =
-    "The text you ask to hear is sent to a public speech service: recorded word audio comes from Youdao Dictionary when it has one, Microsoft Read Aloud voices sentences, phrases and words it has no recording for, and Baidu Translate answers when Microsoft's service does not. All are free and key-free, unofficial and unlicensed, and none is guaranteed to stay available. Only the text you ask to hear is sent, never the book's context, and system speech is the fallback."
+@StringRes
+internal val AUDIO_SOURCE_NOTICE: Int = R.string.speech_source_notice
 
 /**
- * Bounded audio for one request, and the attribution that must accompany it. [notice] carries anything
+ * Bounded audio for one request, and the attribution that must accompany it. [noticeRes] carries anything
  * about the clip the reader should be told — the fallback's single English accent, for instance — so an
  * honest caveat travels with the bytes rather than being guessed from the credit.
  */
-class AudioClip(val audio: ByteArray, val credit: AudioCredit, val notice: String? = null)
+class AudioClip(
+    val audio: ByteArray,
+    val credit: AudioCredit,
+    /** Localized caveat to show with the clip; the player resolves it with the application context. */
+    @StringRes val noticeRes: Int? = null
+)
 
 /** Audio for one word and accent; null means no usable audio, so the next route speaks instead. */
 fun interface WordAudioSource {

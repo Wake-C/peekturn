@@ -5,12 +5,14 @@ import android.net.Uri
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
@@ -21,27 +23,37 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.margin.reader.R
 import app.margin.reader.model.AppSettings
 import app.margin.reader.reader.ReaderActivity
 import app.margin.reader.ui.*
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     private val graph get() = (application as MarginApp).graph
     private val vm: MainViewModel by viewModels { MainViewModel.Factory(graph) }
     private val pickEpub = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importBook) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The in-app choice is the source of truth, so it is pushed to the per-app locale API as the
+        // first thing the screen does: Compose then resolves stringResource in that locale on this
+        // first composition. Changing the language later recreates this activity (AppCompatDelegate
+        // does it); the tab state survives in the retained ViewModel, settings live in MarginStore,
+        // and the reader is not open while this screen is shown - it later reopens from its stored
+        // Readium locator, so neither settings nor reading position are lost.
+        applyAppLanguage(graph.store.settings.value.uiLanguage)
         applyAppTheme(graph.store.settings.value.appTheme)
         val incoming = extractIncoming(intent)
         intent = Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN)
         vm.initialize(reopen = savedInstanceState == null, incoming = incoming)
         setContent {
             val settings by graph.store.settings.collectAsStateWithLifecycle()
+            LaunchedEffect(settings.uiLanguage) { applyAppLanguage(settings.uiLanguage) }
             DisposableEffect(settings.appTheme) {
                 applyAppTheme(settings.appTheme)
                 onDispose { }
@@ -54,10 +66,20 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    /** Empty list means "follow the system"; official per-app locale API, no custom locale plumbing. */
+    private fun applyAppLanguage(language: String) {
+        val locales = when (language) {
+            "en", "zh" -> LocaleListCompat.forLanguageTags(language)
+            else -> LocaleListCompat.getEmptyLocaleList()
+        }
+        if (AppCompatDelegate.getApplicationLocales() != locales) {
+            AppCompatDelegate.setApplicationLocales(locales)
+        }
+    }
     private fun applyAppTheme(theme: String) {
         val background = marginColorScheme(theme).background.toArgb()
         window.setBackgroundDrawable(ColorDrawable(background))
-        val style = if (theme == "light" || theme == "warm") {
+        val style = if (!isDarkTheme(theme)) {
             SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
         } else {
             SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
@@ -110,7 +132,11 @@ private fun MarginHome(vm: MainViewModel, settings: AppSettings, onImport: () ->
             Column {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                    listOf("Library", "Statistics", "Settings").forEachIndexed { index, label ->
+                    listOf(
+                        stringResource(R.string.shell_library_title),
+                        stringResource(R.string.shell_statistics_title),
+                        stringResource(R.string.settings_title)
+                    ).forEachIndexed { index, label ->
                         NavigationBarItem(selected = state.tab == index, onClick = { vm.tab(index) },
                             icon = { Icon(when(index) { 0 -> Icons.Outlined.AutoStories; 1 -> Icons.Outlined.BarChart; else -> Icons.Outlined.Settings }, label) },
                             label = { Text(label) },

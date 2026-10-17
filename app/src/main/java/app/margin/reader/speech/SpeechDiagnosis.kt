@@ -1,6 +1,8 @@
 package app.margin.reader.speech
 
 import android.speech.tts.TextToSpeech
+import androidx.annotation.StringRes
+import app.margin.reader.R
 import java.util.Locale
 
 /**
@@ -10,8 +12,8 @@ import java.util.Locale
  * requested accent, and it is offered for English text only, because a voice the app cannot name must
  * never be handed text in another script.
  */
-internal const val DEVICE_DEFAULT_VOICE_NOTICE =
-    "Using this device's own voice instead of an installed English one; the requested accent is not guaranteed."
+@StringRes
+internal val DEVICE_DEFAULT_VOICE_NOTICE: Int = R.string.speech_notice_device_default_voice
 
 /**
  * One engine's answer while device speech was prepared. Whether an engine listed voices and what each
@@ -99,23 +101,23 @@ internal class SpeechEvidence {
  * not the same device fact as an engine that never started, and neither is an engine whose own voice
  * data it says is missing.
  */
-internal enum class DeviceSpeechFailure(val verdict: String, val message: String) {
+internal enum class DeviceSpeechFailure(val verdict: String, @StringRes val message: Int) {
     /** No engine ever initialized, so nothing was learnt about any engine's voices. */
     NotStarted(
         "the device's speech engine did not start",
-        NO_SPEECH_ENGINE
+        R.string.speech_failure_engine_not_started
     ),
 
     /** An engine started and reported that its English voice data is missing. */
     MissingData(
         "the engine reports its English voice data is missing",
-        MISSING_ENGLISH_DATA
+        R.string.speech_failure_missing_english_data
     ),
 
     /** An engine started and offered no usable English voice, and its own voice could not speak either. */
     NoEnglishVoice(
         "no installed speech engine offered an English voice",
-        NO_ENGLISH_VOICE
+        R.string.speech_failure_no_english_voice
     ),
 
     /**
@@ -125,7 +127,7 @@ internal enum class DeviceSpeechFailure(val verdict: String, val message: String
      */
     PlaybackFailed(
         "the engine accepted an English utterance and then failed to speak it",
-        "Your speech engine accepted English but could not speak it. Check system speech settings, or choose another engine."
+        R.string.speech_failure_engine_playback
     )
 }
 
@@ -152,7 +154,7 @@ internal fun deviceSpeechFailure(
  * for text whose own script says English, because a Chinese selection must not be spoken by a voice
  * the app would then have to call an English one.
  */
-internal fun substitutedDeviceVoiceNotice(availability: SpeechAvailability, text: String): String? =
+internal fun substitutedDeviceVoiceNotice(availability: SpeechAvailability, text: String): Int? =
     if (availability !is SpeechAvailability.Available && isEnglishText(text)) DEVICE_DEFAULT_VOICE_NOTICE else null
 
 /**

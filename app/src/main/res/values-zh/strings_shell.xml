@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shell_app_name">Margin</string>
+
+    <!-- 书架 -->
+    <string name="shell_library_title">书架</string>
+    <string name="shell_add_book">添加图书</string>
+    <string name="shell_empty_library">书架还是空的</string>
+    <string name="shell_continue_book">继续阅读《%1$s》</string>
+    <string name="shell_unknown_author">未知作者</string>
+    <string name="shell_progress_label">进度：%1$s</string>
+    <string name="shell_continue">继续阅读</string>
+    <string name="shell_shelf_heading">全部图书</string>
+    <string name="shell_search_books_hint">搜索图书</string>
+    <string name="shell_search_books_description">按书名或作者搜索</string>
+    <string name="shell_open_book">打开《%1$s》</string>
+    <string name="shell_book_options">《%1$s》的选项</string>
+    <string name="shell_filter_all">全部</string>
+    <string name="shell_filter_reading">在读</string>
+    <string name="shell_filter_unread">未读</string>
+    <string name="shell_filter_finished">已读完</string>
+    <string name="shell_no_matching_books">没有匹配的图书</string>
+    <string name="shell_remove_book_title">移除这本书？</string>
+    <string name="shell_remove_book_message">要从 Margin 中移除“%1$s”、阅读位置和阅读时长记录吗？原 EPUB 文件不会改动。</string>
+    <string name="shell_remove">移除</string>
+    <string name="shell_keep_book">保留</string>
+    <string name="shell_progress_finished">已读完</string>
+    <string name="shell_progress_not_started">未开始</string>
+    <string name="shell_progress_reading">在读</string>
+    <string name="shell_progress_percent">已读 %1$d%%</string>
+
+    <!-- 统计 -->
+    <string name="shell_statistics_title">统计</string>
+    <string name="shell_metric_today">今天</string>
+    <string name="shell_metric_week">本周</string>
+    <string name="shell_metric_total">总计</string>
+    <string name="shell_metric_week_description">本周，从周一起</string>
+    <string name="shell_metric_total_description">总阅读时长</string>
+    <string name="shell_metric_description">%1$s：%2$s</string>
+    <string name="shell_reading_time">阅读时长</string>
+    <string name="shell_days">近 %1$d 天</string>
+    <string name="shell_reading_time_last_days">最近 %2$d 天共阅读 %1$s</string>
+    <string name="shell_no_reading_time">还没有阅读记录</string>
+    <string name="shell_recent_books">最近阅读</string>
+    <string name="shell_read_book">阅读《%1$s》</string>
+    <string name="shell_peak_day">单日最高：%1$s</string>
+    <string name="shell_chart_description">每日阅读时长图。%1$s</string>
+    <string name="shell_chart_day">%1$s：%2$s</string>
+    <string name="shell_chart_date_pattern">M月d日</string>
+    <string name="shell_list_separator">；</string>
+
+    <!-- 时长 -->
+    <string name="shell_duration_zero">0 分钟</string>
+    <string name="shell_duration_seconds">%1$d 秒</string>
+    <string name="shell_duration_minutes">%1$d 分钟</string>
+    <string name="shell_duration_hours">%1$d 小时</string>
+    <string name="shell_duration_hours_minutes">%1$d 小时 %2$d 分钟</string>
+    <string name="shell_compact_duration_zero">0分</string>
+    <string name="shell_compact_duration_seconds">%1$d秒</string>
+    <string name="shell_compact_duration_minutes">%1$d分</string>
+    <string name="shell_compact_duration_hours">%1$d小时</string>
+    <string name="shell_compact_duration_hours_minutes">%1$d小时%2$d分</string>
+
+    <!-- 本书搜索 -->
+    <string name="shell_search_title">搜索本书</string>
+    <string name="shell_search_placeholder">单词或短语</string>
+    <string name="shell_search_this_book">在本书中搜索</string>
+    <string name="shell_search_busy">正在搜索…</string>
+    <string name="shell_search_no_matches">没有找到匹配内容。</string>
+    <string name="shell_search_failed">搜索失败，请重新提交查询。</string>
+    <string name="shell_search_matches">共 %1$d 条匹配</string>
+    <string name="shell_search_matches_more">已载入 %1$d 条匹配</string>
+    <string name="shell_more_results">更多结果</string>
+    <string name="shell_open_match">打开匹配项</string>
+    <string name="shell_close">关闭</string>
+</resources>

@@ -1,5 +1,6 @@
 package app.margin.reader.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,11 +15,13 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import app.margin.reader.R
 import app.margin.reader.model.Book
 import app.margin.reader.model.ReadingStats
 import java.time.LocalDate
@@ -43,13 +46,17 @@ internal fun readingSummary(stats: ReadingStats, today: LocalDate, period: Int):
     )
 }
 
-internal fun readingDuration(seconds: Long): String {
+internal enum class DurationUnit { Zero, Seconds, Minutes, Hours, HoursMinutes }
+
+internal data class DurationParts(val unit: DurationUnit, val first: Long = 0, val second: Long = 0)
+
+internal fun readingDuration(seconds: Long): DurationParts {
     val value = seconds.coerceAtLeast(0)
     return when {
-        value == 0L -> "0 min"
-        value < 60 -> "$value sec"
-        value < 3600 -> "${value / 60} min"
-        else -> "${value / 3600} hr ${value % 3600 / 60} min"
+        value == 0L -> DurationParts(DurationUnit.Zero)
+        value < 60 -> DurationParts(DurationUnit.Seconds, value)
+        value < 3600 -> DurationParts(DurationUnit.Minutes, value / 60)
+        else -> DurationParts(DurationUnit.HoursMinutes, value / 3600, value % 3600 / 60)
     }
 }
 
@@ -59,15 +66,39 @@ internal fun readingDuration(seconds: Long): String {
  * there it can only wrap and orphan its last unit. Prose lines and accessibility labels keep the spoken
  * form; every metric column shows the same compact notation at the same size.
  */
-internal fun compactDuration(seconds: Long): String {
+internal fun compactDuration(seconds: Long): DurationParts {
     val value = seconds.coerceAtLeast(0)
     val minutes = value % 3600 / 60
     return when {
-        value == 0L -> "0m"
-        value < 60 -> "${value}s"
-        value < 3600 -> "${value / 60}m"
-        minutes == 0L -> "${value / 3600}h"
-        else -> "${value / 3600}h ${minutes}m"
+        value == 0L -> DurationParts(DurationUnit.Zero)
+        value < 60 -> DurationParts(DurationUnit.Seconds, value)
+        value < 3600 -> DurationParts(DurationUnit.Minutes, value / 60)
+        minutes == 0L -> DurationParts(DurationUnit.Hours, value / 3600)
+        else -> DurationParts(DurationUnit.HoursMinutes, value / 3600, minutes)
+    }
+}
+
+@Composable
+private fun readingDurationText(seconds: Long): String {
+    val parts = readingDuration(seconds)
+    return when (parts.unit) {
+        DurationUnit.Zero -> stringResource(R.string.shell_duration_zero)
+        DurationUnit.Seconds -> stringResource(R.string.shell_duration_seconds, parts.first)
+        DurationUnit.Minutes -> stringResource(R.string.shell_duration_minutes, parts.first)
+        DurationUnit.Hours -> stringResource(R.string.shell_duration_hours, parts.first)
+        DurationUnit.HoursMinutes -> stringResource(R.string.shell_duration_hours_minutes, parts.first, parts.second)
+    }
+}
+
+@Composable
+private fun compactDurationText(seconds: Long): String {
+    val parts = compactDuration(seconds)
+    return when (parts.unit) {
+        DurationUnit.Zero -> stringResource(R.string.shell_compact_duration_zero)
+        DurationUnit.Seconds -> stringResource(R.string.shell_compact_duration_seconds, parts.first)
+        DurationUnit.Minutes -> stringResource(R.string.shell_compact_duration_minutes, parts.first)
+        DurationUnit.Hours -> stringResource(R.string.shell_compact_duration_hours, parts.first)
+        DurationUnit.HoursMinutes -> stringResource(R.string.shell_compact_duration_hours_minutes, parts.first, parts.second)
     }
 }
 
@@ -82,51 +113,54 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
     val recent = remember(books, totals) { books.filter { (totals[it.id] ?: 0L) > 0 }.sortedByDescending { it.lastReadAt } }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        item { MarginScreenHeader("Statistics") }
+        item { MarginScreenHeader(stringResource(R.string.shell_statistics_title)) }
         item {
             HorizontalDivider()
             BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
                 val horizontal = maxWidth / LocalDensity.current.fontScale >= 300.dp
                 if (horizontal) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        TimeMetric("Today", summary.today, Modifier.weight(1f), compact = true)
-                        TimeMetric("This week", summary.week, Modifier.weight(1f), compact = true)
-                        TimeMetric("Total", summary.total, Modifier.weight(1f), compact = true)
+                        TimeMetric(R.string.shell_metric_today, summary.today, Modifier.weight(1f), compact = true)
+                        TimeMetric(R.string.shell_metric_week, summary.week, Modifier.weight(1f), compact = true,
+                            accessibleLabel = R.string.shell_metric_week_description)
+                        TimeMetric(R.string.shell_metric_total, summary.total, Modifier.weight(1f), compact = true,
+                            accessibleLabel = R.string.shell_metric_total_description)
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        TimeMetric("Today", summary.today)
-                        TimeMetric("This week", summary.week)
-                        TimeMetric("Total", summary.total)
+                        TimeMetric(R.string.shell_metric_today, summary.today)
+                        TimeMetric(R.string.shell_metric_week, summary.week, accessibleLabel = R.string.shell_metric_week_description)
+                        TimeMetric(R.string.shell_metric_total, summary.total, accessibleLabel = R.string.shell_metric_total_description)
                     }
                 }
             }
             HorizontalDivider()
         }
         item {
-            Text("Reading time", style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.shell_reading_time), style = MaterialTheme.typography.titleLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(7, 30).forEach { days ->
-                    FilterChip(selected = period == days, onClick = { period = days }, label = { Text("$days days") },
+                    FilterChip(selected = period == days, onClick = { period = days }, label = { Text(stringResource(R.string.shell_days, days)) },
                         modifier = Modifier.heightIn(min = 48.dp))
                 }
             }
-            Text("${readingDuration(summary.daily.sumOf { it.second })} in the last $period days", color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.shell_reading_time_last_days,
+                    readingDurationText(summary.daily.sumOf { it.second }), period),
+                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         }
         item { ReadingChart(summary.daily) }
         if (summary.total == 0L) item {
-            Text("No reading time yet", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.shell_no_reading_time), style = MaterialTheme.typography.titleMedium)
         }
-        if (recent.isNotEmpty()) item { Text("Recent books", style = MaterialTheme.typography.titleLarge) }
+        if (recent.isNotEmpty()) item { Text(stringResource(R.string.shell_recent_books), style = MaterialTheme.typography.titleLarge) }
         items(recent, key = { it.id }) { book ->
-            Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "Read ${book.title}") { onOpen(book) }.padding(vertical = 8.dp),
+            Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = stringResource(R.string.shell_read_book, book.title)) { onOpen(book) }.padding(vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 BookCover(book, Modifier.width(56.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(book.title, style = MaterialTheme.typography.titleMedium)
-                    Text(book.author.ifBlank { "Unknown author" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                    Text(readingDuration(totals[book.id] ?: 0L), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
+                    Text(book.author.ifBlank { stringResource(R.string.shell_unknown_author) }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Text(readingDurationText(totals[book.id] ?: 0L), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
                 }
             }
             HorizontalDivider()
@@ -135,18 +169,15 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
 }
 
 @Composable
-private fun TimeMetric(label: String, seconds: Long, modifier: Modifier = Modifier, compact: Boolean = false) {
-    val duration = readingDuration(seconds)
-    val accessibleLabel = when (label) {
-        "This week" -> "This week, Monday onward"
-        "Total" -> "All reading time"
-        else -> label
-    }
-    Column(modifier.clearAndSetSemantics { contentDescription = "$accessibleLabel: $duration" },
+private fun TimeMetric(@StringRes label: Int, seconds: Long, modifier: Modifier = Modifier, compact: Boolean = false,
+    @StringRes accessibleLabel: Int = label) {
+    val duration = readingDurationText(seconds)
+    val description = stringResource(R.string.shell_metric_description, stringResource(accessibleLabel), duration)
+    Column(modifier.clearAndSetSemantics { contentDescription = description },
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(label), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         // The figure and its unit are one inseparable mark: no wrap, no orphaned "min" on a second line.
-        Text(compactDuration(seconds), maxLines = 1, softWrap = false,
+        Text(compactDurationText(seconds), maxLines = 1, softWrap = false,
             style = (if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
                 .copy(fontFeatureSettings = "tnum"))
     }
@@ -160,13 +191,18 @@ private fun ReadingChart(days: List<Pair<LocalDate, Long>>) {
     // data mark belongs to the same family as the controls around it.
     val barCorner = MaterialTheme.shapes.extraSmall.topStart
     val max = days.maxOfOrNull { it.second }?.coerceAtLeast(1L) ?: 1L
-    val dateFormat = remember { DateTimeFormatter.ofPattern("MMM d") }
-    val description = remember(days, dateFormat) {
-        days.joinToString("; ") { (day, seconds) -> "${day.format(dateFormat)}: ${readingDuration(seconds)}" }
+    val datePattern = stringResource(R.string.shell_chart_date_pattern)
+    val dateFormat = remember(datePattern) { DateTimeFormatter.ofPattern(datePattern) }
+    val separator = stringResource(R.string.shell_list_separator)
+    val dayDescriptions = ArrayList<String>(days.size)
+    for ((day, seconds) in days) {
+        dayDescriptions += stringResource(R.string.shell_chart_day, day.format(dateFormat), readingDurationText(seconds))
     }
+    val description = stringResource(R.string.shell_chart_description, dayDescriptions.joinToString(separator))
     Column {
-        Text("Peak day: ${readingDuration(days.maxOfOrNull { it.second } ?: 0L)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Canvas(Modifier.fillMaxWidth().height(168.dp).padding(vertical = 12.dp).semantics { contentDescription = "Daily reading chart. $description" }) {
+        Text(stringResource(R.string.shell_peak_day, readingDurationText(days.maxOfOrNull { it.second } ?: 0L)),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Canvas(Modifier.fillMaxWidth().height(168.dp).padding(vertical = 12.dp).semantics { contentDescription = description }) {
             for (line in 0..2) {
                 val y = size.height * line / 2f
                 drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())

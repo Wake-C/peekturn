@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import androidx.test.core.app.ApplicationProvider
+import app.margin.reader.R
 import java.time.Duration
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
@@ -75,6 +76,9 @@ class PronunciationPlayerTest {
             }
         }
     }
+
+    private val appContext = ApplicationProvider.getApplicationContext<Application>()
+    private fun text(id: Int): String = appContext.getString(id)
 
     private fun loseAudioFocus() {
         val audio = ApplicationProvider.getApplicationContext<Context>().getSystemService(AudioManager::class.java)
@@ -221,7 +225,7 @@ class PronunciationPlayerTest {
         assertEquals(listOf("A little further, one page at a time." to "UK"), first.calls)
         assertEquals("The route with nothing hands the text on", first.calls, second.calls)
         assertEquals(AudioCredit("Baidu Translate", "https://fanyi.baidu.com"), player.state.value.credit)
-        assertEquals("The fallback's single accent is disclosed with its audio", BAIDU_ACCENT_NOTICE, player.state.value.notice)
+        assertEquals("The fallback's single accent is disclosed with its audio", text(BAIDU_ACCENT_NOTICE), player.state.value.notice)
         assertTrue(player.state.value.playing)
         assertNull(player.state.value.error)
         player.shutdown()
@@ -544,7 +548,7 @@ class PronunciationPlayerTest {
         settle()
 
         assertNull("Another script is never spoken by a voice the app cannot name", alternative.lastSpokenText)
-        assertFailure(player, "Online audio failed", NO_ENGLISH_VOICE)
+        assertFailure(player, "Online audio failed", text(R.string.speech_failure_no_english_voice))
         val report = player.state.value.diagnostic
         assertNotNull("The reader can send back what the engines answered", report)
         assertTrue("Every engine that was asked is named", report!!.contains("com.example.other-engine"))
@@ -562,7 +566,7 @@ class PronunciationPlayerTest {
         lastEngine().onInitListener.onInit(TextToSpeech.ERROR)
         settle()
 
-        assertFailure(player, "Online audio failed", NO_SPEECH_ENGINE)
+        assertFailure(player, "Online audio failed", text(R.string.speech_failure_engine_not_started))
         val report = player.state.value.diagnostic
         assertNotNull(report)
         assertTrue("The engine that was asked is named", report!!.contains("com.example.other-engine"))
@@ -588,7 +592,7 @@ class PronunciationPlayerTest {
         assertEquals("A little further, one page at a time.", engine.lastSpokenText)
         assertNotNull("The English voice that was offered is the voice that is set", engine.getCurrentVoice())
         assertFalse("An offered English voice carries no substitute notice",
-            player.state.value.notice?.contains(DEVICE_DEFAULT_VOICE_NOTICE) == true)
+            player.state.value.notice?.contains(text(DEVICE_DEFAULT_VOICE_NOTICE)) == true)
         player.shutdown()
         ShadowTextToSpeech.reset()
     }
@@ -608,7 +612,7 @@ class PronunciationPlayerTest {
         engineInitialization(TextToSpeech.SUCCESS)
 
         assertFalse("A substitute is not used while another engine may still have English",
-            player.state.value.notice?.contains(DEVICE_DEFAULT_VOICE_NOTICE) == true)
+            player.state.value.notice?.contains(text(DEVICE_DEFAULT_VOICE_NOTICE)) == true)
         val alternative = lastEngine()
         assertTrue("The other installed engine is asked first", alternative !== defaultEngine)
 
@@ -625,7 +629,7 @@ class PronunciationPlayerTest {
         assertNull("Nothing about the engine's own voice is changed", substituting.getCurrentVoice())
         assertNull("A voice the engine could speak with is not an installation error", player.state.value.error)
         assertTrue("A substituted voice is labelled as one",
-            player.state.value.notice?.contains(DEVICE_DEFAULT_VOICE_NOTICE) == true)
+            player.state.value.notice?.contains(text(DEVICE_DEFAULT_VOICE_NOTICE)) == true)
         player.shutdown()
         ShadowTextToSpeech.reset()
     }
@@ -660,7 +664,7 @@ class PronunciationPlayerTest {
         failUtterance(secondSubstitute, TextToSpeech.ERROR_SYNTHESIS)
         settle()
 
-        assertFailure(player, "Online audio failed", DeviceSpeechFailure.PlaybackFailed.message)
+        assertFailure(player, "Online audio failed", text(DeviceSpeechFailure.PlaybackFailed.message))
         assertNotNull("That report carries what the engines answered", player.state.value.diagnostic)
         assertFalse(player.state.value.playing)
         player.shutdown()
@@ -680,7 +684,7 @@ class PronunciationPlayerTest {
         failUtterance(substituting, TextToSpeech.ERROR_NOT_INSTALLED_YET)
         settle()
 
-        assertFailure(player, "Online audio failed", MISSING_ENGLISH_DATA)
+        assertFailure(player, "Online audio failed", text(R.string.speech_failure_missing_english_data))
         assertNotNull(player.state.value.diagnostic)
         assertFalse(player.state.value.playing)
         player.shutdown()
@@ -702,7 +706,7 @@ class PronunciationPlayerTest {
         failUtterance(engine, TextToSpeech.ERROR_SYNTHESIS)
         settle()
 
-        assertFailure(player, "Online audio failed", DeviceSpeechFailure.PlaybackFailed.message)
+        assertFailure(player, "Online audio failed", text(DeviceSpeechFailure.PlaybackFailed.message))
         val report = player.state.value.diagnostic
         assertNotNull("A playback failure still carries the device evidence", report)
         assertTrue("An accepted utterance that failed is a playback verdict, not a missing voice",
@@ -854,7 +858,7 @@ class PronunciationPlayerTest {
         settle()
         engineInitialization(TextToSpeech.ERROR)
 
-        assertFailure(player, "All 3 online audio routes failed", NO_SPEECH_ENGINE)
+        assertFailure(player, "All 3 online audio routes failed", text(R.string.speech_failure_engine_not_started))
         val report = player.state.value.diagnostic
         assertNotNull(report)
         val dictionary = report!!.indexOf("online: dictionary=")
@@ -883,7 +887,7 @@ class PronunciationPlayerTest {
         assertTrue("No speech service was asked", bing.calls.isEmpty() && baidu.calls.isEmpty())
         engineInitialization(TextToSpeech.ERROR)
 
-        assertFailure(player, TOO_LONG_FOR_ONLINE, NO_SPEECH_ENGINE)
+        assertFailure(player, text(R.string.speech_failure_too_long_online), text(R.string.speech_failure_engine_not_started))
         val report = player.state.value.diagnostic
         assertNotNull(report)
         assertFalse("A route that was not attempted is not a failure", report!!.contains("online:"))

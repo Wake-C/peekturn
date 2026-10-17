@@ -118,4 +118,16 @@ class ChapterTitlesTest {
             chapterTitleFor(position("chapter1.xhtml"), listOf(chapter("chapter1.xhtml", "   ")), emptyList())
         )
     }
+
+    /** A titled part names the untitled chapters under it, and only those. */
+    @Test fun `a named part covers its untitled children but not a following chapter`() {
+        val part = chapter(
+            "part1/first.xhtml", "Part One",
+            children = listOf(chapter("part1/second.xhtml"), chapter("part1/third.xhtml"))
+        )
+        val spine = listOf(chapter("part1/first.xhtml"), chapter("part1/second.xhtml"), chapter("part1/third.xhtml"), chapter("part2/other.xhtml"))
+        assertEquals("Part One", chapterTitleFor(position("part1/second.xhtml"), listOf(part), spine))
+        assertEquals("Part One", chapterTitleFor(position("part1/third.xhtml"), listOf(part), spine))
+        assertEquals("", chapterTitleFor(position("part2/other.xhtml"), listOf(part), spine))
+    }
 }

@@ -26,5 +26,6 @@ internal data class ReaderSystemBars(val statusVisible: Boolean, val navigationV
 internal fun readerSystemBars(preferences: ReaderPreferences, appTheme: String) = ReaderSystemBars(
     statusVisible = !preferences.immersive,
     navigationVisible = !preferences.immersive,
-    darkIcons = appTheme != "dark"
+    // Light system-bar icons are needed on any dark canvas, including true black.
+    darkIcons = appTheme != "dark" && appTheme != "oled"
 )

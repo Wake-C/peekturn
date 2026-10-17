@@ -20,3 +20,4 @@
 - **Model profile**: a named, saved model configuration.
 - **Active profile**: the model profile selected for new explanation requests.
 - **Chapter page position**: the currently visible page and total pages for the current chapter under current layout. Not a durable reading position or a fixed whole-book page count.
+- **Interface language**: the language of the app's own controls and messages (English or Simplified Chinese). Distinct from book text, chapter titles, dictionary data and IPA, which are never translated.

@@ -130,7 +130,11 @@ class MarginStore internal constructor(private val context: Context, private val
             },
             activeProfileId = settings.activeProfileId.takeIf { id -> profiles.any { it.id == id } } ?: profiles.first().id,
             accent = if (settings.accent == "UK") "UK" else "US",
-            appTheme = when (settings.appTheme) { "dark", "light", "warm" -> settings.appTheme; else -> "dark" }
+            appTheme = when (settings.appTheme) {
+                "dark", "light", "warm", "oled", "sage" -> settings.appTheme
+                else -> "dark"
+            },
+            uiLanguage = when (settings.uiLanguage) { "en", "zh" -> settings.uiLanguage; else -> "system" }
         )
     }
 

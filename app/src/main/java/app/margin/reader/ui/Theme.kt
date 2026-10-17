@@ -53,6 +53,56 @@ private val classicScheme = lightColorScheme(
     surfaceContainerLowest = Color(0xFFFFFFFF), surfaceContainerLow = Color(0xFFF4F3EC),
     surfaceContainer = Color(0xFFEEEDE5), surfaceContainerHigh = Color(0xFFE8E7DF), surfaceContainerHighest = Color(0xFFE2E1D9)
 )
+
+/**
+ * Midnight for AMOLED: the canvas is true #000000, so every elevated surface is a very low-chroma
+ * warm step above black (surface 7, container 18, high 26) rather than a shadow. Body ink is a warm
+ * off-white, 17:1 on the canvas and 16.5:1 on the elevated surface.
+ */
+private val oledScheme = darkColorScheme(
+    primary = Color(0xFFE0C08B), onPrimary = Color(0xFF2C2008),
+    primaryContainer = Color(0xFF4A3A1E), onPrimaryContainer = Color(0xFFF5E2BE),
+    secondary = Color(0xFFCFBF9F), onSecondary = Color(0xFF2A2418),
+    secondaryContainer = Color(0xFF3B3424), onSecondaryContainer = Color(0xFFEDE0C3),
+    tertiary = Color(0xFFC9C3B4), onTertiary = Color(0xFF232118),
+    tertiaryContainer = Color(0xFF343128), onTertiaryContainer = Color(0xFFE8E3D5),
+    background = Color(0xFF000000), onBackground = Color(0xFFEDE7DB),
+    surface = Color(0xFF070605), onSurface = Color(0xFFEDE7DB),
+    surfaceVariant = Color(0xFF16130F), onSurfaceVariant = Color(0xFFB8B1A4),
+    surfaceTint = Color(0xFFE0C08B), outline = Color(0xFF8A8579), outlineVariant = Color(0xFF2A2620),
+    error = Color(0xFFFFB4AB), onError = Color(0xFF690005),
+    errorContainer = Color(0xFF93000A), onErrorContainer = Color(0xFFFFDAD6),
+    inverseSurface = Color(0xFFEDE7DB), inverseOnSurface = Color(0xFF1A1815), inversePrimary = Color(0xFF6B5326), scrim = Color.Black,
+    surfaceBright = Color(0xFF2E2A24), surfaceDim = Color(0xFF000000),
+    surfaceContainerLowest = Color(0xFF000000), surfaceContainerLow = Color(0xFF0A0907),
+    surfaceContainer = Color(0xFF12100E), surfaceContainerHigh = Color(0xFF1A1815),
+    surfaceContainerHighest = Color(0xFF23201B)
+)
+/**
+ * Sage is a green-grey paper, not a green theme: the canvas carries only a faint vegetal cast and
+ * the ink stays a neutral near-black. The accent is an olive-gold, so it reads as a second paper
+ * stock next to Classic White instead of a second identity.
+ */
+private val sageScheme = lightColorScheme(
+    primary = Color(0xFF6B571D), onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFEFDFB2), onPrimaryContainer = Color(0xFF382D04),
+    secondary = Color(0xFF5E6147), onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFE3E6D3), onSecondaryContainer = Color(0xFF22260F),
+    tertiary = Color(0xFF5C6257), onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFE2E8DC), onTertiaryContainer = Color(0xFF1D231C),
+    background = Color(0xFFEDF0E7), onBackground = Color(0xFF222A23),
+    surface = Color(0xFFF6F8EF), onSurface = Color(0xFF222A23),
+    surfaceVariant = Color(0xFFE2E7DA), onSurfaceVariant = Color(0xFF4F594E),
+    surfaceTint = Color(0xFF6B571D), outline = Color(0xFF777D72), outlineVariant = Color(0xFFC6CCBF),
+    error = Color(0xFFB3261E), onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFFDAD6), onErrorContainer = Color(0xFF410002),
+    inverseSurface = Color(0xFF2E342C), inverseOnSurface = Color(0xFFEFF2E7), inversePrimary = Color(0xFFDCC58A), scrim = Color.Black,
+    surfaceBright = Color(0xFFFBFDF5), surfaceDim = Color(0xFFDDE2D5),
+    surfaceContainerLowest = Color(0xFFFFFFFF), surfaceContainerLow = Color(0xFFF1F4EB),
+    surfaceContainer = Color(0xFFEBEFE4), surfaceContainerHigh = Color(0xFFE5EADF),
+    surfaceContainerHighest = Color(0xFFDFE4D9)
+)
+
 private val warmScheme = lightColorScheme(
     primary = Color(0xFF735019), onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFEBD49F), onPrimaryContainer = Color(0xFF342302),
@@ -76,8 +126,14 @@ private val warmScheme = lightColorScheme(
 internal fun marginColorScheme(theme: String): ColorScheme = when (theme) {
     "light" -> classicScheme
     "warm" -> warmScheme
+    "oled" -> oledScheme
+    "sage" -> sageScheme
     else -> focusScheme
 }
+
+/** Themes whose canvas is dark; system bar icons and reader chrome invert against these. */
+internal fun isDarkTheme(theme: String) = theme == "dark" || theme == "oled"
+
 private val focusTypography = Typography(
     // Serif carries the editorial voice; display sizes take the negative tracking that keeps a
     // large face from looking stretched, and its small sizes stay loose for legibility.

@@ -2,13 +2,18 @@
 
 package app.margin.reader.reader
 
+import androidx.compose.ui.graphics.toArgb
 import app.margin.reader.model.ReaderPreferences
+import app.margin.reader.ui.marginColorScheme
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.preferences.Color
 import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.navigator.preferences.Theme
 
-/** Persistence uses percentages; Readium's public API uses multipliers. */
+/**
+ * Persistence uses percentages; Readium's public API uses multipliers. Paper and ink come from the
+ * same scheme the chrome renders, so a theme added to Theme.kt cannot leave the book page behind.
+ */
 internal fun ReaderPreferences.toEpub(appTheme: String) = EpubPreferences(
     fontSize = fontSize / 100.0,
     fontFamily = FontFamily(fontFamily),
@@ -18,11 +23,13 @@ internal fun ReaderPreferences.toEpub(appTheme: String) = EpubPreferences(
     scroll = scroll,
     publisherStyles = false,
     typeScale = 1.2,
-    backgroundColor = Color(android.graphics.Color.parseColor(
-        when (appTheme) { "light" -> "#FAF9F4"; "warm" -> "#EEE5D3"; else -> "#171E23" }
-    )),
-    textColor = Color(android.graphics.Color.parseColor(if (appTheme == "dark") "#E9E8DF" else "#262B2C")),
-    theme = when (appTheme) { "light" -> Theme.LIGHT; "warm" -> Theme.SEPIA; else -> Theme.DARK }
+    backgroundColor = Color(marginColorScheme(appTheme).background.toArgb()),
+    textColor = Color(marginColorScheme(appTheme).onBackground.toArgb()),
+    theme = when (appTheme) {
+        "warm" -> Theme.SEPIA
+        "light", "sage" -> Theme.LIGHT
+        else -> Theme.DARK
+    }
 )
 
 internal data class ReaderTextInsets(val topDp: Double, val bottomDp: Double)

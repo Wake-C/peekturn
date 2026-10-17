@@ -59,18 +59,6 @@ class OnlineRouteReportTest {
         assertEquals(RouteStage.Handshake, socket.stage)
     }
 
-    /** The lead counts the routes that actually ran, so a word's three are not called "both". */
-    @Test fun theLeadNamesTheNumberOfRoutesThatActuallyRan() {
-        val bing = RouteOutcome("bing", RouteStage.Answer, 1)
-        val baidu = RouteOutcome("baidu", RouteStage.Answer, 2)
-        val dictionary = RouteOutcome(DICTIONARY_ROUTE, RouteStage.Answer, 3)
-
-        assertEquals("Online audio failed", onlineFailureLead(emptyList()))
-        assertEquals("Online audio failed", onlineFailureLead(listOf(bing)))
-        assertEquals("Both online audio routes failed", onlineFailureLead(listOf(bing, baidu)))
-        assertEquals("All 3 online audio routes failed", onlineFailureLead(listOf(dictionary, bing, baidu)))
-    }
-
     @Test fun theReportLineCarriesEachRouteItsOutcomeAndMilliseconds() {
         val line = onlineFailureReport(
             listOf(

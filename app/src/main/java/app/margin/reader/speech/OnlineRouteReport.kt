@@ -30,9 +30,6 @@ internal const val CONNECTION_CLOSED = "connection closed before audio"
 /** What an attempt that reached the service and returned nothing is reported as. */
 internal const val NO_AUDIO = "no audio"
 
-/** Why no online route was asked at all: the text is past what the services will voice. */
-internal const val TOO_LONG_FOR_ONLINE = "This text is too long for online audio"
-
 /** The route name a single word's dictionary recording is reported under. */
 internal const val DICTIONARY_ROUTE = "dictionary"
 
@@ -85,28 +82,6 @@ data class RouteOutcome(
 /** The one line a failure report starts with, in the order the routes were tried and nothing else. */
 internal fun onlineFailureReport(outcomes: List<RouteOutcome>): String =
     "online: " + outcomes.joinToString("; ") { "${it.route}=${it.outcome()} ${it.elapsedMs}ms" }
-
-/**
- * The leading clause of a failure message, from how many routes were actually attempted: a word may
- * have tried its dictionary recording plus both services, while a phrase only has the services. A
- * route that was never attempted is absent from [outcomes], so the sentence cannot claim a failure
- * that did not happen.
- */
-internal fun onlineFailureLead(outcomes: List<RouteOutcome>): String {
-    val attempts = outcomes.map { it.route }.distinct().size
-    return when {
-        attempts <= 1 -> "Online audio failed"
-        attempts == 2 -> "Both online audio routes failed"
-        else -> "All $attempts online audio routes failed"
-    }
-}
-
-/**
- * The reader's failure sentence: what the online routes did, then the device's own answer. The two
- * halves come from their own classification, so neither can claim a cause the app did not observe.
- */
-internal fun failureMessage(online: String?, device: String): String =
-    if (online == null) device else "$online, and ${device.replaceFirstChar { it.lowercase() }}"
 
 /**
  * The clock and build identity a wrong device clock would otherwise hide. Both are fixed facts of the

@@ -1,5 +1,6 @@
 package app.margin.reader.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -16,14 +17,21 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.margin.reader.R
 import app.margin.reader.model.Book
 import kotlin.math.roundToInt
 
-private enum class ShelfFilter(val label: String) { All("All"), Reading("Reading"), Unread("Unread"), Finished("Finished") }
+private enum class ShelfFilter(@StringRes val label: Int) {
+    All(R.string.shell_filter_all),
+    Reading(R.string.shell_filter_reading),
+    Unread(R.string.shell_filter_unread),
+    Finished(R.string.shell_filter_finished)
+}
 
 @Composable
 fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Unit, onDelete: (Book) -> Unit) {
@@ -54,9 +62,9 @@ fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Uni
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            MarginScreenHeader("Library") {
+            MarginScreenHeader(stringResource(R.string.shell_library_title)) {
                 IconButton(onClick = onImport, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Outlined.Add, contentDescription = "Add book")
+                    Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.shell_add_book))
                 }
             }
         }
@@ -64,11 +72,11 @@ fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Uni
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 64.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                    Text("No books yet", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+                    Text(stringResource(R.string.shell_empty_library), style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
                     FilledTonalButton(onClick = onImport, modifier = Modifier.heightIn(min = 48.dp)) {
                         Icon(Icons.Outlined.Add, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Add book")
+                        Text(stringResource(R.string.shell_add_book))
                     }
                 }
             }
@@ -76,7 +84,7 @@ fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Uni
             if (focus != null) item(key = "focus-${focus.id}") {
                 Column(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 20.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    BookCover(focus, Modifier.width(144.dp).clickable(role = Role.Button, onClickLabel = "Continue ${focus.title}") { onOpen(focus) })
+                    BookCover(focus, Modifier.width(144.dp).clickable(role = Role.Button, onClickLabel = stringResource(R.string.shell_continue_book, focus.title)) { onOpen(focus) })
                     Box(Modifier.fillMaxWidth()) {
                         Text(focus.title, Modifier.fillMaxWidth().padding(horizontal = 44.dp).align(Alignment.Center),
                             style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Serif, textAlign = TextAlign.Center)
@@ -87,42 +95,42 @@ fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Uni
                     // read as an unlabelled chip floating over the action.
                     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(focus.author.ifBlank { "Unknown author" }, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                        Text("Progress: ${bookProgress(focus)}", style = MaterialTheme.typography.labelMedium,
+                        Text(focus.author.ifBlank { stringResource(R.string.shell_unknown_author) }, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                        Text(stringResource(R.string.shell_progress_label, bookProgressText(focus)), style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                     }
-                    Button(onClick = { onOpen(focus) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Continue") }
+                    Button(onClick = { onOpen(focus) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.shell_continue)) }
                 }
             }
             item {
                 if (focus != null) HorizontalDivider(Modifier.padding(bottom = 20.dp))
-                Text("Shelf", style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.shell_shelf_heading), style = MaterialTheme.typography.titleLarge)
             }
             item {
                 OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Search books") }, singleLine = true,
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = "Search by title or author") })
+                    placeholder = { Text(stringResource(R.string.shell_search_books_hint)) }, singleLine = true,
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = stringResource(R.string.shell_search_books_description)) })
             }
             item {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ShelfFilter.entries.forEach { option ->
                         FilterChip(selected = filter == option, onClick = { filterName = option.name },
-                            label = { Text(option.label) }, modifier = Modifier.heightIn(min = 48.dp))
+                            label = { Text(stringResource(option.label)) }, modifier = Modifier.heightIn(min = 48.dp))
                     }
                 }
             }
             if (shelf.isEmpty() && focus == null) item {
-                Text("No matching books", Modifier.padding(vertical = 20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.shell_no_matching_books), Modifier.padding(vertical = 20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(shelf, key = { it.id }) { book ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f).clickable(role = Role.Button, onClickLabel = "Open ${book.title}") { onOpen(book) }.padding(vertical = 8.dp),
+                    Row(Modifier.weight(1f).clickable(role = Role.Button, onClickLabel = stringResource(R.string.shell_open_book, book.title)) { onOpen(book) }.padding(vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         BookCover(book, Modifier.width(56.dp))
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(book.title, style = MaterialTheme.typography.titleMedium)
-                            Text(book.author.ifBlank { "Unknown author" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(bookProgress(book), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(book.author.ifBlank { stringResource(R.string.shell_unknown_author) }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(bookProgressText(book), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     BookActions(book, onRemove = { deletingId = book.id })
@@ -132,11 +140,11 @@ fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Uni
         }
     }
     books.firstOrNull { it.id == deletingId }?.let { book ->
-        AlertDialog(onDismissRequest = { deletingId = null }, title = { Text("Remove book?") },
-            text = { Text("Remove “${book.title}”, its reading position, and its reading-time records from Margin? Your original EPUB is not changed.",
+        AlertDialog(onDismissRequest = { deletingId = null }, title = { Text(stringResource(R.string.shell_remove_book_title)) },
+            text = { Text(stringResource(R.string.shell_remove_book_message, book.title),
                 Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) },
-            confirmButton = { TextButton(onClick = { deletingId = null; onDelete(book) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Remove") } },
-            dismissButton = { TextButton(onClick = { deletingId = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Keep book") } })
+            confirmButton = { TextButton(onClick = { deletingId = null; onDelete(book) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.shell_remove)) } },
+            dismissButton = { TextButton(onClick = { deletingId = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.shell_keep_book)) } })
     }
 }
 
@@ -144,7 +152,7 @@ fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Uni
 internal fun MarginScreenHeader(title: String, action: @Composable () -> Unit = {}) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Margin", style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Serif,
+            Text(stringResource(R.string.shell_app_name), style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Serif,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(title, style = MaterialTheme.typography.headlineSmall)
         }
@@ -157,17 +165,33 @@ private fun BookActions(book: Book, onRemove: () -> Unit, modifier: Modifier = M
     var expanded by remember(book.id) { mutableStateOf(false) }
     Box(modifier) {
         IconButton(onClick = { expanded = true }, modifier = Modifier.size(48.dp)) {
-            Icon(Icons.Outlined.MoreHoriz, contentDescription = "Options for ${book.title}")
+            Icon(Icons.Outlined.MoreHoriz, contentDescription = stringResource(R.string.shell_book_options, book.title))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text("Remove book") }, onClick = { expanded = false; onRemove() })
+            DropdownMenuItem(text = { Text(stringResource(R.string.shell_remove)) }, onClick = { expanded = false; onRemove() })
         }
     }
 }
 
-private fun bookProgress(book: Book): String = when {
-    book.progression >= 1.0 -> "Finished"
-    book.lastReadAt <= 0L -> "Not started"
-    !book.progression.isFinite() || book.progression < 0.005 -> "Reading"
-    else -> "${(book.progression.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0)?.times(100) ?: 0.0).roundToInt()}% read"
+private enum class BookProgressKind { Finished, NotStarted, Reading, Percent }
+
+private data class BookProgress(val kind: BookProgressKind, val percent: Int = 0)
+
+private fun bookProgress(book: Book): BookProgress = when {
+    book.progression >= 1.0 -> BookProgress(BookProgressKind.Finished)
+    book.lastReadAt <= 0L -> BookProgress(BookProgressKind.NotStarted)
+    !book.progression.isFinite() || book.progression < 0.005 -> BookProgress(BookProgressKind.Reading)
+    else -> BookProgress(BookProgressKind.Percent,
+        (book.progression.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0)?.times(100) ?: 0.0).roundToInt())
+}
+
+@Composable
+private fun bookProgressText(book: Book): String {
+    val progress = bookProgress(book)
+    return when (progress.kind) {
+        BookProgressKind.Finished -> stringResource(R.string.shell_progress_finished)
+        BookProgressKind.NotStarted -> stringResource(R.string.shell_progress_not_started)
+        BookProgressKind.Reading -> stringResource(R.string.shell_progress_reading)
+        BookProgressKind.Percent -> stringResource(R.string.shell_progress_percent, progress.percent)
+    }
 }

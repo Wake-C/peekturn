@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 阅读、查词与语音界面的简体中文文案。诊断报告中的技术标识仍保持英文。 -->
+<resources>
+    <!-- 查词浮窗 -->
+    <string name="reader_lookup_tab_explain">解释</string>
+    <string name="reader_lookup_tab_dictionary">词典</string>
+    <string name="reader_lookup_section_context">语境</string>
+    <string name="reader_lookup_section_examples">例句</string>
+    <string name="reader_lookup_loading_dictionary">正在查词…</string>
+    <string name="reader_lookup_loading_explanation">正在解释…</string>
+    <string name="reader_lookup_empty_dictionary">离线词典中没有这个词条。</string>
+    <string name="reader_lookup_retry">重试</string>
+    <string name="reader_lookup_speech_settings">语音设置</string>
+    <string name="reader_lookup_dismiss_failure">忽略</string>
+    <string name="reader_lookup_adjust">调整</string>
+    <string name="reader_lookup_close">关闭</string>
+    <string name="reader_lookup_close_description">关闭解释</string>
+    <string name="reader_lookup_pronounce">朗读</string>
+    <string name="reader_lookup_stop_pronouncing">停止朗读</string>
+    <string name="reader_lookup_dictionary_error">无法打开离线词典，请重试。</string>
+
+    <!-- 阅读器对话框 -->
+    <string name="reader_contents_title">目录</string>
+    <string name="reader_contents_empty">这本书没有目录。</string>
+    <string name="reader_chapter_untitled">未命名章节</string>
+    <string name="reader_close">关闭</string>
+    <string name="reader_appearance_title">阅读外观</string>
+    <string name="reader_appearance_typeface">字体</string>
+    <string name="reader_appearance_typeface_serif">衬线体</string>
+    <string name="reader_appearance_typeface_sans">无衬线体</string>
+    <string name="reader_appearance_typeface_selected">✓ %1$s</string>
+    <string name="reader_appearance_font_size">字号</string>
+    <string name="reader_appearance_font_size_value">%1$d%%</string>
+    <string name="reader_appearance_line_height">行距</string>
+    <string name="reader_appearance_line_height_value">%1$.2f×</string>
+    <string name="reader_appearance_paragraph_spacing">段间距</string>
+    <string name="reader_appearance_paragraph_spacing_value">%1$.2f em</string>
+    <string name="reader_appearance_side_margins">页边距</string>
+    <string name="reader_appearance_side_margins_value">%1$.2f×</string>
+    <string name="reader_appearance_top_distance">上边距</string>
+    <string name="reader_appearance_bottom_distance">下边距</string>
+    <string name="reader_appearance_distance_value">%1$d dp</string>
+    <string name="reader_appearance_continuous">连续滚动</string>
+    <string name="reader_appearance_immersive">沉浸式阅读</string>
+    <string name="reader_apply">应用</string>
+    <string name="reader_cancel">取消</string>
+
+    <!-- 阅读器提示 -->
+    <string name="reader_toast_position_not_saved">阅读进度未能保存。</string>
+    <string name="reader_toast_book_cannot_open">无法打开这本书，请重新导入可读取的 EPUB 文件。</string>
+    <string name="reader_toast_no_browser">没有可打开此链接的浏览器。</string>
+    <string name="reader_toast_chapter_load_failed">有一章无法加载，请重新导入可读取的 EPUB 文件。</string>
+    <string name="reader_toast_unsafe_link">此链接的目标地址不安全。</string>
+    <string name="reader_toast_unsafe_location">此位置标识不安全。</string>
+
+    <!-- 语音提示与错误。其下的诊断报告保持英文。 -->
+    <string name="speech_notice_accent_not_guaranteed">正在使用系统英语语音，可能无法按所选口音朗读。</string>
+    <string name="speech_notice_device_default_voice">正在使用本机自带的语音，而不是已安装的英语语音；可能无法按所选口音朗读。</string>
+    <string name="speech_notice_baidu_accent">百度翻译只有一个英语语音，可能无法按所选口音朗读。</string>
+    <string name="speech_notice_no_online_audio">这段文字没有可用的在线音频，已改用系统语音。</string>
+    <string name="speech_failure_too_long_online">这段文字过长，无法使用在线音频</string>
+    <string name="speech_notice_too_long_online">%1$s，已改用系统语音。</string>
+    <string name="speech_failure_online_failed">在线音频不可用</string>
+    <string name="speech_failure_both_online_routes">两条在线音频途径均不可用</string>
+    <string name="speech_failure_all_online_routes">全部 %1$d 条在线音频途径均不可用</string>
+    <string name="speech_failure_online_playback">找到了在线音频，但无法播放</string>
+    <string name="speech_failure_online_and_device">%1$s，%2$s</string>
+    <string name="speech_failure_engine_not_started">设备语音引擎没有启动，请打开系统语音设置检查。</string>
+    <string name="speech_failure_missing_english_data">语音引擎报告英语语音数据缺失，请打开系统语音设置下载后再试。</string>
+    <string name="speech_failure_no_english_voice">设备上的语音引擎都没有提供英语语音，请检查系统语音设置。</string>
+    <string name="speech_failure_engine_playback">语音引擎接受了英语文本，但无法朗读，请检查系统语音设置或选择其他引擎。</string>
+    <string name="speech_failure_too_long_for_system">这段文字过长，系统语音无法朗读，请选择更短的片段。</string>
+    <string name="speech_failure_playback">语音播放失败，请检查系统语音设置后重试。</string>
+    <string name="speech_failure_playback_settings">语音播放失败，请检查系统语音设置。</string>
+    <string name="speech_failure_settings_unavailable">此设备没有可用的系统语音设置。</string>
+    <string name="speech_failure_choose_accent">请选择美式或英式发音。</string>
+    <string name="speech_failure_no_text">没有可朗读的文字。</string>
+    <string name="speech_failure_audio_unavailable">当前无法播放音频，请重试朗读。</string>
+    <string name="speech_source_notice">你选择朗读的文字会发送到公开的语音服务：有道词典有单词录音时使用它，Microsoft Read Aloud 朗读句子、短语和没有录音的单词，Microsoft 服务不可用时由百度翻译应答。这些服务都免费、无需密钥，但非官方也未获授权，无法保证一直可用。只有你选择朗读的文字会发送出去，书籍上下文不会；在线音频不可用时改用系统语音。</string>
+    <string name="speech_report_copy_details">复制详情</string>
+    <string name="speech_report_copied">已复制</string>
+    <string name="speech_report_clip_label">语音详情</string>
+</resources>

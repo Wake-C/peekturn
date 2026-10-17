@@ -56,19 +56,23 @@ internal class ChapterTitles private constructor(
             val exact = linkedMapOf<String, String>()
             val byResource = linkedMapOf<String, String>()
 
-            fun collect(children: List<Link>) {
+            // A book may title a part and leave its chapters untitled; those chapters are still in
+            // that part, so the nearest titled ancestor names them. Inheritance follows the book's own
+            // hierarchy and never crosses to a sibling, which is why a named chapter cannot lend its
+            // name to the next file.
+            fun collect(children: List<Link>, inherited: String?) {
                 for (link in children) {
-                    val title = cleanChapterTitle(link.title)
+                    val href = link.href.toString()
+                    val title = cleanChapterTitle(link.title) ?: inherited
                     if (title != null) {
-                        val href = link.href.toString()
                         // Deeper entries are collected last and own their resource, as in Readium.
                         exact[href] = title
                         byResource[href.resourceKey()] = title
                     }
-                    collect(link.children)
+                    collect(link.children, title)
                 }
             }
-            collect(tableOfContents)
+            collect(tableOfContents, null)
 
             // Every reading-order resource identifies a chapter, whether or not it is titled.
             val resources = linkedSetOf<String>()
@@ -78,6 +82,8 @@ internal class ChapterTitles private constructor(
                 resources += key
                 cleanChapterTitle(link.title)?.let { spineTitles[key] = it }
             }
+            // Reading-order position of every resource, so a title can be attributed to the chapter
+            // at or before a position even when its own entry is untitled.
             return ChapterTitles(exact, byResource, resources, spineTitles)
         }
     }
