@@ -48,4 +48,26 @@ class BookSearchRowTest {
         assertEquals(201, long.match.length)
         assertTrue(long.match.endsWith("…"))
     }
+
+    @Test fun `a sentence closing inside the budget ends the snippet before the next fragment`() {
+        val row = bookSearchRow("Opening the book", "She was ",
+            "reluctant", " to leave the familiar streets behind. A new city meant new people and new routines.")
+        assertEquals(" to leave the familiar streets behind.", row.after)
+        assertFalse(row.after.endsWith("…"))
+    }
+
+    @Test fun `a snippet cut inside a sentence still marks the dropped words`() {
+        val row = bookSearchRow("Opening the book", "The old man ",
+            "kept", "s, and they were held in fear of the long night that never ended")
+        assertEquals("s, and they were held in fear of the long…", row.after)
+    }
+
+    @Test fun `the same chapter labels a run of results once`() {
+        assertTrue(chapterRunStart(null, "Opening the book"))
+        assertTrue(chapterRunStart("Opening the book", "A different street"))
+        assertFalse(chapterRunStart("A different street", "A different street"))
+        assertFalse(chapterRunStart("A different street", null))
+        assertEquals("Opening the book", chapterLabel("  Opening\n the book "))
+        assertNull(chapterLabel("  "))
+    }
 }

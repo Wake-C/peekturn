@@ -10,7 +10,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -48,6 +50,24 @@ internal fun readingDuration(seconds: Long): String {
         value < 60 -> "$value sec"
         value < 3600 -> "${value / 60} min"
         else -> "${value / 3600} hr ${value % 3600 / 60} min"
+    }
+}
+
+/**
+ * The same durations for the metric columns, where each unit is glued to its numeral ("1h 26m"). Three
+ * columns on a phone offer about a hundred dp each, and the spoken "1 hr 26 min" needs about 122dp, so
+ * there it can only wrap and orphan its last unit. Prose lines and accessibility labels keep the spoken
+ * form; every metric column shows the same compact notation at the same size.
+ */
+internal fun compactDuration(seconds: Long): String {
+    val value = seconds.coerceAtLeast(0)
+    val minutes = value % 3600 / 60
+    return when {
+        value == 0L -> "0m"
+        value < 60 -> "${value}s"
+        value < 3600 -> "${value / 60}m"
+        minutes == 0L -> "${value / 3600}h"
+        else -> "${value / 3600}h ${minutes}m"
     }
 }
 
@@ -125,8 +145,10 @@ private fun TimeMetric(label: String, seconds: Long, modifier: Modifier = Modifi
     Column(modifier.clearAndSetSemantics { contentDescription = "$accessibleLabel: $duration" },
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-        Text(duration, style = (if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
-            .copy(fontFeatureSettings = "tnum"))
+        // The figure and its unit are one inseparable mark: no wrap, no orphaned "min" on a second line.
+        Text(compactDuration(seconds), maxLines = 1, softWrap = false,
+            style = (if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
+                .copy(fontFeatureSettings = "tnum"))
     }
 }
 
@@ -134,6 +156,9 @@ private fun TimeMetric(label: String, seconds: Long, modifier: Modifier = Modifi
 private fun ReadingChart(days: List<Pair<LocalDate, Long>>) {
     val accent = MaterialTheme.colorScheme.primary
     val grid = MaterialTheme.colorScheme.outlineVariant
+    // Bars carry the app's smallest rectangle corner, the same one the search field is drawn with, so a
+    // data mark belongs to the same family as the controls around it.
+    val barCorner = MaterialTheme.shapes.extraSmall.topStart
     val max = days.maxOfOrNull { it.second }?.coerceAtLeast(1L) ?: 1L
     val dateFormat = remember { DateTimeFormatter.ofPattern("MMM d") }
     val description = remember(days, dateFormat) {
@@ -148,11 +173,12 @@ private fun ReadingChart(days: List<Pair<LocalDate, Long>>) {
             }
             val slot = size.width / days.size.coerceAtLeast(1)
             val barWidth = slot * .55f
+            val corner = CornerRadius(barCorner.toPx(Size.Zero, this))
             days.forEachIndexed { index, (_, seconds) ->
                 if (seconds > 0L) {
                     val height = size.height * (seconds.toDouble() / max).toFloat()
-                    drawRect(accent, topLeft = Offset(slot * index + (slot - barWidth) / 2f, size.height - height),
-                        size = androidx.compose.ui.geometry.Size(barWidth, height))
+                    drawRoundRect(accent, topLeft = Offset(slot * index + (slot - barWidth) / 2f, size.height - height),
+                        size = Size(barWidth, height), cornerRadius = corner)
                 }
             }
         }

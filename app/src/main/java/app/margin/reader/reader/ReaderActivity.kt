@@ -233,9 +233,10 @@ class ReaderActivity : AppCompatActivity() {
         val pub = publication ?: return
         val spineHtmlHrefs = pub.readingOrder.filter { it.mediaType?.isHtml == true }
             .map { it.url().removeQuery().removeFragment().toString() }.toSet()
+        val settings = graph.store.settings.value
         supportFragmentManager.fragmentFactory = EpubNavigatorFactory(pub).createFragmentFactory(
             initialLocator = initialLocator,
-            initialPreferences = graph.store.settings.value.let { it.reading.toEpub(it.appTheme) },
+            initialPreferences = settings.reading.toEpub(settings.appTheme),
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onExternalLinkActivated(url: org.readium.r2.shared.util.AbsoluteUrl) {
                     val uri = android.net.Uri.parse(url.toString())
@@ -270,8 +271,15 @@ class ReaderActivity : AppCompatActivity() {
             configuration = EpubNavigatorFragment.Configuration(
                 // Readium 3.1 quotes generic families in --USER__fontFamily. An unquoted
                 // root inline family keeps its normal descendant inheritance working.
+                //
+                // Readium CSS paints the native selection from --RS__selectionBackgroundColor, and
+                // its stock #b4d8fe is the platform blue that fights every Margin theme: the theme
+                // accent is injected here instead, in the same inline root style, per chapter.
                 readiumCssRsProperties = org.readium.r2.navigator.epub.css.RsProperties(
-                    overrides = mapOf("font-family" to if (graph.store.settings.value.reading.fontFamily == "sans-serif") "sans-serif" else "serif")
+                    overrides = mapOf(
+                        "font-family" to if (settings.reading.fontFamily == "sans-serif") "sans-serif" else "serif",
+                        "--RS__selectionBackgroundColor" to readerSelectionBackground(settings.appTheme)
+                    )
                 ),
                 selectionActionModeCallback = selectionActions,
                 shouldApplyInsetsPadding = false
@@ -552,8 +560,8 @@ class ReaderActivity : AppCompatActivity() {
         lookup = LookupRequest(
             LookupContext(
                 text,
-                locator.text.before.orEmpty(),
-                locator.text.after.orEmpty(),
+                contextBeforeSelection(locator.text.before.orEmpty()),
+                contextAfterSelection(locator.text.after.orEmpty()),
                 book?.title.orEmpty(),
                 chapterTitles?.titleFor(locator).orEmpty()
             ),

@@ -1,5 +1,3 @@
-@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-
 package app.margin.reader.ui
 
 import androidx.compose.foundation.BorderStroke
@@ -10,8 +8,8 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
@@ -23,9 +21,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -142,17 +140,29 @@ fun SettingsScreen(
     }
 }
 
-/** Appearance stays side by side, wrapping to two per row once text is scaled up. */
+/**
+ * Appearance stays three equal tiles at every text scale, so no tile can wrap alone and stretch.
+ * Past 1.8x the three columns are too narrow for their labels on a phone, so they stack at full
+ * width instead of breaking words to fit - the same tiles, one layout decision.
+ */
 @Composable
 private fun ThemeGroup(selected: String, onSelect: (String) -> Unit) {
-    val perRow = if (LocalDensity.current.fontScale >= 1.3f) 2 else 3
-    FlowRow(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = perRow) {
+    val stacked = LocalDensity.current.fontScale >= 1.8f
+    val tiles: @Composable (Modifier) -> Unit = { modifier ->
         listOf("dark" to "Focus Dark", "light" to "Classic White", "warm" to "Warm Paper").forEach { (value, label) ->
             val preview = marginColorScheme(value)
-            ThemeChoice(label, selected == value, preview.background, preview.onBackground, Modifier.weight(1f)) {
+            ThemeChoice(label, selected == value, preview.background, preview.onBackground, modifier) {
                 onSelect(value)
             }
+        }
+    }
+    if (stacked) {
+        Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            tiles(Modifier.fillMaxWidth())
+        }
+    } else {
+        Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            tiles(Modifier.weight(1f))
         }
     }
 }
@@ -173,7 +183,9 @@ private fun ThemeChoice(label: String, selected: Boolean, paper: Color, ink: Col
                 .padding(horizontal = 6.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
                 Text("Aa", color = ink, fontFamily = FontFamily.Serif, style = MaterialTheme.typography.titleMedium)
             }
-            Text(label, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 2)
+            // Two label lines are reserved so the three tiles keep one height at every text scale, even
+            // when only the longest name ("Classic White") needs the second line.
+            Text(label, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 2, minLines = 2)
         }
     }
 }
@@ -239,7 +251,8 @@ private fun PronunciationSection(
 private fun PreviewAction(label: String, playing: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     OutlinedButton(onClick = onClick, modifier = modifier.heightIn(min = 48.dp),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
-        Icon(if (playing) Icons.Default.Stop else Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
+        Icon(if (playing) Icons.Outlined.Stop else Icons.AutoMirrored.Outlined.VolumeUp,
+            contentDescription = null, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(6.dp))
         Text(if (playing) "Stop" else label, textAlign = TextAlign.Center, maxLines = 2)
     }

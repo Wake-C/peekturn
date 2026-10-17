@@ -68,6 +68,40 @@ data class LookupContext(
     val chapterTitle: String = ""
 )
 
+/**
+ * Whitespace as EPUBs actually carry it: the same class the explanation client uses to count context
+ * words, so a non-breaking space between a heading and its paragraph cannot defeat the shaping below.
+ */
+private val contextWhitespace = Regex("[\\s\\p{Z}\\u0085]+")
+
+/**
+ * A terminator that really ends a sentence: a point only counts when a capital or the end of the
+ * text follows it, so decimals ("3.5") and initials ("U.S. market") are not edges.
+ */
+private val contextSentenceEnd = Regex("[.!?][\"'”’)\\]]*(?=\\s+[\"'“”‘’(]*[A-Z]|\\s*$)")
+
+/**
+ * The context window around a selection, as the model receives it and the popup echoes it. Readium
+ * reports the surrounding text it can reach with no separator where one block ends and the next
+ * begins, so a heading and the paragraph after it arrive glued together ("the bookChapter 1"). Each
+ * side is collapsed to single spaces and cut back to its nearest sentence edge, which reads as
+ * language instead of concatenated markup. Two words are kept when a side has them, and the
+ * selection itself is never altered.
+ */
+internal fun contextBeforeSelection(raw: String): String {
+    val collapsed = raw.replace(contextWhitespace, " ").trim()
+    val edge = contextSentenceEnd.findAll(collapsed).lastOrNull() ?: return collapsed
+    val tail = collapsed.substring(edge.range.last + 1).trim()
+    return if (tail.count { it == ' ' } >= 1) tail else collapsed
+}
+
+internal fun contextAfterSelection(raw: String): String {
+    val collapsed = raw.replace(contextWhitespace, " ").trim()
+    val edge = contextSentenceEnd.find(collapsed) ?: return collapsed
+    val head = collapsed.substring(0, edge.range.last + 1).trim()
+    return if (head.count { it == ' ' } >= 1) head else collapsed
+}
+
 data class Explanation(
     val term: String = "",
     val partOfSpeech: String = "",

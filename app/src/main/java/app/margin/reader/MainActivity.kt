@@ -104,13 +104,19 @@ private fun MarginHome(vm: MainViewModel, settings: AppSettings, onImport: () ->
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
-                listOf("Library", "Statistics", "Settings").forEachIndexed { index, label ->
-                    NavigationBarItem(selected = state.tab == index, onClick = { vm.tab(index) },
-                        icon = { Icon(when(index) { 0 -> Icons.Outlined.AutoStories; 1 -> Icons.Outlined.BarChart; else -> Icons.Outlined.Settings }, label) },
-                        label = { Text(label) },
-                        colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.surfaceVariant,
-                            selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary))
+            // The bar is a plinth, not a shadow: a luminance step from the page plus one hairline marks
+            // where the scrolling content ends, so a row clipped at the fold reads as "more below"
+            // instead of being cut by an invisible edge. The selected pill keeps its theme role.
+            Column {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                    listOf("Library", "Statistics", "Settings").forEachIndexed { index, label ->
+                        NavigationBarItem(selected = state.tab == index, onClick = { vm.tab(index) },
+                            icon = { Icon(when(index) { 0 -> Icons.Outlined.AutoStories; 1 -> Icons.Outlined.BarChart; else -> Icons.Outlined.Settings }, label) },
+                            label = { Text(label) },
+                            colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.surfaceVariant,
+                                selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary))
+                    }
                 }
             }
         }

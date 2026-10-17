@@ -173,6 +173,14 @@ All three playback-ownership regressions were observed assertion-red before thei
 
 These update model requests used fixture-only credentials and a controlled SSE provider, not a new live DeepSeek/Doubao acceptance run. No physical OnePlus device was attached; its engine behavior and perceived accent quality are not claimed as device-tested. Recorded coverage/connectivity remains conditional, and sentence speech still requires some usable English TTS capability. Private screenshots and logs remain ignored. The controlled model provider used for this update was stopped and its script removed; earlier local verification artifacts were not deleted.
 
+## Debug APK packaging workflow (2026-10-16)
+
+The packaging orchestration suite passed all nine tests, covering metadata-selected artifacts, checksums and receipts, dirty-worktree reporting, failed gates retaining prior deliveries, invalid/missing/split outputs, toolchain prerequisites and argument handling.
+
+`tools/package-apk.sh` completed against a temporary detached checkout of commit `d00c736`, with only the packaging script added. The run passed 147 Android unit tests with no failures, errors or skips, assembled the universal debug APK, and passed lint with zero errors and 42 warnings. The collected APK's checksum, debug signature, package ID `app.margin.reader` and version `1.2.0` (code `3`) were independently checked. No device installation, launch or feature acceptance was performed; the receipt records runtime verification as `not_run`.
+
+A separate invocation against the concurrently edited working tree stopped during Kotlin compilation at the unresolved `TextToSpeech.getDefaultEngine()` call in `speech/PronunciationPlayer.kt` and collected no APK. The committed-snapshot success does not validate that changing tree. Temporary build logs and the validated delivery remain outside tracked files.
+
 ## Reader controls, selection, search and free word audio update (2026-10-16)
 
 Final package: `app.margin.reader` version `1.2.0`, version code `3`, universal debug APK. In an isolated detached checkout of `d00c736` with only this change applied, `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` passed with 174 tests in 25 classes, zero failures, errors or skips. Lint reported zero errors and 43 warnings, not a warning-free build. The APK is 56,293,374 bytes against 56,374,583 for the pre-change build: no speech model or voice data was added, and no paid audio service, API key or bundled engine is present.
@@ -234,3 +242,49 @@ The adversarial pass on the committed change found one wiring defect: `ACTION_CA
 
 The review of this delivery (standards, security, spec and adversarial axes) found no P0 or P1 issue and two P2 defects, both inside the live selection read. An answered read that carries no selection was reported as unavailable instead of empty, so an explicit action could tell the user "The selection could not be read" when nothing was selected. The explicit Explain, Dictionary and Copy read also reused the automatic path's pointer gate, so a finger resting on the page turned the user's own command into a failed read. The read rule now lives in `readLiveSelection`, which takes the navigator through a lambda so its four answers are testable; explicit actions read without the pointer gate; and `NativeSelectionReadTest` pins confirmation, moving ranges, empty and unavailable. Restoring the earlier classification in a scratch copy reproduced `expected:<Empty> but was:<Unavailable>`. The same review corrected two documentation overclaims: the toolbar's tap claim and the explicit read's validation. After the fixes the isolated run reported 181 tests with no failures, errors or skips and lint with zero errors and 43 warnings, and the explicit Explain action still opened the released phrase on the emulator.
 
+## Award-level interface pass (2026-10-16)
+
+A design pass judged every shipped surface from rendered screens rather than source: 48 screenshots
+across the three themes and two text scales, produced by one capture agent, then read independently by
+a craft critic, a needs/accessibility critic, and the main agent. The pass found the interface coherent
+but not yet considered: several defects were palette and craft problems that source reading cannot show.
+
+Corrected in this pass:
+
+- The secondary colour family was green in all three schemes while the accepted direction is ink-blue,
+  warm text and a gold accent, which put a green selected state on chips, the navigation indicator and
+  the pronunciation selector. The family is now warm brown/gold in every scheme, so selected states
+  belong to the one accent.
+- The manifest's type scale fell back to framework defaults for headlineSmall, titleSmall, labelLarge
+  and labelMedium, which left screen titles in stock Roboto next to the serif voice; the scale is now
+  stated explicitly and display sizes carry negative tracking.
+- The reading rail was drawn in exactly the page paper colour, so it erased roughly 40% of the last
+  visible text line instead of reading as a control surface. It now uses the theme's raised container
+  with a hairline border, with no change to its footprint.
+- Book text selection was the platform's blue in every theme; it now follows the theme accent through
+  Readium's own selection variable.
+- The rail's three glyphs came from three visual families (heavy filled list, hairline magnifier, heavy
+  filled "Tt"); the rail now draws its own two marks on one 24dp grid at one stroke weight, and the
+  appearance mark reads "Aa" rather than "Ad".
+- Search results repeated the same chapter label on every row, ended snippets on dangling fragments and
+  highlighted matches in a hue-less grey; rows now group consecutive matches under one chapter heading,
+  snippets end at a sentence, and the highlight uses the container pair that survives all three themes.
+- Lookup context arrived with block text glued together ("the bookChapter 1, passage 1"), in the request
+  and in the answer's echo; both sides are now collapsed and cut back to their nearest sentence edge.
+- The library's navigation bar had no edge so the last shelf row was sliced mid-glyph; the bar now takes
+  the theme's surface step with a hairline divider, and the list clears it. The focus cover no longer
+  repeats the author line printed beneath it, and the bare "Reading" chip became a labelled progress line.
+- Statistics metric values wrapped and orphaned their unit; they now use the compact form, and chart bars
+  carry the app's smallest corner radius. Appearance keeps three equal tiles at every text scale, stacking
+  only past 1.8x where three columns no longer fit.
+
+Evidence: the fixes were re-captured in `verification-local/runtime-awards/round2/` (54 screenshots,
+overwritten after the last two corrections), including a chrome/page pixel comparison proving the rail
+still does not repaginate, and the provider request log showing the context payload changed. The unit
+suite passed at 186 tests before the last corrections and 192 after, with lint, assemble and an
+independent security and standards review of the pass.
+
+A test that pinned the selection tint's exact rgba string while re-deriving the expected value from the
+same production expression was deleted: it could not fail for a wrong colour, and the rendered
+screenshot is the real check. Remaining known gaps: audible and motion behaviour, and any surface at
+display sizes beyond those captured.

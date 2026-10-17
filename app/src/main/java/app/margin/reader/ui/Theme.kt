@@ -19,10 +19,10 @@ object FocusColors {
 private val focusScheme = darkColorScheme(
     primary = FocusColors.Accent, onPrimary = FocusColors.Background,
     primaryContainer = Color(0xFF4A3D29), onPrimaryContainer = Color(0xFFF4DEBD),
-    secondary = Color(0xFFB8CCBC), onSecondary = Color(0xFF24372B),
-    secondaryContainer = Color(0xFF35463A), onSecondaryContainer = Color(0xFFD8E8DA),
-    tertiary = Color(0xFFC5C4AA), onTertiary = Color(0xFF313222),
-    tertiaryContainer = Color(0xFF484934), onTertiaryContainer = Color(0xFFE5E5C9),
+    secondary = Color(0xFFCBB68F), onSecondary = Color(0xFF3A2F1D),
+    secondaryContainer = Color(0xFF453926), onSecondaryContainer = Color(0xFFF4DEBD),
+    tertiary = Color(0xFFC9BFA8), onTertiary = Color(0xFF332F21),
+    tertiaryContainer = Color(0xFF413C2C), onTertiaryContainer = Color(0xFFEAE2CC),
     background = FocusColors.Background, onBackground = FocusColors.Text,
     surface = FocusColors.Surface, onSurface = FocusColors.Text,
     surfaceVariant = Color(0xFF29353B), onSurfaceVariant = FocusColors.Muted,
@@ -38,10 +38,10 @@ private val focusScheme = darkColorScheme(
 private val classicScheme = lightColorScheme(
     primary = Color(0xFF76521C), onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFF1DFBA), onPrimaryContainer = Color(0xFF372405),
-    secondary = Color(0xFF4F6654), onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFD9E7D8), onSecondaryContainer = Color(0xFF182D1D),
-    tertiary = Color(0xFF656044), onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFECE5C5), onTertiaryContainer = Color(0xFF302C16),
+    secondary = Color(0xFF6B5B3C), onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFEBDFC6), onSecondaryContainer = Color(0xFF2F2614),
+    tertiary = Color(0xFF6B6349), onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFEEE6CE), onTertiaryContainer = Color(0xFF2F2A16),
     background = Color(0xFFF8F7F2), onBackground = Color(0xFF252923),
     surface = Color(0xFFFFFDF8), onSurface = Color(0xFF252923),
     surfaceVariant = Color(0xFFECE9DF), onSurfaceVariant = Color(0xFF595D53),
@@ -56,10 +56,10 @@ private val classicScheme = lightColorScheme(
 private val warmScheme = lightColorScheme(
     primary = Color(0xFF735019), onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFEBD49F), onPrimaryContainer = Color(0xFF342302),
-    secondary = Color(0xFF536044), onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFDEE3BF), onSecondaryContainer = Color(0xFF202B11),
-    tertiary = Color(0xFF79513C), onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFF3D8C4), onTertiaryContainer = Color(0xFF31190C),
+    secondary = Color(0xFF6A5730), onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFE8DCC0), onSecondaryContainer = Color(0xFF2F2614),
+    tertiary = Color(0xFF6E5B47), onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFEFDFCB), onTertiaryContainer = Color(0xFF32200F),
     background = Color(0xFFF3E6BF), onBackground = Color(0xFF302B20),
     surface = Color(0xFFF9EDCD), onSurface = Color(0xFF302B20),
     surfaceVariant = Color(0xFFE9DAB2), onSurfaceVariant = Color(0xFF61563F),
@@ -79,13 +79,21 @@ internal fun marginColorScheme(theme: String): ColorScheme = when (theme) {
     else -> focusScheme
 }
 private val focusTypography = Typography(
-    headlineLarge = TextStyle(fontFamily = FontFamily.Serif, fontSize = 34.sp, lineHeight = 40.sp),
-    headlineMedium = TextStyle(fontFamily = FontFamily.Serif, fontSize = 28.sp, lineHeight = 34.sp),
-    titleLarge = TextStyle(fontFamily = FontFamily.Serif, fontSize = 24.sp, lineHeight = 30.sp),
-    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),
-    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
-    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 21.sp),
-    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
+    // Serif carries the editorial voice; display sizes take the negative tracking that keeps a
+    // large face from looking stretched, and its small sizes stay loose for legibility.
+    headlineLarge = TextStyle(fontFamily = FontFamily.Serif, fontSize = 34.sp, lineHeight = 40.sp, letterSpacing = (-0.6).sp),
+    headlineMedium = TextStyle(fontFamily = FontFamily.Serif, fontSize = 28.sp, lineHeight = 34.sp, letterSpacing = (-0.4).sp),
+    titleLarge = TextStyle(fontFamily = FontFamily.Serif, fontSize = 24.sp, lineHeight = 30.sp, letterSpacing = (-0.2).sp),
+    headlineSmall = TextStyle(fontFamily = FontFamily.Serif, fontSize = 24.sp, lineHeight = 30.sp, letterSpacing = (-0.2).sp),
+    // The sans tiers are stated explicitly so control labels do not fall back to the framework's
+    // default metrics and tracking, which read as stock Material next to the serif voice.
+    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.1).sp),
+    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
+    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, letterSpacing = 0.1.sp),
+    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, letterSpacing = 0.1.sp),
+    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 18.sp, letterSpacing = 0.2.sp),
+    labelLarge = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.1.sp),
+    labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.4.sp),
     labelSmall = TextStyle(fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 1.2.sp)
 )
 @Composable fun MarginTheme(theme: String = "dark", content: @Composable () -> Unit) {

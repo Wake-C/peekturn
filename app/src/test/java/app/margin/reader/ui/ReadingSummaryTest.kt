@@ -48,4 +48,13 @@ class ReadingSummaryTest {
         assertEquals("1 min", readingDuration(60))
         assertEquals("1 hr 1 min", readingDuration(3660))
     }
+
+    @Test fun metricDurationsGlueEachUnitToItsFigure() {
+        assertEquals("0m", compactDuration(0))
+        assertEquals("45s", compactDuration(45))
+        assertEquals("51m", compactDuration(3060))
+        assertEquals("1h", compactDuration(3600))
+        assertEquals("1h 26m", compactDuration(5160))
+        assertEquals("1h 26m", compactDuration(5160 + 59))
+    }
 }

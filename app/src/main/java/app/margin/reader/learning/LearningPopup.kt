@@ -12,13 +12,18 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -149,8 +154,8 @@ fun LearningPopup(
                     SpeakButton(context.selection, speech, playback.text, playback.playing) {
                         speech.speakWord(context.selection, accent)
                     }
-                    IconButton(onClick = { close() }, modifier = Modifier.size(44.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close explanation", modifier = Modifier.size(19.dp))
+                    IconButton(onClick = { close() }, modifier = Modifier.size(48.dp)) {
+                        Icon(popupClose, contentDescription = "Close explanation", modifier = Modifier.size(20.dp))
                     }
                 }
                 val details = listOf(phonetic.takeIf { it.isNotBlank() }, partOfSpeech.takeIf { it.isNotBlank() })
@@ -179,9 +184,12 @@ fun LearningPopup(
                             if (answer.examples.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text("Examples", fontSize = 12.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.primary)
                                 answer.examples.forEach { example ->
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    // Both examples share one trailing icon column, and each speaker
+                                    // stays on its own first line: a wrapped example can no longer
+                                    // push its glyph into the middle of the text block.
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                                         Text(example, modifier = Modifier.weight(1f), fontSize = 14.sp, lineHeight = 20.sp)
-                                        SpeakButton(example, speech, playback.text, playback.playing) {
+                                        SpeakButton(example, speech, playback.text, playback.playing, firstLine = true) {
                                             speech.speakExample(example, accent)
                                         }
                                     }
@@ -231,7 +239,7 @@ fun LearningPopup(
 @Composable
 private fun LookupTab(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Column(modifier.selectable(selected = selected, role = Role.Tab, onClick = onClick)
-        .heightIn(min = 44.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        .heightIn(min = 48.dp), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center) {
         Box(Modifier.weight(1f, fill = false).padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
             Text(label, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1,
@@ -243,10 +251,33 @@ private fun LookupTab(label: String, selected: Boolean, modifier: Modifier, onCl
 }
 
 @Composable
-private fun SpeakButton(text: String, speech: PronunciationPlayer, playingText: String, playing: Boolean, onSpeak: () -> Unit) {
+private fun SpeakButton(
+    text: String, speech: PronunciationPlayer, playingText: String, playing: Boolean,
+    firstLine: Boolean = false, onSpeak: () -> Unit
+) {
     val active = playing && playingText == text
-    IconButton(onClick = { if (active) speech.stop() else onSpeak() }, modifier = Modifier.size(44.dp)) {
-        Icon(if (active) Icons.Default.Stop else Icons.Default.VolumeUp,
-            contentDescription = if (active) "Stop pronunciation" else "Pronounce", modifier = Modifier.size(19.dp))
+    IconButton(onClick = { if (active) speech.stop() else onSpeak() }, modifier = Modifier.size(48.dp)) {
+        Box(Modifier.fillMaxSize(),
+            contentAlignment = if (firstLine) Alignment.TopCenter else Alignment.Center) {
+            Icon(if (active) Icons.Outlined.Stop else Icons.AutoMirrored.Outlined.VolumeUp,
+                contentDescription = if (active) "Stop pronunciation" else "Pronounce",
+                modifier = Modifier.size(20.dp))
+        }
     }
 }
+
+/**
+ * Material's Close is the same filled cross in every style, so the popup draws its own hairline
+ * cross on the rail's 24dp grid instead of importing a glyph that reads heavier than the rest.
+ */
+private val popupClose: ImageVector = ImageVector.Builder(
+    name = "MarginPopupClose", defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f
+).path(
+    fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 1.6f,
+    strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round,
+    pathBuilder = {
+        moveTo(6.4f, 6.4f); lineTo(17.6f, 17.6f)
+        moveTo(17.6f, 6.4f); lineTo(6.4f, 17.6f)
+    }
+).build()

@@ -47,7 +47,10 @@ fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Uni
     val focus = if (query.isBlank() && filter == ShelfFilter.All) ordered.firstOrNull { it.lastReadAt > 0L } else null
     val shelf = if (focus == null) matches else matches.filter { it.id != focus.id }
     LazyColumn(
-        Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 24.dp, top = 20.dp, end = 24.dp, bottom = 24.dp),
+        Modifier.fillMaxSize(),
+        // The list viewport stops at the navigation container; a full touch target of clearance under the
+        // last row keeps it, and the row's own options button, off that boundary at the end of the scroll.
+        contentPadding = PaddingValues(start = 24.dp, top = 20.dp, end = 24.dp, bottom = 48.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
@@ -79,14 +82,21 @@ fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Uni
                             style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Serif, textAlign = TextAlign.Center)
                         BookActions(focus, onRemove = { deletingId = focus.id }, modifier = Modifier.align(Alignment.TopEnd))
                     }
-                    Text(focus.author.ifBlank { "Unknown author" }, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                    Text(bookProgress(focus), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // Author and reading status form one metadata block, tighter inside than the cover,
+                    // title and action around it; the status is named ("Progress: Reading") so it cannot
+                    // read as an unlabelled chip floating over the action.
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(focus.author.ifBlank { "Unknown author" }, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                        Text("Progress: ${bookProgress(focus)}", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                    }
                     Button(onClick = { onOpen(focus) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Continue") }
                 }
             }
             item {
                 if (focus != null) HorizontalDivider(Modifier.padding(bottom = 20.dp))
-                Text("Shelf", style = MaterialTheme.typography.titleMedium)
+                Text("Shelf", style = MaterialTheme.typography.titleLarge)
             }
             item {
                 OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(),

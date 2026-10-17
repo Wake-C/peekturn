@@ -69,9 +69,9 @@ internal fun BookCover(book: Book, modifier: Modifier = Modifier) {
                     color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Clip)
                 Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 8.dp)) {
+                    // The focus card prints the author directly beneath this cover, so the cover
+                    // carries only the monogram and its rule instead of repeating the metadata.
                     Box(Modifier.width(if (compact) 16.dp else 24.dp).height(1.dp).background(MaterialTheme.colorScheme.primary))
-                    if (!compact) Text(book.author.ifBlank { "Unknown author" }, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
