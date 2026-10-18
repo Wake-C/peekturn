@@ -1,10 +1,10 @@
-# Margin: product specification
+# Peekturn: product specification
 
 Status: authorized implementation. Android phone first. Focus is the accepted visual direction.
 
 ## Product
 
-Margin is an English EPUB reader for sustained, immersive learning. Readers already understand most of the book and request help with unfamiliar words or phrases.
+Peekturn is an English EPUB reader for sustained, immersive learning. Readers already understand most of the book and request help with unfamiliar words or phrases.
 
 The primary flow is Library → Read → Select → Understand/listen → Return to the same reading position. Statistics describe real reading activity, not inferred vocabulary mastery.
 

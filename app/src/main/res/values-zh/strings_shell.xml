@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="shell_app_name">Margin</string>
+    <string name="shell_app_name">憩页</string>
 
     <!-- 书架 -->
     <string name="shell_library_title">书架</string>
@@ -21,7 +21,7 @@
     <string name="shell_filter_finished">已读完</string>
     <string name="shell_no_matching_books">没有匹配的图书</string>
     <string name="shell_remove_book_title">移除这本书？</string>
-    <string name="shell_remove_book_message">要从 Margin 中移除“%1$s”、阅读位置和阅读时长记录吗？原 EPUB 文件不会改动。</string>
+    <string name="shell_remove_book_message">要从憩页中移除“%1$s”、阅读位置和阅读时长记录吗？原 EPUB 文件不会改动。</string>
     <string name="shell_remove">移除</string>
     <string name="shell_keep_book">保留</string>
     <string name="shell_progress_finished">已读完</string>

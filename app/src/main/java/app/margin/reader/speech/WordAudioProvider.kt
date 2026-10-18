@@ -52,7 +52,7 @@ fun interface WordAudioSource {
 }
 
 /** The endpoint is unofficial; this names the app without inventing a contact address. */
-private val USER_AGENT = "Margin/${app.margin.reader.BuildConfig.VERSION_NAME} (Android ${android.os.Build.VERSION.RELEASE})"
+private val USER_AGENT = "Peekturn/${app.margin.reader.BuildConfig.VERSION_NAME} (Android ${android.os.Build.VERSION.RELEASE})"
 private const val VOICE_PATH = "dictvoice"
 private const val MAX_LOOKUP_TERM_LENGTH = 48
 

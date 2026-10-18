@@ -429,7 +429,7 @@ class ReaderActivity : AppCompatActivity() {
                 // text keeps the platform serif/sans fallback.
                 //
                 // Readium CSS paints the native selection from --RS__selectionBackgroundColor, and
-                // its stock #b4d8fe is the platform blue that fights every Margin theme: the theme
+                // its stock #b4d8fe is the platform blue that fights every Peekturn theme: the theme
                 // accent is injected here instead, in the same inline root style, per chapter.
                 readiumCssRsProperties = org.readium.r2.navigator.epub.css.RsProperties(
                     overrides = mapOf(

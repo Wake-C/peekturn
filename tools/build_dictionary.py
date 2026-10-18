@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Margin's offline dictionary from pinned, independently downloaded ECDICT.
+"""Build Peekturn's offline dictionary from pinned, independently downloaded ECDICT.
 
 Usage: python3 tools/build_dictionary.py [--source /path/to/ecdict.csv]
 The optional local CSV must match the pinned upstream SHA-256 once recorded.

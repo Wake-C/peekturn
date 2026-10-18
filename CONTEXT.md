@@ -1,4 +1,4 @@
-# Margin terminology
+# Peekturn terminology
 
 - **Book**: one imported EPUB publication in the reader's local library. Not a translated book or a text reconstruction.
 - **Reading position**: a durable location within a book, independent of current screen size and page count. Avoid using “page” as a synonym.

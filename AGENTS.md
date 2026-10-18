@@ -1,4 +1,4 @@
-# Margin
+# Peekturn
 
 Independent Android EPUB reader for people learning English through sustained reading.
 

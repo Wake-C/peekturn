@@ -8,5 +8,5 @@
         <item name="android:colorAccent">#D9B783</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
-    <color name="launcher_background">#171E23</color>
+    <color name="launcher_background">#FFD84C</color>
 </resources>

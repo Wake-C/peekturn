@@ -151,7 +151,7 @@ Source tests caught the real Commons `extmetadata` wrapper shape before packagin
 ### Android audio and UI observations
 
 - The final Android app played UK hello from Association Shtooka/Judith Franck under CC BY 3.0 US, and US hello from Dvortygirl as public domain. Each displayed the actual creator, source and license. Native NuPlayer/AudioTrack logs recorded 48,510 delivered frames for the UK recording, not merely a pending UI state.
-- An independently installed open-source eSpeak engine supplied real offline English TTS for verification. Native binding and AudioTrack output confirmed sentence synthesis. This engine is a test-environment dependency, not bundled in Margin and not required as the user's engine.
+- An independently installed open-source eSpeak engine supplied real offline English TTS for verification. Native binding and AudioTrack output confirmed sentence synthesis. This engine is a test-environment dependency, not bundled in Peekturn and not required as the user's engine.
 - With emulator Wi-Fi and mobile data disabled, the word speaker fell back to installed English system speech with a nonerror recording-unavailable notice. The sentence action also worked offline. Networking was restored afterward.
 - In the real reading popup, a UK-preferred lookup for reluctant used system speech when its exact Commons file was absent. Example speakers used system speech directly. Meaning, context and examples stayed first; no source excerpt returned.
 - Enabling Auto-pronounce and opening a fresh lookup produced one engine AudioTrack completion. Dictionary/Explain round trips left that count at one and did not add a model request. Auto-pronounce was restored to off afterward.

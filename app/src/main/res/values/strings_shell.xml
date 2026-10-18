@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="shell_app_name">Margin</string>
+    <string name="shell_app_name">Peekturn</string>
 
     <!-- Library -->
     <string name="shell_library_title">Library</string>
@@ -21,7 +21,7 @@
     <string name="shell_filter_finished">Finished</string>
     <string name="shell_no_matching_books">No matching books</string>
     <string name="shell_remove_book_title">Remove book?</string>
-    <string name="shell_remove_book_message">Remove “%1$s”, its reading position, and its reading-time records from Margin? Your original EPUB is not changed.</string>
+    <string name="shell_remove_book_message">Remove “%1$s”, its reading position, and its reading-time records from Peekturn? Your original EPUB is not changed.</string>
     <string name="shell_remove">Remove</string>
     <string name="shell_keep_book">Keep book</string>
     <string name="shell_progress_finished">Finished</string>
