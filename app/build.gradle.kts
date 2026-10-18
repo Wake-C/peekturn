@@ -42,6 +42,8 @@ dependencies {
     implementation("org.readium.kotlin-toolkit:readium-shared:3.1.0")
     implementation("org.readium.kotlin-toolkit:readium-streamer:3.1.0")
     implementation("org.readium.kotlin-toolkit:readium-navigator:3.1.0")
+    implementation("org.readium.kotlin-toolkit:readium-navigator-media-tts:3.1.0")
+    implementation("androidx.media3:media3-session:1.6.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("org.jsoup:jsoup:1.18.3")
