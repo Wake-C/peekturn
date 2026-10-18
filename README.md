@@ -39,7 +39,7 @@ Tap a word to see its core meaning, what it means in this sentence, and an examp
 
 ## What it does
 
-- Imports original EPUB books and articles from links or Android sharing. Imported books keep their available titles and authors.
+- Imports original EPUB books, and articles from a URL or Android sharing. Imported books keep their available titles and authors.
 - Keeps your place when you close the app, restart the phone or change the text size.
 - Shows an explanation for the selected word or phrase, including its meaning in the current sentence and examples.
 - Includes an offline dictionary, online pronunciation for words and examples, a US or UK accent choice, and optional autoplay.
@@ -49,6 +49,12 @@ Tap a word to see its core meaning, what it means in this sentence, and an examp
 - A fresh install includes *The Prophet* by Kahlil Gibran from Project Gutenberg. It is public domain in the USA and stays in your local library like any imported book.
 
 Explanations use an AI provider you configure yourself. Add an HTTPS endpoint, model name and API key in Settings. Peekturn does not include a key or a canned answer. A connection test is a real request and may incur charges.
+
+## Read from the web
+
+Paste an https link, or share it from another app. Peekturn extracts the article and adds it to your library as a book.
+
+Works with long-form posts on X, articles on OpenAI and Anthropic, Paul Graham's essays, and many standard blog article pages. If a site asks you to sign in or complete a verification, do it in the in-app browser, then import the page. A page that shows only a preview, or no readable article, is refused.
 
 ## What it does not do
 
