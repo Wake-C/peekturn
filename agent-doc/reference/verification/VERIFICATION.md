@@ -621,3 +621,473 @@ instead of being dropped; a shared Anthropic link imported to `1 / 28`; the deli
 imported the same article. 277 unit tests pass, including the https-only policy, shared-text punctuation,
 assembler reset and chunk ordering.
 
+
+## Complete article import, bilingual learning and reading controls (2026-10-18)
+
+### Article completeness
+
+The supplied X URL contains a trailing numbered-list `1`, giving a 20-digit status id that returns
+“Post Not Found”. The reachable 19-digit URL is
+`https://x.com/HiTw93/status/2042632355756806281`; ids are never silently rewritten by the app.
+
+The real cause of the preview-only EPUB was the vendored box-based visibility check: an article
+container with `display: contents` has no box, so its rendered descendants were deleted from the
+Readability clone. A generic host-side visibility correction preserves those descendants without
+editing vendor files or adding an X-specific scraper.
+
+On the API 35 emulator, the reachable URL imported into Readium. Inspection of the actual saved
+164,285-byte EPUB found one chapter, 6,695 normalized text characters including the title, the opening
+“Before AI”, and the final paragraph “Now it matters even more.” The 20-digit URL displayed an
+unavailable-page message and the private books directory gained no file.
+
+The real Chromium/vendor regression harness runs with:
+`npm ci --prefix tools/tests/webimport && npm test --prefix tools/tests/webimport`.
+Both cases pass: the unpatched vendor drops the synthetic article's end marker, while the host fix
+preserves it; the actual EPUB writer also retains that marker. Dependencies are pinned in the local
+test package. It uses installed Chromium (or `CHROMIUM_PATH`), not a browser bundled into the APK.
+
+### Language and layout
+
+Android screenshots cover Chinese and English Settings, the full-width five-theme picker, the
+typography/font picker and reading Options, at the normal 412dp width and at 320dp width with 1.3x
+system text. The English toolbar uses “Text”, not a split “Typography” label. Its four docked actions
+remain one line at that tested narrow width.
+
+A temporary local SSE provider and a synthetic verification EPUB exercised the real selection-popup
+path without a paid provider request. Chinese mode displayed Chinese meaning/context and English
+examples with Chinese translations beneath; switching to English requested/displayed English and no
+translation. The temporary provider/profile were removed afterward. This verifies request policy,
+decoding and UI, not the linguistic quality of any particular remote model.
+
+### Real typography checks
+
+WebView inspection initially found the newly registered Literata face in `error` state: the existing
+publication CSP did not allow the new local font directory. The fix adds only
+`https://readium/assets/fonts/` to `font-src`; script and network policy remain restricted.
+Readium then loaded all five bundled families, including real regular/italic/bold faces, with different
+measured glyph widths. Selecting Source Serif 4 through the sheet changed the computed paragraph face.
+
+A renderer-level spacing probe exposed Readium 3.1's factor-of-two preference conversion:
+the requested `0.08` produced `0.04rem`. A temporary pinned-toolkit CSS test failed on that exact
+comparison, passed after the adapter corrected the scale, then was removed rather than retaining
+test-only access to toolkit internals. Preference persistence and stale-draft non-clobber regressions
+remain in the suite; the old value-forwarding assertion was removed instead of being re-pinned.
+
+Revealing the dock left the native WebView at 412 × 826 CSS pixels with the same 2,468-pixel document
+width. Options exposed immersive mode, scrolling, Quick Explain and auto-pronounce; turning immersive
+mode off kept the dock above the system navigation area. Settings and typography no longer duplicate
+these switches.
+
+Limits: captures shorter than 500 normalized characters are currently refused, including some
+legitimate short posts. The length check is a guard against observed shells, not a universal proof of
+article completeness. Interactive X login and every site's paywall/virtualized content are not covered.
+Android 28 locale behavior is covered by Robolectric, not a physical API 28 device. No physical-phone
+or all-OEM visual claim is made.
+
+Final delivery: `app/build/outputs/delivery/package.bKpUKp/margin-1.5.0-9-debug.apk`,
+version 1.5.0 (9), SHA-256
+`fc5ccf4a01ac664f0c10cd217c8fd4b0b616bc779bf35b535c72999aa84882b2`.
+`./tools/package-apk.sh` completed with 308 unit tests, zero failures/errors/skips, lint and assembly.
+The two real Chromium converter tests passed separately. The APK contains 12 font-face TTF files and
+five complete OFL license files.
+
+The final delivery APK installed and resumed the real X article in Readium. WebView inspection
+confirmed the article's final paragraph, a loaded Source Serif 4 face and persisted `0.08rem` letter
+spacing (1.28909 CSS pixels at the tested text size). The earlier half-scale spacing was no longer
+present. All temporary provider routing, mock profile and viewport overrides were removed/restored.
+
+## Four review-finding fixes (2026-10-18)
+
+### Checks and package
+
+Executed `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` and
+`npm test --prefix tools/tests/webimport`, then `./tools/package-apk.sh`.
+
+- 321 unit tests in 43 suites: zero failures, errors or skips.
+- Android lint: zero errors, 62 warnings and 2 hints (64 reported issues). Warnings were not
+  suppressed, and this is not a warning-free build.
+- Real Chromium/vendored converter tests: 2 passed, 0 failed.
+- Final package: `app/build/outputs/delivery/package.nWlplI/margin-1.5.1-10-debug.apk`,
+  `app.margin.reader` 1.5.1 (10), debug. SHA-256
+  `b99fc6de2ae04c9e1d43b3e67643f9e00a6dd9fcaae727c69df56bbaff25da7a`; `shasum -a 256 -c`
+  verified the collected file. Receipt revision `c289a36`, dirty worktree `true`.
+
+### Test-first regression evidence
+
+An isolated copy of the pre-fix checkout was given matching regressions before the fixes. Its
+targeted run completed 27 tests with 6 failures: three preview refusals, two example-validation
+cases and one queued-options case. The copy's existing probes printed:
+
+```
+duplicateExamples: ACCEPTED, examples=2
+thirdExample: rejected but visible snapshot count=3
+preview=692 chars, decision=Import
+two option updates from same UI snapshot: quickExplain=false, scrolling=true
+```
+
+The current suite contains the surviving equivalents and passed them:
+`repeatedRootExamplesAreRejected`, `aRejectedThirdExampleNeverEntersTheInvalidSnapshot`,
+`queued options toggles from one stale snapshot preserve both`, the four article-preview tests
+(including the 692-character preview and Chinese CTA), and
+`everyFailureCategoryMapsToItsOwnLocalizedMessage`. The baseline copy and its probes were
+temporary review artifacts and are not retained in the repository.
+
+### Android observations
+
+The collected APK installed with `adb -s emulator-5556 install -r`, reported version 1.5.1 (10), and
+cold-launched `app.margin.reader/.MainActivity` on the API 35 emulator.
+
+- The real `https://x.com/HiTw93/status/2042632355756806281` share imported into Readium as
+  library book 12. The saved EPUB was 164,288 bytes with 14 entries and 6,774 normalized text
+  characters including the title; its final paragraph ended with the exact sentence
+  “Now it matters even more.” Readium displayed `1 / 7`.
+- A synthetic 1,212-byte HTTPS HTML page (953 normalized article characters) containing an explicit
+  “Continue reading the full article” link was opened through the same share/import interface. The
+  Chinese UI reported “只读到了页面预览。请打开全文或登录后，再重试导入。” and the library remained at
+  12 books; no EPUB was written for the refused capture.
+- The default DeepSeek profile had no API key. Selecting text and choosing Explain in the Chinese
+  UI displayed the distinct configuration message
+  “请在设置中检查模型配置：填写 API 密钥、选择模型，并确认接口地址和温度。” with Retry, rather than
+  the former generic explanation error. No provider request or credential was needed.
+- Two Options switches (continuous scrolling and Quick Explain) were tapped back-to-back from the
+  same open sheet. Settings persisted `quickExplain:true` and `reading.scroll:true`; after a
+  force-stop and cold relaunch, both remained enabled in the reopened Options sheet. Immersive
+  reading stayed enabled and auto-pronounce stayed disabled.
+
+### Limits
+
+The preview refusal used a public HTTPS echo page, not site-specific paywalls, login flows or a
+site matrix; it establishes the policy at the real import bridge, not every publisher's markup. No
+live provider request was made, so provider compatibility and model output quality are not
+re-verified here; every localization category is covered only by the unit mapping except the
+configuration case exercised on device. The Android-native selection action labels remained English
+(“Explain”, “Dictionary”, “Copy”) in the Chinese session; this round changed the import and popup
+copy, not that native menu. The package is debug-signed for testing; no store signing or remote
+publication was performed.
+
+## Continuous narration and app-scoped explanation cache (2026-10-18)
+
+Final package: `app.margin.reader` version `1.6.0`, version code `11`, debug.
+Delivery: `app/build/outputs/delivery/package.XEBXmC/margin-1.6.0-11-debug.apk`, SHA-256
+`ab1bd86ed7d486a6ec04d4c9dc13caec11f11576c146d70b4cfd450f492bfc65`; the receipt records revision
+`c289a36`, dirty worktree `true`, all three packaging gates passed, and runtime verification
+`not_run`. The collected APK was installed with `adb -s emulator-5556 install -r` and cold-launched;
+the package reported `1.6.0` / `11`.
+
+### Checks
+
+- `./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug`: 391 tests in 51 classes,
+  zero failures, errors or skips.
+- Android lint: zero errors, 65 warnings, 3 hints, not a warning-free build.
+- Real Chromium/vendored converter suite: 5 passed, 0 failed (`article title`, `display: contents`
+  and full-article end paragraph).
+- Targeted `ExplanationCacheTest` + `LearningSessionTest`: 26 tests, zero failures. The FIFTEEN-DAY
+  regression
+  `expiryIsAbsoluteAtFifteenDaysAndRepeatedReadsDoNotExtendIt` passed with the fake clock, as did
+  future-clock rejection, LRU batch trim, generation-gated clear, corrupt/wrong-language rejection
+  and no-secret-in-name coverage.
+- Baseline-red evidence: narration new-contract artifact `artifact://3320`, explanation-cache
+  artifact `artifact://3618`. The title regression was run in an isolated snapshot with the old
+  `margin-import.js`; exactly 2 positive headline tests failed and the profile negative passed
+  (`Example Journal` vs the BlogPosting headline; `Synthetic Author (@synthetic) on X` vs the
+  article heading). No shared checkout was reverted.
+
+### Android observations
+
+- **Add menu and title.** The library plus control opened a `DropdownMenu` anchored below it with
+  only `From a file` / `From a link`; no centered source chooser appeared. The file choice opened
+  the system document picker immediately, and the link choice opened the URL dialog. The real
+  `https://x.com/HiTw93/status/2042632355756806281` share imported a 6,755-character EPUB whose
+  `dc:title` is `How I Turn Learning Into a Workflow in the AI Era` (not the profile title); its
+  final paragraph still ends “Now it matters even more.” The same URL with a trailing `1` appended
+  to the 19-digit status id (`…62811`) showed the real X “Post not found” page and refusal, and the
+  library stayed at the previous maximum id 15; no silent id repair or success entry occurred.
+- **Caches in Settings.** Settings showed adjacent `Explanation cache` (`Saved 15 days · 1 GB
+  limit`) and `Sentence audio cache` (`No expiry · 4 GB limit`) rows. The explanation dialog showed
+  `Stored: 2.0 kB`; its clear emptied `no_backup/explanations`. The audio dialog showed
+  `Stored: 286 kB`; its clear stopped narration and emptied `no_backup/sentence-audio`. Neither clear touched books, reading progress or settings; the two
+  synthetic test books created for this run were removed afterward.
+- **Explanation cache reuse.** A controlled local HTTP provider (`127.0.0.1:8768` via
+  `adb reverse`) was configured as the active profile; no paid endpoint or real credential was
+  used. Selecting `was` in `Margin Acceptance` produced a complete answer and one 642-byte cache
+  entry. After `force-stop` and cold launch, selecting the same word/context showed the identical
+  complete answer with **zero** new provider requests in the provider log. Selecting a different
+  text (`She`, then `streets`) produced one new request each, proving different-selection isolation;
+  exact context/book/language identity isolation is unit-tested (`sameTermDifferentContextBookLanguageOrModelNeverSharesAKey`). A separate negative regression proves an answer with empty before/after context is neither persisted nor reused across occurrences (`explanationsWithoutContextAreNeverPersistedOrReused`, `explanationsWithoutContextAreNotReusedAcrossOccurrences`). The first provider fixture returned string examples and correctly failed validation;
+  the test provider was then corrected to the app's object schema with Chinese translations, not
+  the app. The cache uses a 15-day absolute TTL from completion; reads do not extend it.
+- **Narration audio and lookahead.** Starting from the visible `First listen` page synthesized the
+  heading, `Today is a perfect day.`, `Dr. Smith reads at 3.5 words per second.`, `The room…`, the
+  226-character `At dusk…harborlight.` sentence and `FINAL_CHAPTER_MARKER`. Cache keys were the
+  expected opaque SHA-256 names; the repeated `Today` sentence existed as one 14,688-byte clip.
+  The long sentence was one 85,968-byte clip; `dumpsys media.audio_flinger` recorded its
+  24 kHz track for 0x53F40 = 343,872 frames = 14.328 s before the next track, so it was not
+  truncated at the 190-character request boundary. HTTPS capture during playback held six
+  `speech.platform.bing.com` SNI occurrences and three new TCP handshakes spaced 2.64 s and 5.81 s
+  apart, not one chapter burst.
+- **Controls and background.** The controls changed pause to `Play`, resume to `Pause`, showed
+  `Playing saved audio` for prefetched/cached clips, changed speed from `1×` to `1.25×`, and
+  previous/next moved sentences. Screen-off left `MediaSession` `PLAYING` while
+  `mWakefulness=Asleep`; `dumpsys media.audio_flinger` showed an active 24 kHz app track
+  (0x20CE0 = 134,368 frames), and `cmd media_session dispatch pause/play` changed the session to
+  `PAUSED`/`PLAYING`. The emulator has no secure keyguard, so a lockscreen visual panel was not
+  captured; the media-session state and audio output are the background evidence.
+- **Offline durable cache.** With Wi-Fi/data off, airplane mode on, and after `force-stop` and cold
+  launch, starting narration showed `Playing saved audio` and produced real 24 kHz app audio tracks
+  with unchanged cache files; no network was available. The cache clear action removed only
+  sentence audio; popup word/example pronunciation audio remains memory-only and is untouched by that action.
+- **Uncached offline failure.** With the cache empty and airplane mode on, starting narration on an uncached sentence showed the localized “This sentence could not be fetched…” message with Retry and no system-speech fallback or fabricated success.
+- **Start location (red then green).** On the pre-fix build, `Margin-Narration-Middle.epub`
+  (`Yesterday was ordinary. Today is a perfect day.`), searching `perfect` and starting narration
+  wrote `Yesterday was ordinary.` first (`a3f87632…8ea3`), then Today: the old block-start failure.
+  After the fix, the same scenario's first spoken/requested/cache unit was
+  `Today is a perfect day.` (`eada15cf…ed4b`), and the cache contained only that key. The search
+  locator's exact before/highlight/after supplies the start sentence; a shared
+  `SentenceStartSkipper` trims leading sentences in that block on every utterance-window
+  tokenization, while other blocks pass through. The skipper tests cover target later, target
+  first, an absent target falling back after eight segments, repeated start-block tokenization and
+  reset. No `Yesterday` or suffix-fragment clip was synthesized in the green run.
+
+- **Private service and awaited clear.** The delivered service no longer accepts an external
+  ACTION_START/STOP or opens a book from `onStartCommand`; control binding carries a random
+  per-process token and every binder transaction checks the caller UID, while normal Media3
+  controller access remains. Settings clear binds with `BIND_AUTO_CREATE`, calls `binder.stop()`,
+  waits for cancellation, takes the shared synthesis gate and only then clears. A cache clear
+  generation refuses late writes; the in-flight clear regression released a blocked synthesis after
+  clear and observed zero bytes and no late write.
+
+### Limits and cleanup
+
+Synthetic EPUBs, the local provider and its profile were used; no private book text, user key or
+paid request was involved. The provider log and host fixtures remain ignored under `verification-local/`; the local provider,
+`adb reverse`, on-device fixture copies and the temporary model profile key were removed after the
+run, and the original profile endpoint/model/temperature were restored. The package is debug-signed for
+testing; no physical phone, store signing, release build or remote publication was exercised. The
+emulator had no secure lockscreen, so visual lockscreen controls remain unverified beyond the media
+session/audio state above. The title import used the signed-in X session already present; it is one
+real article, not a site matrix. The explanation run used the controlled fixture provider, not a
+live commercial model. Settings clear was exercised on-device when narration was idle; the
+active in-flight stop→cancel→gate→clear race is covered by the unit regression, not a separate
+device run.
+
+## Docked narration, selected-sentence entry and article authors (2026-10-18)
+
+Delivery: `app/build/outputs/delivery/package.zye8fd/margin-1.6.1-12-debug.apk`,
+`app.margin.reader` 1.6.1 (12), debug-signed. SHA-256:
+`79f54b0d95eb0a3678e604ee5e9e28fec059652fde8828e0ac71d4e98d6e5bf6`.
+The final collected APK installed and cold-launched on API 35 `emulator-5556`; package manager
+reported the expected version. No commit, history rewrite, push or store publication was performed.
+
+### Checks and corrected failures
+
+- `./tools/package-apk.sh`: 395 unit tests, zero failures/ignored; lint and assembly passed.
+  Lint still reports warnings, so this is not a warning-free build.
+- `npm test --prefix tools/tests/webimport`: 10 Chromium conversion regressions passed, including
+  author byline, card-only fallback, absent author, conflicting identity, cross-origin same-slug
+  rejection, existing structured author, headline and complete-body preservation.
+- `node --test tools/tests/reader/narration_anchor.test.mjs`: two real Chromium DOM-probe
+  regressions passed, covering a nested inline selection and an absent selection.
+- Integration caught a Float/Double height-state mismatch, then a test that incorrectly expected
+  the trailing context to lose its leading space. Height state now uses primitive Float state;
+  the locator regression checks preservation of the complete before/highlight/after source.
+- Native selected-start initially failed despite a readable `perfect` selection: the new probe
+  returned `JSON.stringify(...)`, then Android encoded that string again. The callback was not a
+  JSON object. Both narration probes now return objects, matching Readium's callback contract.
+  The corrected native run resolved the block and started the containing complete sentence.
+
+### Android observations
+
+- The ordinary toolbar and narration transport occupy one full-width bottom slot. Screenshots
+  showed book text and the page/progression label above it, without the previous floating card.
+  X stopped narration and immediately restored Contents/Search/Text/Options.
+- Center taps hid and restored the transport. The visible WebView stayed at 751 CSS pixels high,
+  on the same resource and scroll position while hidden. During a cached sentence, the media
+  session remained PLAYING and AudioFlinger reported an active 24 kHz track for the app while
+  the toolbar was hidden.
+- Long-pressing `perfect` in `Yesterday was ordinary. Today is a perfect day.` with Quick Explain
+  off exposed the localized read-aloud action first. Playback highlighted and cached the complete
+  `Today is a perfect day.` sentence, not the previous sentence or the selected-word suffix.
+  Next highlighted the following paragraph; Previous returned to the prior sentence. Speed
+  changed from 1x to 1.25x.
+- With Quick Explain on, releasing the same selection opened the explanation popup directly.
+  Its existing missing-model-configuration message was shown; no commercial model request was
+  used for this interaction check.
+- Visual checks covered Chinese at 1080x2400, English at 320dp width with 1.3 font scale, a
+  840x1280 compact viewport, paginated and scrolling modes, immersive/system-bar modes, and
+  gesture/three-button navigation. The long English selection action remained visible before
+  overflow. Transport controls fit above the three-button navigation area.
+- Sharing `https://x.com/HiTw93/status/2042632355756806281` through the real native importer
+  produced `dc:creator=Tw93` and the article headline
+  `How I Turn Learning Into a Workflow in the AI Era`. The EPUB retained the final sentence
+  `Now it matters even more.`; the SQLite library record and visible bookshelf both showed Tw93.
+  The pre-fix import had an empty author. Existing imported books are not retroactively rewritten.
+
+### Limits and cleanup
+
+The interaction matrix preceded the final primitive-state allocation-only change; the final APK
+reran all packaging gates and was installed/cold-launched separately. No physical phone or new
+lockscreen/background-service matrix was tested in this UI change. Article verification covers
+the real X article above and generic synthetic metadata cases, not every publisher.
+
+Temporary library entries and their on-device EPUB fixture were removed. The initially empty
+sentence-audio cache was cleared through Settings. Interface language, reading options, viewport,
+font scale, navigation mode and network were restored; the temporary WebView port forward was
+removed. Screenshots remain ignored under `verification-local/`; no credentials or private book
+text were added to tracked files.
+
+## Dynamic toolbar space (2026-10-18)
+
+Version 1.6.2 (13) removes the permanent bottom reservation introduced in 1.6.1.
+Delivery: `app/build/outputs/delivery/margin-1.6.2-13-debug.apk`, debug-signed.
+SHA-256: `d7e206e118cb39fa6546eba939419bd0def11135cbff5ef87bd8b9f28c91646c`.
+
+Only `ReaderChromePolicyTest` and `ReflowAnchorTest` were run with `:app:assembleDebug`:
+10 tests passed. The full unit suite and lint were deliberately not rerun for this correction.
+The assembled APK was installed and cold-launched on API 35 `emulator-5556`.
+
+Native bounds showed the ordinary toolbar reducing the WebView bottom from 2337 to 2166 pixels;
+hiding it restored 2337. The counter moved from y=2347 back to y=2176 while shown, then returned
+to y=2347 when hidden. Narration used the same dynamic space, retained PLAYING while hidden, and
+reclaimed all toolbar space even after its extra cached-audio status row had appeared.
+X restored the ordinary toolbar, whose space was also released on the next center tap.
+Paginated reading with system bars retained their own inset: WebView bottom was 2103 with controls
+and 2274 without them. This supersedes the previous fixed-height/no-repagination toolbar contract.
+
+Screenshots under ignored `verification-local/dynamic-*-1.6.2.png` show the rendered result.
+The synthetic EPUB and generated audio were removed; scrolling and immersive preferences were
+restored. No physical-phone or unrelated feature matrix was rerun.
+
+## System reading font default (2026-10-18)
+
+Version 1.6.3 (14), debug APK:
+`app/build/outputs/delivery/margin-1.6.3-14-debug.apk`.
+SHA-256: `1048667aa89dcb167fadda85fd7360f6def34d0d9b25f480749bb1ae053cf586`.
+
+Only `ReaderFontsTest` and `ReaderPreferencesTest` were run with `:app:assembleDebug`:
+9 tests passed. No full-suite or lint run. The APK installed and launched on API 35
+`emulator-5556`. The existing Source Serif 4 choice survived the update. Choosing System font
+rendered the paragraph with computed `font-family: system-ui, sans-serif` and no loaded packaged
+font faces; the system selection survived force-stop/cold launch. Choosing Source Serif 4 again
+loaded its packaged face and restored the paragraph family. The screenshot is ignored at
+`verification-local/reader-system-font-1.6.3.png`. Readium's existing heading styling was unchanged.
+
+The synthetic book was removed and the original explicit font choice restored. An emulator proves
+the platform-font path, not every manufacturer's downloadable-font integration. No physical phone
+or unrelated feature matrix was tested.
+
+## Deep-position toolbar reflow regression (2026-10-18)
+
+Version 1.6.4 (15), debug APK:
+`app/build/outputs/delivery/margin-1.6.4-15-debug.apk`.
+SHA-256: `1aa4958e94d065b3b6ac8ead792e6224ca2a1b5d605aa72838fbfbfed6dde3f7`.
+Installed on API 35 `emulator-5556`, with package version confirmed.
+
+### Failing baseline and cause
+
+The 1.6.3 build reproduced the reported distant jump using a synthetic single chapter with
+700 paragraphs and 41 SVG illustrations. At the middle text position, toolbar hide changed
+WebView height from 761 to 826 CSS pixels but kept `scrollX=126720`: visible content changed
+from paragraphs 349/350 to illustration/paragraph 374. At illustration 340, the same action
+kept `scrollX=123428.57` and replaced it with paragraphs 364/365.
+
+Pinned Readium 3.1 source confirms that height-only resizing does not recompute its native scroll
+position. CSS columns reflow, so preserving that pixel offset preserves neither text nor images.
+Input dispatch consumes center taps before the directional adapter; this was not an edge-zone bug.
+
+The first anchored candidate fixed the distant jump but failed repeated toggles: recapturing the
+new page's first visible character on each change walked from paragraph 349 toward 345 after six
+taps. Retaining the original precise anchor while it remains visible fixed that second failure.
+An isolated pre-fix DOM-probe snapshot also failed the image-before-caption regression while
+passing the text visibility case. No shared worktree was reverted.
+
+### Focused verification
+
+- `ReflowAnchorTest`, `ChromeReflowTest`, `ReaderChromePolicyTest`: 34 tests passed with
+  `:app:assembleDebug`. No full-suite or lint run.
+- Real Chromium reader regressions: five passed, covering native selection probes, image-before-
+  caption precedence, visible words within a long paragraph, and ten alternating viewport heights
+  restoring an exact character in repeated text. Moving away makes that retained anchor unusable.
+- Native deep-text run: ten alternating taps kept the original paragraph-349 character offset 75
+  visible. Hidden/shown heights were 826/761, with scroll offsets alternating exactly between
+  118080 and 126720. The final shown layout returned to its original position, without ratcheting.
+- Native image run: ten alternating taps retained illustration 340. Scroll offsets alternated
+  between 115200 and 123428.57 as heights changed; the image remained visible throughout.
+- Rapid triple then double center taps respected final visibility parity and kept the original
+  text character visible.
+- An explicit right-edge page turn advanced normally. Subsequent toolbar toggles retained the new
+  page's anchor rather than restoring the preceding illustration.
+- Narration transport at the deep position survived four toggles with the same illustration
+  visible. Live playback remained PLAYING while controls were hidden; X restored the ordinary bar.
+
+The original scrolling preference was restored. The synthetic EPUB and generated sentence audio
+were removed through the app's scoped controls, and the temporary WebView port forward was removed.
+Screenshots remain ignored under `verification-local/deep-reflow-*.png`. Verification used the
+synthetic illustrated publication, not the user's private book; no physical-phone or unrelated
+feature matrix was run.
+
+## Accepted A overlays, sentence-time resume and bottom explanations (2026-10-18)
+
+Delivery: `app/build/outputs/delivery/margin-1.7.0-16-debug.apk`, `app.margin.reader`
+1.7.0 (16), debug-signed. SHA-256:
+`6e8b6ba47f99293b31e231ed601a6477f69a28ee2ca4833f60089a0870fc004a`.
+The final APK installed and cold-launched on API 35 `emulator-5556`; its package version was
+confirmed. Production changes remain uncommitted. The accepted throwaway prototype alone was
+captured on `prototype/reader-overlay-a` at `3002e148f3bacb4cdb7954e7451644c37e674198` using an
+isolated Git index; no main-branch checkout/index or existing history was rewritten.
+
+### Targeted checks
+
+- `ReaderChromePolicyTest`, `ReaderControlsTest`, `ReflowAnchorTest`, `PopupGeometryTest`,
+  `NarrationEnginePauseTest`, `NarrationResumePolicyTest`: 29 passed, zero failures/ignored.
+- `node --test tools/tests/reader/viewport_reflow.test.mjs`: two real-Chromium typography-anchor
+  regressions passed. Dynamic-chrome restoration and selection-narration tests were removed with
+  their obsolete production paths, not repinned to the new implementation.
+- An isolated copy restored only the former pause semantics (discard checkpoint, always resume
+  at zero), retaining the new constructor interface so the tests could execute. Of the three
+  actual-engine/ShadowMediaPlayer cases, pause-at-45s and paused-speed-change failed; deliberate
+  new-intent playback from zero passed. The current implementation passed all three.
+- No full unit suite or lint run. The final touch-target-only polish was assembled separately
+  and exercised on Android, without rerunning unrelated tests.
+- Prompt/request/schema, parser and shared answer validation sources were SHA-256 identical
+  before/after this task (`ExplanationClient.kt`, `ExplanationParser.kt`,
+  `ExplanationValidation.kt`). Only the explanation container/positioning changed.
+
+### Android observations
+
+- All four A states were reached: hidden normal reading, expanded four-menu tools, expanded
+  narration card above that menu, and collapsed narration transport centred in the footer.
+  The final previous/play-pause/next icon centres were x=414.5/540.5/666.5 on the 1080px device;
+  the group centre is independent of the page counter at the left. Controls have 48dp targets.
+- A 700-paragraph chapter with 41 SVG illustrations stayed at illustration 340 through ten
+  menu toggles. Every measurement retained `innerHeight=826` CSS pixels and `scrollX=115200`;
+  there was no viewport resize, repagination or accumulated position drift.
+- Contents exposed the binoculars action; the existing whole-publication search found
+  `harborlight` in the actual EPUB paragraph, not its chapter title. Back returned to Contents.
+  With Quick Explain off, native long press showed Explain/Dictionary/Copy and no narration item.
+- The actual Microsoft MP3 path paused for lookup at 2702ms and resumed at 2702ms. A later run
+  paused at 9494ms, then prepared, sought, completed the seek at 9494ms and started at 9494ms.
+  The temporary probe sampled real `MediaPlayer.currentPosition`, not a UI timer. Changing speed
+  during a manual pause retained its 3170ms checkpoint. A manually paused lookup remained paused
+  after close. Following sentences began at zero rather than inheriting the previous offset.
+- The bottom-docked explanation displayed a multi-line Chinese meaning, context, and two English
+  examples with Chinese translations from a controlled loopback SSE provider. Its normal
+  term/tab/scroll/close/adjust/speaker content remained. This was a fixture response, not a
+  commercial model quality check.
+- Visual checks covered Chinese at 1080x2400 and English at 320dp width with 1.3 font scale,
+  immersive/system-bar modes, and the four tool states. The final English menu labels
+  Contents/Layout/Features/Listen fit on one line. No physical phone or new lockscreen matrix ran.
+
+### Cleanup and evidence limits
+
+The real-player timing probe and its call sites were removed before the final build. Both
+synthetic books and generated sentence audio were removed; only the loopback fixture's own
+explanation-cache records were deleted. The temporary provider profile/server and ADB forwards
+were removed. The original profile selection, language, reading switches, viewport, font scale
+and Pinyin keyboard subtype were restored. No real credentials or private book passages were
+used for requests or logs. Screenshots remain ignored under `verification-local/overlay-*.png`.
+
+The retained prototype preview is served from an external temporary copy, not the Android source
+tree; its illustrative content and simulated audio are not shipped. Existing narration cache
+quotas/providers and explanation prompts/formats were intentionally unchanged. Physical-device,
+commercial-model and unrelated feature coverage are not implied by this focused verification.
+

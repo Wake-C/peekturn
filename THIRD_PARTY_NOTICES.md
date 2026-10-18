@@ -61,7 +61,9 @@ Earlier builds queried the [Wikimedia Commons Action API](https://commons.wikime
 
 Pronouncing a phrase, a generated example or a word whose dictionary recording is unavailable uses a public, key-free speech service: primarily [Microsoft's read-aloud service](https://speech.platform.bing.com), the same one Microsoft Edge uses for its read-aloud voices, and — when that returns no usable audio — [Baidu Translate's speech endpoint](https://fanyi.baidu.com/gettts) (`lan=en`, `spd=3`, `source=web`, `text=<text>`) as a fallback. Neither service publishes a licensed API, and Margin holds no key, license or permission for either; both are called as public endpoints, so availability, coverage and speech quality are not guaranteed and can change or disappear without notice. The Microsoft service offers US and UK English voices, so the reader's accent preference is requested there; the Baidu service offers one English voice, so a Baidu answer cannot honour that preference and is a substitution — which the app states as a notice rather than pretending the accent was met. Margin requests speech only for text of at most roughly 190 characters, and a longer passage is never sent online. The audio is machine-synthesized by whichever service answers rather than a verified human recording or a freely licensed audio asset, and Margin claims no license over it.
 
-Downloaded audio is decoded from a bounded in-memory response for playback only. It is not persisted, not cached as a local library and not bundled in the APK, so no service audio is distributed under Margin's code license. A request carries only the exact text the reader asked to hear — a phrase, an example or a single word — and never surrounding context, book text, chapter titles or credentials; the Baidu request is a plain GET that is refused rather than followed if it redirects, and the Microsoft audio is read over a WebSocket the app opens to that host, so the text is never sent to a host the app did not choose. Because the services state no creator and no license, the app credits whichever one supplied the audio by name and address only ("Microsoft Read Aloud", <https://speech.platform.bing.com> or "Baidu Translate", <https://fanyi.baidu.com>) and implies no endorsement by either.
+Downloaded popup audio is decoded from a bounded in-memory response for playback only. It is not persisted, not cached as a local library and not bundled in the APK, so no service audio is distributed under Margin's code license. A request carries only the exact text the reader asked to hear — a phrase, an example or a single word — and never surrounding context, book text, chapter titles or credentials; the Baidu request is a plain GET that is refused rather than followed if it redirects, and the Microsoft audio is read over a WebSocket the app opens to that host, so the text is never sent to a host the app did not choose. Because the services state no creator and no license, the app credits whichever one supplied the audio by name and address only ("Microsoft Read Aloud", <https://speech.platform.bing.com> or "Baidu Translate", <https://fanyi.baidu.com>) and implies no endorsement by either.
+
+Continuous narration uses the same Microsoft read-aloud service, but it is a separate route: there is no Baidu retry and no system-speech fallback. It requests the current sentence and at most two following sentences, in bounded 190-character provider chunks, and stores each complete sentence clip in app-private, no-backup storage for offline replay. That cache is bounded to 4 GiB with no expiry and evicts least-recently-used clips only at the bound; Settings shows its usage and offers a separate clear. The stored audio remains a service response: it is not bundled, not licensed to Margin, not redistributed, and Margin claims no license over it; Margin's own code remains Apache-2.0 as stated above.
 
 Earlier builds requested an alternative public speech endpoint, Google Translate's `translate_tts`; it was removed because that host was unreachable from the reader's network — the same network where the Microsoft and Baidu endpoints answered — and no request is made to it now.
 
@@ -344,4 +346,22 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
+
+
+## Bundled reading fonts
+
+Five English-reading families are distributed as unmodified TTF assets under `app/src/main/assets/fonts/`.
+They are licensed under the SIL Open Font License 1.1, not a proprietary desktop-font license.
+Each project's complete copyright and OFL text is included in the APK under `assets/licenses/`:
+
+- Literata, Copyright 2017 The Literata Project Authors; [upstream](https://github.com/googlefonts/literata). License: `OFL-Literata.txt`.
+- Source Serif 4, Copyright 2014 The Source Serif 4 Project Authors; [upstream](https://github.com/adobe-fonts/source-serif). License: `OFL-SourceSerif4.txt`.
+- Noto Serif, Copyright 2022 The Noto Project Authors; [upstream](https://github.com/notofonts/latin-greek-cyrillic). License: `OFL-NotoSerif.txt`.
+- Atkinson Hyperlegible, Copyright 2020 Braille Institute of America, Inc. License: `OFL-AtkinsonHyperlegible.txt`.
+- Source Sans 3, Copyright 2010–2020 Adobe, Reserved Font Name “Source”; license: `OFL-SourceSans3.txt`.
+
+Regular/italic variable faces carry their native weight ranges. Atkinson Hyperlegible uses separate
+regular, italic, bold and bold-italic files. Android settings previews and Readium both use the actual
+packaged faces; system serif/sans remains the fallback for glyphs not covered by these Latin families.
+This is a curated selection for sustained reading, not a claim of a global usage ranking.
 

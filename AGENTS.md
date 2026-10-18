@@ -16,6 +16,12 @@ Independent Android EPUB reader for people learning English through sustained re
 - A single change should land in one layer. Never let a UI class own parsing, persistence or conversion, and never repeat a rule in two places.
 - Prefer composing small, named units over one class that does everything; keep orchestration explicit and local.
 
+## Verification scope
+
+- Default to targeted tests for the current change's affected behavior, callers and shared contracts. Do not run the full suite for ordinary features, bug fixes or small refactors.
+- Run the full suite only for a large refactor. Choose the affected test scope before running checks, and report exactly what ran; targeted checks must not be described as full-suite verification.
+- Keep Android smoke verification for behavior changes, scoped to the changed interaction. Build or collect the APK separately when needed; do not use packaging as an indirect reason to run the full suite.
+
 ## Task context
 
 - For code changes, shared actors, boundaries and state ownership: [architecture](agent-doc/essential/ARCHITECTURE.md).
