@@ -25,9 +25,9 @@
 
 ## 看它怎么读
 
-<p align="center"><a href="docs/video/peekturn-intro.mp4"><img src="docs/video/peekturn-intro-cover.jpg" width="86%" alt="观看 34 秒憩页介绍视频"></a></p>
+<p align="center"><a href="https://github.com/Wake-C/peekturn/raw/refs/heads/main/docs/video/peekturn-intro.mp4"><img src="docs/video/peekturn-intro.gif" width="58%" alt="憩页介绍视频预览：阅读、朗读、查词和 URL 导入"></a></p>
 
-34 秒看完：阅读、朗读、查词，以及从 URL 导入文章。[观看视频](docs/video/peekturn-intro.mp4)。
+34 秒看完：阅读、朗读、查词，以及从 URL 导入文章。上面的预览会自动循环。完整版：[下载 MP4](https://github.com/Wake-C/peekturn/raw/refs/heads/main/docs/video/peekturn-intro.mp4)。
 
 ## 阅读界面
 

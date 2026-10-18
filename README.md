@@ -25,9 +25,9 @@ The goal is not to memorise a definition and move on. It is to understand a word
 
 ## See it in motion
 
-<p align="center"><a href="docs/video/peekturn-intro.mp4"><img src="docs/video/peekturn-intro-cover.jpg" width="86%" alt="Watch the 34-second Peekturn intro"></a></p>
+<p align="center"><a href="https://github.com/Wake-C/peekturn/raw/refs/heads/main/docs/video/peekturn-intro.mp4"><img src="docs/video/peekturn-intro.gif" width="58%" alt="Peekturn intro preview: reading, narration, word lookup and URL import"></a></p>
 
-A 34-second tour: read, listen, look up a word, and import an article from a URL. [Watch the video](docs/video/peekturn-intro.mp4).
+A 34-second tour: read, listen, look up a word, and import an article from a URL. The preview above loops automatically. [Download the full MP4](https://github.com/Wake-C/peekturn/raw/refs/heads/main/docs/video/peekturn-intro.mp4).
 
 ## The reading surface
 
