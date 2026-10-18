@@ -25,9 +25,9 @@
 
 ## 看它怎么读
 
-<p align="center"><a href="https://github.com/Wake-C/peekturn/raw/refs/heads/main/docs/video/peekturn-intro-zh.mp4"><img src="docs/video/peekturn-intro-zh.gif" width="58%" alt="憩页介绍视频预览：阅读、朗读、查词和 URL 导入"></a></p>
+<p align="center"><img src="docs/video/peekturn-intro-zh.gif" width="58%" alt="憩页介绍：阅读、朗读、查词和 URL 导入"></p>
 
-28 秒看完：阅读、朗读、查词，以及从 URL 导入文章。上面的预览会自动循环。完整版：[下载 MP4](https://github.com/Wake-C/peekturn/raw/refs/heads/main/docs/video/peekturn-intro-zh.mp4)。
+28 秒循环一遍：阅读、朗读、查词，以及从 URL 导入文章。
 
 ## 它做什么
 
