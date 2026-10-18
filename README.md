@@ -1,6 +1,6 @@
 # Peekturn
 
-<p align="center"><img src="docs/images/icon.png" width="96" alt="Peekturn app icon"></p>
+<p align="center"><img src="assets/images/icon.png" width="96" alt="Peekturn app icon"></p>
 
 An Android reader for finishing real English books.
 
@@ -25,7 +25,7 @@ The goal is not to memorise a definition and move on. It is to understand a word
 
 ## See it in motion
 
-<p align="center"><img src="docs/video/peekturn-intro.gif" width="58%" alt="Peekturn intro: reading, narration, word lookup and URL import"></p>
+<p align="center"><img src="assets/video/peekturn-intro.gif" width="58%" alt="Peekturn intro: reading, narration, word lookup and URL import"></p>
 
 A 28-second tour that loops: read, listen, look up a word, and import an article from a URL.
 

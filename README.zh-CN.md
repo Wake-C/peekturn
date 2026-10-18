@@ -1,6 +1,6 @@
 # 憩页
 
-<p align="center"><img src="docs/images/icon.png" width="96" alt="憩页应用图标"></p>
+<p align="center"><img src="assets/images/icon.png" width="96" alt="憩页应用图标"></p>
 
 一个帮你把英文原版书读完的 Android 阅读器。
 
@@ -25,7 +25,7 @@
 
 ## 看它怎么读
 
-<p align="center"><img src="docs/video/peekturn-intro-zh.gif" width="58%" alt="憩页介绍：阅读、朗读、查词和 URL 导入"></p>
+<p align="center"><img src="assets/video/peekturn-intro-zh.gif" width="58%" alt="憩页介绍：阅读、朗读、查词和 URL 导入"></p>
 
 28 秒循环一遍：阅读、朗读、查词，以及从 URL 导入文章。
 
