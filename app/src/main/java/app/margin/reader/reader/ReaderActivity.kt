@@ -63,6 +63,7 @@ import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.publication.Locator
+import org.readium.r2.shared.publication.services.positionsByReadingOrder
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.util.getOrElse
 import org.readium.r2.shared.publication.services.search.SearchIterator
@@ -78,6 +79,18 @@ class ReaderActivity : AppCompatActivity() {
     private var initialLocator: Locator? = null
     private var lastLocator: Locator? = null
     private var positionLabel by mutableStateOf("")
+    /** Readium positions per resource and for the whole book; absent until loaded. */
+    private var positionsByResource by mutableStateOf<Map<String, Int>>(emptyMap())
+    private var totalPositions by mutableStateOf(0)
+    /**
+     * Measured pages and positions per layout signature. A single short chapter ends in a nearly
+     * blank page, so its density underestimates the layout; only an accumulated sample is trusted.
+     */
+    private var pageSamples by mutableStateOf<Map<String, Pair<Int, Int>>>(emptyMap())
+    /** Chapters already counted, so turning pages does not sample the same chapter again. */
+    private val measuredChapters = mutableSetOf<String>()
+    /** Latest pagination, so a label can be rebuilt once positions finish loading. */
+    private var lastPagination: Triple<Int, Int, Locator>? = null
     private var chapterLabel by mutableStateOf("")
     private var chrome by mutableStateOf(ReaderChromeState())
     private var panel by mutableStateOf<String?>(null)
@@ -203,6 +216,22 @@ class ReaderActivity : AppCompatActivity() {
                 val opened = graph.engine.open(File(loaded.filePath))
                 publication = opened
                 chapterTitles = ChapterTitles.of(opened.tableOfContents, opened.readingOrder)
+                lifecycleScope.launch {
+                    // Readium paginates a single resource, so a whole-book count is derived from the
+                    // publication's own positions (each chapter's count is proportional to its text).
+                    val byOrder: List<List<Locator>> = runCatching { opened.positionsByReadingOrder() }
+                        .getOrNull().orEmpty()
+                    val perResource = byOrder.mapIndexedNotNull { index, list ->
+                        val href = opened.readingOrder.getOrNull(index)?.href?.toString() ?: return@mapIndexedNotNull null
+                        href.substringBefore('#').substringBefore('?') to list.size
+                    }.toMap()
+                    positionsByResource = perResource
+                    totalPositions = byOrder.sumOf { it.size }
+                    // Positions arrive after the first page; rebuild the label when they do.
+                    lastPagination?.let { (page, total, locator) ->
+                        positionLabel = pageLabel(page, total, locator, graph.store.settings.value.reading)
+                    }
+                }
                 val json = savedInstanceState?.getString(STATE_LOCATOR) ?: loaded.locatorJson
                 initialLocator = json?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
                 if (initialLocator?.let(::isSafeReaderLocator) == false) error("Unsafe saved fragment identifier.")
@@ -261,7 +290,8 @@ class ReaderActivity : AppCompatActivity() {
             },
             paginationListener = object : EpubNavigatorFragment.PaginationListener {
                 override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) {
-                    positionLabel = chapterPositionLabel(graph.store.settings.value.reading.scroll, pageIndex + 1, totalPages, locator.locations.progression)
+                    lastPagination = Triple(pageIndex + 1, totalPages, locator)
+                    positionLabel = pageLabel(pageIndex + 1, totalPages, locator, graph.store.settings.value.reading)
                     applyChapterLabel(locator)
                 }
                 override fun onPageLoaded() {
@@ -532,6 +562,34 @@ class ReaderActivity : AppCompatActivity() {
     private fun readIsCurrent(nav: EpubNavigatorFragment, token: Long, requireReleasedPointer: Boolean): Boolean =
         selectionSession.isCurrent(token) && (!requireReleasedPointer || !selectionSession.pointerHeld) &&
             navigator === nav && resumed && !isFinishing && !isDestroyed
+
+    /**
+     * Chapter pages are exact; the book total is derived once per layout and reused until the
+     * typography or the viewport changes, which is the only moment the density can differ.
+     */
+    private fun pageLabel(page: Int, chapterPages: Int, locator: Locator, reading: ReaderPreferences): String {
+        val progression = locator.locations.progression
+        if (reading.scroll) return chapterPositionLabel(true, page, chapterPages, progression)
+        val chapter = getString(R.string.reader_position_pages, page, chapterPages)
+        if (totalPositions < 1) return chapter
+        val key = locator.href.toString().substringBefore('#').substringBefore('?')
+        val here = positionsByResource[key] ?: positionsByResource.entries
+            .firstOrNull { (href, _) -> href.substringAfterLast('/') == key.substringAfterLast('/') }?.value
+            ?: return chapter
+        val signature = listOf(
+            reading.fontFamily, reading.fontSize, reading.lineHeight, reading.paragraphSpacing,
+            reading.pageMargins, reading.topPaddingDp, reading.bottomPaddingDp,
+            navigator?.view?.width ?: 0, navigator?.view?.height ?: 0
+        ).joinToString("|")
+        val sampleKey = "$signature|$key"
+        if (measuredChapters.add(sampleKey)) {
+            val (sampledPages, sampledPositions) = pageSamples[signature] ?: (0 to 0)
+            pageSamples = pageSamples + (signature to ((sampledPages + chapterPages) to (sampledPositions + here)))
+        }
+        val sample = pageSamples[signature] ?: (0 to 0)
+        val estimate = bookPageEstimate(sample.first, sample.second, totalPositions) ?: return chapter
+        return getString(R.string.reader_position_book_pages, page, chapterPages, estimate)
+    }
 
     private suspend fun showLookup(dictionary: Boolean, token: Long, captured: Selection? = null) {
         val nav = navigator ?: return

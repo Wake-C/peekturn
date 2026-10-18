@@ -130,4 +130,25 @@ class ChapterTitlesTest {
         assertEquals("Part One", chapterTitleFor(position("part1/third.xhtml"), listOf(part), spine))
         assertEquals("", chapterTitleFor(position("part2/other.xhtml"), listOf(part), spine))
     }
+
+    /** Readium reports the resource name when its table-of-contents match fails; that is not a title. */
+    @Test fun `a file name reported as the title falls through to the real chapter name`() {
+        val toc = listOf(chapter("OEBPS/part0005.xhtml", "Prologue"))
+        val spine = listOf(chapter("OEBPS/part0005.xhtml"))
+        assertEquals(
+            "Prologue",
+            chapterTitleFor(position("OEBPS/part0005.xhtml", title = "part0005"), toc, spine)
+        )
+        // A genuine single-word title still wins when the file is not named that way.
+        assertEquals(
+            "Arrival",
+            chapterTitleFor(position("OEBPS/part0005.xhtml", title = "Arrival"), toc, spine)
+        )
+    }
+
+    /** An untitled resource must stay unnamed, even when Readium fills the link title with its file. */
+    @Test fun `a spine entry named after its file never becomes a chapter name`() {
+        val spine = listOf(chapter("OEBPS/part0006.xhtml"))
+        assertEquals("", chapterTitleFor(position("OEBPS/part0006.xhtml", title = "part0006"), emptyList(), spine))
+    }
 }

@@ -32,4 +32,13 @@ class ReaderPreferencesTest {
         assertEquals("", chapterPositionLabel(false, 0, 0, null))
         assertEquals("Chapter", chapterPositionLabel(true, 0, 0, null))
     }
+
+    @Test fun `book page estimate scales chapter density to the whole publication`() {
+        // 20 measured pages over 40 positions, 500 positions in the book.
+        assertEquals(250, bookPageEstimate(chapterPages = 20, chapterPositions = 40, totalPositions = 500))
+        // Unusable measurements produce no estimate rather than a fabricated number.
+        assertNull(bookPageEstimate(chapterPages = 0, chapterPositions = 40, totalPositions = 500))
+        assertNull(bookPageEstimate(chapterPages = 2, chapterPositions = 2, totalPositions = 500))
+        assertNull(bookPageEstimate(chapterPages = 20, chapterPositions = 60, totalPositions = 50))
+    }
 }

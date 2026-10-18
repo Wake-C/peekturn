@@ -510,3 +510,39 @@ Verified: 265 unit tests with no failures, errors or skips; lint and isolated as
 the Chinese reader dialogs and lookup popup on a screen (the probe device has no book and the fixture
 device was used for the label check), and the five themes at 1.5 text scale in Chinese, which are string-
 and layout-reviewed only.
+
+## Real-book chapter names and a whole-book page estimate (2026-10-18)
+
+**Fixture.** The reader's copy of *The Alchemist* now lives outside tracked files at
+`verification-local/fixtures/the-alchemist.epub` (ignored directory), so real-book checks use the same
+publication without committing private book text. Its structure exercises the hard cases: 18 reading-order
+resources, a 204-entry nested NCX, a titled part page followed by a long untitled body file, and XHTML
+documents whose `<title>` is the file name.
+
+**File names are not chapter names.** Readium reports the resource's own name when its table-of-contents
+match fails, and the reading-order link carries the file name too; the label used to print `part0005`
+above a chapter the NCX calls "Prologue", and `part0006` on an untitled separator page. A reported title
+that equals the resource file name or its stem is now discarded at both resolution points (locator title
+and reading-order title), so resolution continues to the real table-of-contents name and an untitled
+resource stays blank. Device evidence: the Prologue page reads "Prologue" and the separator page shows no
+chapter name; the unmatched body file of Part One also stays blank, as the table of contents names only
+the part page and the earlier rule forbids lending a name across resources.
+
+**Chapter pages versus the book total.** The bottom-left counter is `current / total` for the loaded
+chapter, straight from Readium's `PaginationListener`; Readium paginates one resource at a time and never
+reports a whole-book page count. A book total is therefore derived: measured chapter pages over that
+chapter's Readium positions gives the pages-per-position density of the current typography, and applying it
+to the publication's position total estimates the book. It is shown as approximate, appears only after at
+least five measured pages (short chapters are dominated by partial first and last pages), samples each
+chapter once per layout signature, and is recomputed when that signature changes.
+
+Device evidence on the API 35 probe emulator, Chinese interface, Sage theme: the Prologue shows
+`1 / 2` with no estimate; Part One (47,881 characters) shows `1 / 47 · 约 210 页`; raising the font to
+176% reflows to `1 / 142 · 约 636 页`, preserving the derived ratio (47,881 characters over 47 pages is
+1,019 characters per page; the book's 187,776 characters come to roughly 184 pages at that setting, so the
+estimate's 210 is about 14% high because Readium rounds positions per resource). Positions load
+asynchronously, so the label is rebuilt when they arrive instead of waiting for the next page turn.
+
+Verified: 268 unit tests with no failures, errors or skips. Not verified: the estimate against a second
+publication, and page counts after a rotation that changes the viewport (the signature includes viewport
+size, but no device rotation was exercised this round).

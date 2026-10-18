@@ -28,9 +28,12 @@ internal class ChapterTitles private constructor(
 ) {
     /** Readium's own title, else this publication's name for the locator's resource, else blank. */
     fun titleFor(locator: Locator): String {
-        cleanChapterTitle(locator.title)?.let { return it }
         val href = locator.href.toString()
         val key = href.resourceKey()
+        // Readium falls back to the resource's own file name when its table-of-contents match fails,
+        // and a reader must never see "part0005" where a chapter name belongs. A name that is only the
+        // file or its stem is therefore not a title, and resolution continues below.
+        cleanChapterTitle(locator.title)?.takeUnless { it.namesResource(key) }?.let { return it }
         return tableOfContentsTitle(href, key) ?: spineTitle(key).orEmpty()
     }
 
@@ -63,7 +66,8 @@ internal class ChapterTitles private constructor(
             fun collect(children: List<Link>, inherited: String?) {
                 for (link in children) {
                     val href = link.href.toString()
-                    val title = cleanChapterTitle(link.title) ?: inherited
+                    val title = cleanChapterTitle(link.title)
+                        ?.takeUnless { it.namesResource(href.resourceKey()) } ?: inherited
                     if (title != null) {
                         // Deeper entries are collected last and own their resource, as in Readium.
                         exact[href] = title
@@ -80,7 +84,8 @@ internal class ChapterTitles private constructor(
             for (link in readingOrder) {
                 val key = link.href.toString().resourceKey()
                 resources += key
-                cleanChapterTitle(link.title)?.let { spineTitles[key] = it }
+                cleanChapterTitle(link.title)?.takeUnless { it.namesResource(key) }
+                    ?.let { spineTitles[key] = it }
             }
             // Reading-order position of every resource, so a title can be attributed to the chapter
             // at or before a position even when its own entry is untitled.
@@ -115,4 +120,12 @@ private fun String.resourceKey(): String {
         }
     }
     return value
+}
+
+/** True when a reported "title" is only the resource's file name or its stem. */
+private fun String.namesResource(key: String): Boolean {
+    val file = key.substringAfterLast('/')
+    if (file.isEmpty()) return false
+    val stem = file.substringBeforeLast('.', file)
+    return equals(file, ignoreCase = true) || equals(stem, ignoreCase = true)
 }

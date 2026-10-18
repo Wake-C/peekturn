@@ -39,6 +39,23 @@ internal fun readerTextInsets(preferences: ReaderPreferences) = ReaderTextInsets
     preferences.topPaddingDp.coerceAtLeast(16.0), preferences.bottomPaddingDp.coerceAtLeast(24.0)
 )
 
+/**
+ * Whole-book page estimate for the current layout. Readium paginates one resource at a time, so a
+ * book-wide page count can only be derived: a chapter's measured pages over its own positions gives
+ * the pages-per-position density of this typography, and applying that density to the publication's
+ * positions total estimates the book. It is an estimate, never presented as a measured count, and it
+ * is recomputed when the layout signature changes because the density changes with it.
+ */
+/** A sample shorter than this is dominated by chapter-start and chapter-end partial pages. */
+internal const val BOOK_ESTIMATE_MIN_PAGES = 5
+
+internal fun bookPageEstimate(chapterPages: Int, chapterPositions: Int, totalPositions: Int): Int? {
+    if (chapterPages < BOOK_ESTIMATE_MIN_PAGES || chapterPositions < 1) return null
+    if (totalPositions < chapterPositions) return null
+    val estimate = (chapterPages.toLong() * totalPositions + chapterPositions.toLong() / 2) / chapterPositions
+    return estimate.coerceAtLeast(chapterPages.toLong()).toInt()
+}
+
 internal fun chapterPositionLabel(scroll: Boolean, page: Int, total: Int, progression: Double?): String =
     if (scroll) progression?.let { "Chapter ${(it.coerceIn(0.0, 1.0) * 100).toInt()}%" } ?: "Chapter"
     else if (page in 1..total) "$page / $total" else ""
