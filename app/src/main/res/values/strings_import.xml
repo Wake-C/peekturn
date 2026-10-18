@@ -1,5 +1,4 @@
 <resources>
-    <string name="shell_import_menu_title">Add to library</string>
     <string name="shell_import_from_file">From a file</string>
     <string name="shell_import_from_url">From a link</string>
     <string name="shell_import_url_hint">https://…</string>

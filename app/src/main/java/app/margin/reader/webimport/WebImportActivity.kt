@@ -3,15 +3,17 @@ package app.margin.reader.webimport
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.webkit.JsResult
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
@@ -28,14 +30,20 @@ import app.margin.reader.MarginApp
 import app.margin.reader.R
 import app.margin.reader.reader.ReaderActivity
 import app.margin.reader.ui.MarginTheme
+import com.google.gson.JsonParser
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -49,15 +57,26 @@ internal data class ImportUi(
 
 /**
  * Hosts the interactive import browser. It owns no conversion logic: the vendored converter runs
- * inside the page, and this activity only decides how the page is loaded, forwards status, and
- * hands the produced archive to the existing EPUB importer.
+ * inside the page, and this activity only decides how the page is loaded, waits for the article to
+ * be rendered, forwards the converter's verdict, and hands the produced archive to the existing
+ * EPUB importer.
  */
-class WebImportActivity : ComponentActivity() {
+class WebImportActivity : AppCompatActivity() {
     private val graph get() = (application as MarginApp).graph
     private var ui by mutableStateOf(ImportUi())
     private var webView: WebView? = null
     private var bridge: WebEpubBridge? = null
-    private var directFirstLoad = false
+    private var originalUrl: String? = null
+    private var autoStartOnLoad = false
+    private var directLoaded = false
+    private var reloadedForInteraction = false
+    private var followedFullArticle = false
+    @Volatile private var offeredFullArticle: String? = null
+    private var converterReady = false
+    private var injecting = false
+    private var pageGeneration = 0
+    private val converterWaiters = mutableListOf<() -> Unit>()
+    private var readinessJob: Job? = null
     private val assembler = EpubChunkAssembler()
     private val http by lazy {
         OkHttpClient.Builder()
@@ -74,7 +93,9 @@ class WebImportActivity : ComponentActivity() {
             finish()
             return
         }
+        originalUrl = url
         val direct = intent.getBooleanExtra(EXTRA_DIRECT, false)
+        autoStartOnLoad = direct
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 val view = webView
@@ -95,6 +116,7 @@ class WebImportActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        readinessJob?.cancel()
         webView?.run {
             stopLoading()
             removeJavascriptInterface("MarginBridge")
@@ -106,7 +128,6 @@ class WebImportActivity : ComponentActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createWebView(context: Context, url: String, direct: Boolean): WebView {
-        directFirstLoad = direct
         val view = WebView(context)
         with(view.settings) {
             javaScriptEnabled = true
@@ -120,19 +141,41 @@ class WebImportActivity : ComponentActivity() {
         }
         val epubBridge = WebEpubBridge(
             assembler = assembler,
+            onReview = { text ->
+                when (val decision = reviewArticleCapture(text)) {
+                    CaptureDecision.Import -> "import"
+                    is CaptureDecision.Refuse -> decision.reason.code
+                }
+            },
+            onFullArticle = { target -> offeredFullArticle = target },
             onStatus = { code -> runOnUiThread { showStatus(code) } },
             onArchive = { bytes, name -> runOnUiThread { saveAndImport(bytes, name) } },
-            onFailure = { message -> runOnUiThread { showFailure(message) } }
+            onFailure = { code -> runOnUiThread { showFailure(code) } }
         )
         bridge = epubBridge
         view.addJavascriptInterface(epubBridge, "MarginBridge")
         view.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView, pageUrl: String?, favicon: Bitmap?) {
+                readinessJob?.cancel()
+                pageGeneration++
+                converterReady = false
+                injecting = false
+                converterWaiters.clear()
+                offeredFullArticle = null
+                ui = ui.copy(status = R.string.web_import_loading, canImport = false, working = false)
+            }
+
             override fun onPageFinished(view: WebView, pageUrl: String?) {
                 if (pageUrl == null || pageUrl == "about:blank") return
-                ui = ui.copy(canImport = true, working = false, status = R.string.web_import_ready)
-                val startNow = directFirstLoad
-                directFirstLoad = false
-                injectConverter(startWhenReady = startNow, auto = true)
+                val shouldAutoStart = autoStartOnLoad
+                autoStartOnLoad = false
+                ui = ui.copy(status = R.string.web_import_loading, canImport = false, working = false)
+                val generation = pageGeneration
+                injectConverter(generation) {
+                    if (generation != pageGeneration) return@injectConverter
+                    ui = ui.copy(canImport = true, working = false, status = R.string.web_import_ready)
+                    if (shouldAutoStart) awaitArticleAndImport(automatic = true)
+                }
             }
         }
         view.webChromeClient = object : WebChromeClient() {
@@ -142,7 +185,7 @@ class WebImportActivity : ComponentActivity() {
 
             // The converter reports failures through alert(); the app states them in its own bar.
             override fun onJsAlert(view: WebView, url: String?, message: String?, result: JsResult?): Boolean {
-                Log.w("MarginWebImport", "Converter alert: $message")
+                Log.w("MarginWebImport", "Converter alert")
                 result?.cancel()
                 return true
             }
@@ -152,8 +195,10 @@ class WebImportActivity : ComponentActivity() {
             val fetched = if (direct) withContext(Dispatchers.IO) { fetchDirect(url) } else null
             if (fetched != null) {
                 // A redirect can change the directory or the host; relative resources resolve against it.
+                directLoaded = true
                 view.loadDataWithBaseURL(fetched.url, fetched.html, "text/html", "utf-8", fetched.url)
             } else {
+                directLoaded = false
                 view.loadUrl(url)
             }
         }
@@ -210,76 +255,219 @@ class WebImportActivity : ComponentActivity() {
      * that would refuse a script from the app's asset origin, while inline evaluation is not subject
      * to it. Chaining on each callback keeps the order the converter requires.
      */
-    private fun injectConverter(startWhenReady: Boolean, auto: Boolean) {
+    private fun injectConverter(generation: Int, onReady: () -> Unit) {
         val view = webView ?: return
+        if (converterReady) {
+            onReady()
+            return
+        }
+        converterWaiters += onReady
+        if (injecting) return
+        injecting = true
         view.evaluateJavascript("window.__marginConverterLoaded === true", { loaded ->
+            if (generation != pageGeneration) return@evaluateJavascript
             if (loaded == "true") {
-                if (startWhenReady) startConversion()
-                return@evaluateJavascript
+                converterReady = true
+                finishInjection()
+            } else {
+                view.evaluateJavascript("window.__marginConverterLoaded = true", null)
+                injectScript(view, 0, generation)
             }
-            view.evaluateJavascript("window.__marginConverterLoaded = true", null)
-            injectScript(view, 0, startWhenReady, auto)
         })
     }
 
-    private fun injectScript(view: WebView, index: Int, startWhenReady: Boolean, auto: Boolean) {
+    private fun injectScript(view: WebView, index: Int, generation: Int) {
+        if (generation != pageGeneration) return
         if (index >= CONVERTER_SCRIPTS.size) {
-            if (!startWhenReady) return
-            if (auto) startIfArticle() else startConversion()
+            converterReady = true
+            finishInjection()
             return
         }
         val source = try {
             assets.open("webimport/${CONVERTER_SCRIPTS[index]}").bufferedReader().use { it.readText() }
         } catch (e: IOException) {
             Log.w("MarginWebImport", "Converter asset missing: ${CONVERTER_SCRIPTS[index]}")
-            showFailure("Could not load ${CONVERTER_SCRIPTS[index]}")
+            injecting = false
+            converterWaiters.clear()
+            showFailure("failed")
             return
         }
-        view.evaluateJavascript(source, { injectScript(view, index + 1, startWhenReady, auto) })
+        view.evaluateJavascript(source) {
+            if (generation == pageGeneration) injectScript(view, index + 1, generation)
+        }
+    }
+
+    private fun finishInjection() {
+        injecting = false
+        val callbacks = converterWaiters.toList()
+        converterWaiters.clear()
+        callbacks.forEach { it() }
     }
 
     /**
-     * Shared links import without a tap, but an intermediate page, an error page or a challenge must
-     * not become a book: auto-start waits until the document carries article-like text.
+     * A rendered article is not the same as a finished page: single-page sites finish loading their
+     * shell first. The probe waits for article-like text, gives the browser time to settle, and only
+     * then starts conversion. A short shell is handed to the converter anyway so it can classify the
+     * capture and offer a discoverable full-article link; the bridge refuses to build a preview.
      */
-    private fun startIfArticle() {
-        webView?.evaluateJavascript(ARTICLE_READINESS_SCRIPT) { ready ->
-            if (ready == "true") {
-                startConversion()
-            } else {
-                ui = ui.copy(canImport = true, working = false, status = R.string.web_import_ready)
+    private fun awaitArticleAndImport(automatic: Boolean) {
+        readinessJob?.cancel()
+        readinessJob = lifecycleScope.launch {
+            ui = ui.copy(working = true, canImport = false, status = R.string.web_import_extracting)
+            val started = SystemClock.elapsedRealtime()
+            val deadline = started + if (automatic) AUTO_READY_TIMEOUT_MS else MANUAL_READY_TIMEOUT_MS
+            var readySince = 0L
+            var lastDecision: CaptureDecision? = null
+            var lastLength = -1
+            var stableRefusals = 0
+            while (isActive) {
+                val probe = readPageProbe()
+                if (probe != null) {
+                    val decision = reviewArticleCapture(probe.sample)
+                    lastDecision = decision
+                    val now = SystemClock.elapsedRealtime()
+                    if (decision == CaptureDecision.Import) {
+                        stableRefusals = 0
+                        if (readySince == 0L) readySince = now
+                        if (now - readySince >= ARTICLE_SETTLE_MS) {
+                            startConversion()
+                            return@launch
+                        }
+                    } else {
+                        readySince = 0
+                        if (probe.length == lastLength) stableRefusals++ else stableRefusals = 0
+                        lastLength = probe.length
+                        val reason = (decision as? CaptureDecision.Refuse)?.reason
+                        val settled = now - started >= REFUSAL_SETTLE_MS && stableRefusals >= 1
+                        if (settled && (reason == CaptureRefusal.ERROR_PAGE || reason == CaptureRefusal.SIGN_IN_REQUIRED)) {
+                            showCaptureFailure(decision)
+                            return@launch
+                        }
+                        if (settled) {
+                            // The converter reviews the capture and may hand back a full-article link.
+                            startConversion()
+                            return@launch
+                        }
+                    }
+                }
+                if (SystemClock.elapsedRealtime() >= deadline) break
+                delay(READY_POLL_MS)
+            }
+            showCaptureFailure(lastDecision)
+        }
+    }
+
+    private suspend fun readPageProbe(): PageProbe? {
+        val view = webView ?: return null
+        return suspendCancellableCoroutine { continuation ->
+            view.evaluateJavascript(PAGE_PROBE_SCRIPT) { value ->
+                if (continuation.isActive) continuation.resume(parseProbe(value))
             }
         }
+    }
+
+    private fun parseProbe(value: String?): PageProbe? {
+        if (value.isNullOrBlank() || value == "null") return null
+        return runCatching {
+            val json = JsonParser.parseString(value).asJsonObject
+            PageProbe(
+                length = json.get("length")?.asInt ?: 0,
+                sample = json.get("sample")?.asString.orEmpty()
+            )
+        }.getOrNull()
     }
 
     private fun startConversion() {
         // A new attempt gets fresh transfer state and its own token, so a retry after a failure works.
         val token = UUID.randomUUID().toString()
         bridge?.beginSession(token)
+        ui = ui.copy(working = true, status = R.string.web_import_extracting, canImport = false)
         webView?.evaluateJavascript("window.__marginToken = '$token'", null)
         webView?.evaluateJavascript("window.MarginImport && window.MarginImport.start()", null)
     }
 
     private fun importPage() {
         if (ui.working) return
-        ui = ui.copy(working = true, status = R.string.web_import_extracting)
-        injectConverter(startWhenReady = true, auto = false)
+        readinessJob?.cancel()
+        ui = ui.copy(working = true, status = R.string.web_import_extracting, canImport = false)
+        injectConverter(pageGeneration) { awaitArticleAndImport(automatic = false) }
     }
 
     private fun showStatus(code: String) {
-        Log.i("MarginWebImport", "status=$code")
         val status = when (code) {
             "extracting" -> R.string.web_import_extracting
             "building" -> R.string.web_import_building
             "sending" -> R.string.web_import_saving
             else -> return
         }
-        ui = ui.copy(status = status, working = true)
+        Log.i("MarginWebImport", "status=$code")
+        ui = ui.copy(status = status, working = true, canImport = false)
     }
 
-    private fun showFailure(message: String) {
-        Log.w("MarginWebImport", "Conversion declined: $message")
-        ui = ui.copy(status = R.string.web_import_failed, working = false, canImport = true)
+    private fun showCaptureFailure(decision: CaptureDecision?) {
+        val reason = (decision as? CaptureDecision.Refuse)?.reason
+        if (reason != null &&
+            reason != CaptureRefusal.ERROR_PAGE &&
+            fallBackToInteractivePage()
+        ) {
+            return
+        }
+        val status = when (reason) {
+            CaptureRefusal.ERROR_PAGE -> R.string.web_import_error_page
+            CaptureRefusal.SIGN_IN_REQUIRED -> R.string.web_import_sign_in
+            CaptureRefusal.PREVIEW_ONLY -> R.string.web_import_preview_only
+            CaptureRefusal.NO_ARTICLE -> R.string.web_import_no_article
+            null -> R.string.web_import_not_ready
+        }
+        ui = ui.copy(status = status, working = false, canImport = true)
+    }
+
+    /**
+     * A direct fetch has no login session. Hand the same address back to the interactive browser
+     * once, so an account wall can be passed by hand instead of ending in a dead end.
+     */
+    private fun fallBackToInteractivePage(): Boolean {
+        if (!directLoaded || reloadedForInteraction) return false
+        val page = originalUrl ?: return false
+        reloadedForInteraction = true
+        directLoaded = false
+        autoStartOnLoad = false
+        ui = ui.copy(status = R.string.web_import_loading, working = false, canImport = false)
+        webView?.loadUrl(page)
+        return true
+    }
+
+    private fun showFailure(code: String) {
+        val knownCode = CaptureRefusal.entries.firstOrNull { it.code == code }?.code ?: "failed"
+        Log.w("MarginWebImport", "Conversion declined: $knownCode")
+        readinessJob?.cancel()
+        val offer = offeredFullArticle
+        offeredFullArticle = null
+        val needsFullPage = knownCode == CaptureRefusal.PREVIEW_ONLY.code ||
+            knownCode == CaptureRefusal.NO_ARTICLE.code ||
+            knownCode == CaptureRefusal.SIGN_IN_REQUIRED.code
+        if (needsFullPage && !followedFullArticle) {
+            val target = sameOriginArticleTarget(webView?.url ?: originalUrl, offer)
+            if (target != null) {
+                followedFullArticle = true
+                directLoaded = false
+                autoStartOnLoad = true
+                ui = ui.copy(status = R.string.web_import_loading, working = false, canImport = false)
+                webView?.loadUrl(target)
+                return
+            }
+        }
+        // A direct fetch has no login session. Hand the same address back to the interactive browser
+        // once, so an account wall can be passed by hand instead of ending in a dead end.
+        if (needsFullPage && fallBackToInteractivePage()) return
+        val status = when (knownCode) {
+            CaptureRefusal.ERROR_PAGE.code -> R.string.web_import_error_page
+            CaptureRefusal.SIGN_IN_REQUIRED.code -> R.string.web_import_sign_in
+            CaptureRefusal.PREVIEW_ONLY.code -> R.string.web_import_preview_only
+            CaptureRefusal.NO_ARTICLE.code -> R.string.web_import_no_article
+            else -> R.string.web_import_failed
+        }
+        ui = ui.copy(status = status, working = false, canImport = true)
     }
 
     private fun saveAndImport(bytes: ByteArray, name: String) {
@@ -299,14 +487,22 @@ class WebImportActivity : ComponentActivity() {
         }
     }
 
+    private data class PageProbe(
+        val length: Int,
+        val sample: String
+    )
+
     companion object {
         private const val EXTRA_URL = "url"
         private const val EXTRA_DIRECT = "direct"
         private const val MAX_HTML_BYTES = 12L * 1024 * 1024
-        private const val ARTICLE_READINESS_SCRIPT =
-            "(function(){var t=((document.body&&document.body.innerText)||'').trim();" +
-                "var s=((document.title||'')+' '+t).toLowerCase();" +
-                "return t.length>=400 && !/just a moment|attention required|verify you are human/.test(s);})()"
+        private const val READY_POLL_MS = 400L
+        private const val ARTICLE_SETTLE_MS = 600L
+        private const val REFUSAL_SETTLE_MS = 3_000L
+        private const val AUTO_READY_TIMEOUT_MS = 15_000L
+        private const val MANUAL_READY_TIMEOUT_MS = 6_000L
+        private const val PAGE_PROBE_SCRIPT =
+            "window.MarginImport && window.MarginImport.probe ? window.MarginImport.probe() : null"
         private const val CHROME_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) " +
                 "Chrome/126.0.0.0 Mobile Safari/537.36"

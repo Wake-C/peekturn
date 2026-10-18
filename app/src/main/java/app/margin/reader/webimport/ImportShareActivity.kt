@@ -6,8 +6,8 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -32,7 +32,7 @@ import kotlinx.coroutines.launch
  * the reader is on top is otherwise delivered to that task and never reaches the library screen.
  * Links go to the import browser; EPUB streams go straight to the importer.
  */
-class ImportShareActivity : ComponentActivity() {
+class ImportShareActivity : AppCompatActivity() {
     private val graph get() = (application as MarginApp).graph
     private var status by mutableStateOf(R.string.import_share_opening)
 

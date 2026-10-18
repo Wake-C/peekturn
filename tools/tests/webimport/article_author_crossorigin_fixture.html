@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Notes From a Reading Desk | Example Journal</title>
+  <meta property="og:title" content="Notes From a Reading Desk">
+  <meta property="og:type" content="article">
+  <meta name="description" content="A page whose body links reuse the author's profile slug on another host.">
+  <meta property="article:author" content="https://x.com/HiTw93">
+  <meta name="twitter:creator" content="@HiTw93">
+  <style>
+    .contents { display: contents; }
+  </style>
+</head>
+<body>
+<main>
+  <article>
+    <h1>Notes From a Reading Desk</h1>
+    <div class="byline">
+      <a href="https://unrelated.example/HiTw93">Mallory</a>
+      <a href="https://unrelated.example/HiTw93">@HiTw93</a>
+      <span>5 min read</span>
+    </div>
+    <div class="contents">
+      <p>A body link can reuse the same final path segment as the author's profile without pointing
+        at that profile at all. Credit belongs to the identity the page actually named, so the host
+        and path both have to agree before a display name is attached to it.</p>
+      <p>The article is still complete, and its headline and body are unaffected by the rejected
+        link. An empty creator is the honest result for a byline that points somewhere else.</p>
+      <p id="final-marker">ARTICLE_AUTHOR_CROSSORIGIN_END: a same-slug link on another origin is not
+        the author.</p>
+    </div>
+  </article>
+</main>
+</body>
+</html>

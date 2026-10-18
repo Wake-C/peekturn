@@ -1,5 +1,4 @@
 <resources>
-    <string name="shell_import_menu_title">添加到书架</string>
     <string name="shell_import_from_file">从文件导入</string>
     <string name="shell_import_from_url">从链接导入</string>
     <string name="shell_import_url_hint">https://…</string>

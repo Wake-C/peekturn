@@ -35,9 +35,9 @@ internal fun firstHttpUrl(text: String?): String? =
         ?.let(::normalizeHttpUrl)
 
 /**
- * True when a directly fetched response is the article itself. Bot protection answers 200 with a
- * challenge page, so status and content type alone are not enough; the caller falls back to the
- * interactive browser when this is false.
+ * True when a directly fetched response is the article itself. Bot protection and account walls
+ * answer 200 with a challenge or sign-in page, so status and content type alone are not enough; the
+ * caller falls back to the interactive browser when this is false.
  */
 internal fun acceptsDirectHtml(status: Int, contentType: String?, length: Int, head: String): Boolean {
     if (status != 200) return false
@@ -46,7 +46,13 @@ internal fun acceptsDirectHtml(status: Int, contentType: String?, length: Int, h
     val marker = head.lowercase()
     return "just a moment" !in marker &&
         "cf-challenge" !in marker &&
-        "enable javascript and cookies" !in marker
+        "enable javascript and cookies" !in marker &&
+        "sign in to continue" !in marker &&
+        "log in to continue" !in marker &&
+        "sign in to read" !in marker &&
+        "log in to read" !in marker &&
+        "sign in to view" !in marker &&
+        "log in to view" !in marker
 }
 
 internal const val MIN_DIRECT_HTML_CHARS = 4_000
