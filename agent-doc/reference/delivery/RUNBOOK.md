@@ -1,5 +1,13 @@
 # Debug APK delivery
 
+## GitHub Actions test builds
+
+`.github/workflows/debug.yml` builds on pushes to `main`, PR updates and manual dispatch. It runs debug unit tests, debug lint and assembly, then uploads an APK and SHA-256 checksum to the run's **Artifacts**, retained for 14 days. Debug builds never create a Release. New runs cancel unfinished runs for the same branch or PR.
+
+Debug uses `app.peekturn.reader.debug`, version suffix `-debug`, and the display name Peekturn Debug (憩页 Debug in Chinese). It can coexist with the production app; books and settings are separate. Existing debug installations under the production package name are not migrated or removed.
+
+Trusted `main` builds restore the fixed test keystore from `PEEKTURN_DEBUG_KEYSTORE_BASE64`. This is a dedicated debug key, never the release key. Local debug builds use the matching `~/.android/debug.keystore` on the maintainer's machine. PR builds receive no signing secret and use a temporary debug key, so PR APKs are not guaranteed to update another test build. Manual runs on branches other than `main` also use a temporary key. Do not uninstall an app to bypass a signature conflict without considering data loss.
+
 ## Package the current checkout
 
 ```sh
@@ -47,7 +55,7 @@ Use `adb` from the configured SDK's `platform-tools` directory. Select the inten
 adb devices -l
 APK=/absolute/path/to/the/collected.apk
 adb -s DEVICE_SERIAL install -r "$APK"
-adb -s DEVICE_SERIAL shell am start -W -n app.peekturn.reader/.MainActivity
+adb -s DEVICE_SERIAL shell am start -W -n app.peekturn.reader.debug/app.peekturn.reader.MainActivity
 ```
 
 An install/launch check establishes only that this APK installs and starts on that device. The receipt deliberately reports Android runtime verification as `not_run`; packaging alone does not establish feature acceptance. Record any separately executed device checks and their evidence limits in [verification history](../verification/VERIFICATION.md). Use the [product acceptance criteria](../SPEC.md#acceptance) and affected feature owner for behavior changes.
