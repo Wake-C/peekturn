@@ -38,14 +38,16 @@ jobs:
             "$sdk/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
           fi
 
-      # release.gradle.kts falls back to an unsigned build when these are absent.
-      # Fail early instead of publishing an APK that no device will install.
+      # app/build.gradle.kts reads the signing values from these environment
+      # variables. Fail early instead of publishing an APK that no device will install.
       - name: Check signing secrets
         env:
           KEYSTORE_BASE64: ${{ secrets.PEEKTURN_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.PEEKTURN_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.PEEKTURN_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.PEEKTURN_KEY_PASSWORD }}
         run: |
-          for name in KEYSTORE_BASE64 STORE_PASSWORD; do
+          for name in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
             [ -n "$(printenv "$name")" ] || { echo "Missing secret $name" >&2; exit 1; }
           done
 
@@ -64,7 +66,7 @@ jobs:
           PEEKTURN_STORE_PASSWORD: ${{ secrets.PEEKTURN_STORE_PASSWORD }}
           PEEKTURN_KEY_ALIAS: ${{ secrets.PEEKTURN_KEY_ALIAS }}
           PEEKTURN_KEY_PASSWORD: ${{ secrets.PEEKTURN_KEY_PASSWORD }}
-        run: ./gradlew --console=plain :app:testDebugUnitTest :app:assembleRelease
+        run: ./gradlew --console=plain :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
 
       # Naming, checksum and signature check mirror tools/release.sh so the CI
       # artifact is the same shape as a local one.
