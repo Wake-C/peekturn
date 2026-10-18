@@ -548,9 +548,9 @@ counter is still `24 / 557`, proving the cached density is used. The 557 total m
 model (187,776 characters over about 337 characters per page). At 100% font the same counter is not
 re-measured on device.
 
-Delivered as `margin-1.3.2-6-debug.apk` (versionCode 6); the delivered APK installed over the previous
-build on the probe emulator, launched into Part Two, and read "Part Two" with `1 / 356 · 约 559 页` at
-176% font, confirming the package carries the forward name and the character-based estimate.
+Delivered as `margin-1.3.3-7-debug.apk` (versionCode 7); the delivered APK installed over the previous
+build on the probe emulator, launched into the Prologue, and read "Prologue" with `25 / 557` at 176%
+font, confirming the single whole-book counter and the forward section name.
 
 Verified: 270 unit tests with no failures, errors or skips. Not verified: the estimate against a second
 publication, and page counts after a rotation that changes the viewport (the signature includes viewport
