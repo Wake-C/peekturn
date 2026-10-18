@@ -23,6 +23,13 @@ internal class EpubChunkAssembler(private val maxBytes: Int = MAX_EPUB_BYTES) {
         return true
     }
 
+    /** Starts a new transfer; a retry after a failure must not inherit the old indices. */
+    fun reset() {
+        bytes.reset()
+        nextIndex = 0
+        damaged = false
+    }
+
     fun finish(): ByteArray? {
         if (damaged || nextIndex == 0 || bytes.size() == 0) return null
         return bytes.toByteArray()

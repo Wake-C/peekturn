@@ -581,12 +581,43 @@ first pages are links rather than prose. The direct activity path with a pasted 
 starting the import browser for the Anthropic URL and pressing "Import this page", which produced the same
 `1 / 28` book.
 
-Delivered as `margin-1.4.0-8-debug.apk` (versionCode 8); the delivered APK installed over the previous
-build, a shared Anthropic link opened in the import browser without the fetch shortcut, and the imported
-article opened at `1 / 28`.
+Delivered as `margin-1.4.0-8-debug.apk` (versionCode 8) from `package.MR3Xya`
+(SHA-256 `be33ec5b5fedab97203ecf23e2e1bdaa7c24a0f9f05f2eb1397b5aec2878a56b`). The delivered APK installed
+over the previous build; with the reader on top, a shared Paul Graham link reached the import browser and
+produced a book (the reader reopened at `1 / 168`), and a shared Anthropic link imported at `1 / 28`.
+Forwarding an EPUB through the share activity reached the existing importer (it refused the test's
+ungranted MediaStore URI with SecurityException, which proves the URI was forwarded); a real share-sheet
+grant was not available to this test harness.
 
 Verified: 276 unit tests (link policy, direct-fetch acceptance, chunk assembly) with no failures, errors or
 skips; the pipeline ran on the device for three publications. Not verified: an X/Twitter long-form article
 or thread, an interactive challenge completed by hand, rotation during import, and multiple images from
 cross-origin CDNs that refuse a CORS fetch.
+
+### Review findings and fixes (2026-10-18)
+
+The implementation review found five defects; all were fixed and the affected paths re-checked.
+
+1. **Bridge trust boundary.** `MarginBridge` was callable from any frame, so an embedded third-party
+   frame could push its own archive or cancel the reader's transfer. Each attempt now mints a token,
+   installs it in the top document just before starting, and the bridge refuses chunk and finish calls
+   without it; cross-origin frames cannot read that variable.
+2. **Unbounded direct response.** `contentLength() == -1` (chunked or decompressed) bypassed the 12 MiB
+   check because the body was buffered first. The body is now streamed and refused past the limit.
+3. **Broken retry.** `WebEpubBridge` settled permanently and `EpubChunkAssembler` kept its indices, so
+   "Import this page" after a failure could never succeed. Both are reset at the start of every attempt.
+4. **Redirect base URL.** Direct fetch returned only the HTML and loaded it against the original URL, so
+   relative resources from a redirected page resolved wrongly. The final response URL is now the base.
+5. **Cleartext promise.** The policy accepted `http://`, which the network security config blocks in the
+   WebView. Only https is accepted, and the dialog says so in both languages.
+
+A separate defect was found while testing: sharing a link while the reader was on top did nothing,
+because the intent reached the task without reaching the library screen. External shares and content
+views now enter through `ImportShareActivity`, which requires no library screen and forwards links to the
+import browser or EPUB streams to the importer.
+
+Device evidence for this round: with the reader open, a shared Paul Graham link opened the import browser
+instead of being dropped; a shared Anthropic link imported to `1 / 28`; the delivered APK installed and
+imported the same article. 277 unit tests pass, including the https-only policy, shared-text punctuation,
+assembler reset and chunk ordering.
 

@@ -105,7 +105,7 @@ class MainViewModelTest {
     private fun viewModel(key: String) = MainViewModel(graph).also { viewModels.put(key, it) }
 
     private suspend fun initialize(vm: MainViewModel, reopen: Boolean) {
-        vm.initialize(reopen, incoming = null)
+        vm.initialize(reopen)
         vm.viewModelScope.coroutineContext[Job]!!.children.toList().joinAll()
     }
 

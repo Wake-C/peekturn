@@ -33,4 +33,12 @@ class EpubChunkAssemblerTest {
     @Test fun `an empty transfer produces no file`() {
         assertNull(EpubChunkAssembler().finish())
     }
+
+    @Test fun `reset gives a retry a clean transfer`() {
+        val assembler = EpubChunkAssembler()
+        assertFalse(assembler.push(1, chunk("late".toByteArray())))
+        assembler.reset()
+        assertTrue(assembler.push(0, chunk("fresh".toByteArray())))
+        assertArrayEquals("fresh".toByteArray(), assembler.finish())
+    }
 }

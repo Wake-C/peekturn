@@ -3,7 +3,7 @@
     <string name="shell_import_from_file">From a file</string>
     <string name="shell_import_from_url">From a link</string>
     <string name="shell_import_url_hint">https://…</string>
-    <string name="shell_import_url_invalid">Enter an http(s) link.</string>
+    <string name="shell_import_url_invalid">Enter an https link.</string>
     <string name="shell_import_open">Open</string>
     <string name="shell_cancel">Cancel</string>
     <string name="web_import_title">Import article</string>
@@ -15,4 +15,6 @@
     <string name="web_import_building">Building the book…</string>
     <string name="web_import_saving">Saving…</string>
     <string name="web_import_failed">This page could not be imported.</string>
+    <string name="import_share_opening">Opening…</string>
+    <string name="import_share_failed">Could not import this file.</string>
 </resources>

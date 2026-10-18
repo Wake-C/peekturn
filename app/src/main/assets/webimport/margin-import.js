@@ -78,9 +78,9 @@
             }
             var base64 = btoa(parts.join(''));
             for (var offset = 0, index = 0; offset < base64.length; offset += TRANSFER_SLICE, index++) {
-                MarginBridge.pushChunk(index, base64.slice(offset, offset + TRANSFER_SLICE));
+                MarginBridge.pushChunk(index, base64.slice(offset, offset + TRANSFER_SLICE), window.__marginToken || '');
             }
-            MarginBridge.finish(name);
+            MarginBridge.finish(name, window.__marginToken || '');
         });
     }
 

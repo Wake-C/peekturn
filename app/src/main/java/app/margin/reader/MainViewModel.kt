@@ -27,15 +27,14 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
     val state = _state.asStateFlow()
     private var initialized = false
 
-    fun initialize(reopen: Boolean, incoming: Uri?) {
+    fun initialize(reopen: Boolean) {
         if (initialized) return
         initialized = true
         viewModelScope.launch {
             try {
                 graph.store.load()
                 _state.update { it.copy(ready = true) }
-                if (incoming != null) importBook(incoming)
-                else if (reopen) {
+                if (reopen) {
                     val id = graph.store.lastBookId()
                     if (id != null) {
                         val book = graph.store.findBook(id)

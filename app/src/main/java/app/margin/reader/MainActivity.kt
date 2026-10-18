@@ -34,7 +34,6 @@ import app.margin.reader.model.AppSettings
 import app.margin.reader.reader.ReaderActivity
 import app.margin.reader.ui.*
 import app.margin.reader.webimport.WebImportActivity
-import app.margin.reader.webimport.firstHttpUrl
 import app.margin.reader.webimport.normalizeHttpUrl
 
 class MainActivity : AppCompatActivity() {
@@ -52,10 +51,7 @@ class MainActivity : AppCompatActivity() {
         // Readium locator, so neither settings nor reading position are lost.
         applyAppLanguage(graph.store.settings.value.uiLanguage)
         applyAppTheme(graph.store.settings.value.appTheme)
-        val incoming = extractIncoming(intent)
-        intent = Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN)
-        (incoming as? Incoming.Web)?.let { startActivity(WebImportActivity.intent(this, it.url, direct = true)) }
-        vm.initialize(reopen = savedInstanceState == null, incoming = (incoming as? Incoming.Epub)?.uri)
+        vm.initialize(reopen = savedInstanceState == null)
         setContent {
             val settings by graph.store.settings.collectAsStateWithLifecycle()
             LaunchedEffect(settings.uiLanguage) { applyAppLanguage(settings.uiLanguage) }
@@ -92,50 +88,7 @@ class MainActivity : AppCompatActivity() {
         }
         enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
     }
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        when (val incoming = extractIncoming(intent)) {
-            is Incoming.Epub -> vm.importBook(incoming.uri)
-            is Incoming.Web -> startActivity(WebImportActivity.intent(this, incoming.url, direct = true))
-            null -> Unit
-        }
-        setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
-    }
     override fun onPause() { graph.speech.stop(); super.onPause() }
-    private sealed interface Incoming {
-        data class Epub(val uri: Uri) : Incoming
-        data class Web(val url: String) : Incoming
-    }
-
-    /**
-     * Two kinds of share arrive here: a document (the EPUB picker or a share sheet attachment) and a
-     * link (a browser or X share). A link only carries the address, never the rendered page, so it
-     * opens the import browser, which tries a direct fetch first.
-     */
-    private fun extractIncoming(intent: Intent?): Incoming? = try {
-        val source = intent
-        when (source?.action) {
-            Intent.ACTION_VIEW -> source.data
-                ?.takeIf { it.scheme == "content" }
-                ?.let(Incoming::Epub)
-            Intent.ACTION_SEND -> {
-                if (source.type?.startsWith("text/") == true) {
-                    firstHttpUrl(source.getStringExtra(Intent.EXTRA_TEXT))?.let(Incoming::Web)
-                } else {
-                    val stream = if (Build.VERSION.SDK_INT >= 33) {
-                        source.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-                    } else {
-                        @Suppress("DEPRECATION") (source.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri)
-                    }
-                    stream?.takeIf { it.scheme == "content" }?.let(Incoming::Epub)
-                }
-            }
-            else -> null
-        }
-    } catch (e: RuntimeException) {
-        android.util.Log.w("MarginImport", "Unreadable incoming attachment: ${e.javaClass.simpleName}")
-        null
-    }
 }
 
 @Composable

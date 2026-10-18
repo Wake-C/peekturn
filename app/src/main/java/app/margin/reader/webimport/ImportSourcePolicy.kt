@@ -10,21 +10,29 @@ private val httpUrlPattern = Regex("""https?://[^\s"'<>]+""", RegexOption.IGNORE
  * only when it looks like the article rather than a bot-check interstitial.
  */
 
-/** A normalized http(s) link, or null for anything a browser should not be asked to open. */
+/**
+ * A normalized https link, or null for anything a browser should not be asked to open. Cleartext is
+ * refused because the app's network security config forbids it, so an http link could never load in
+ * the import browser; accepting it would promise a page the app cannot show.
+ */
 internal fun normalizeHttpUrl(raw: String?): String? {
-    val value = raw?.trim()?.trimEnd('.', ',', ')', ']', '"', '\'') ?: return null
-    if (!value.startsWith("http://", ignoreCase = true) && !value.startsWith("https://", ignoreCase = true)) {
-        return null
-    }
+    val value = raw?.trim()?.trimEnd('.', ',', ')', ']', '"', '\'', '。', '，', '、', '；', '：', '！', '？')
+        ?: return null
+    if (!value.startsWith("https://", ignoreCase = true)) return null
     val uri = runCatching { URI(value) }.getOrNull() ?: return null
-    if (uri.scheme?.lowercase() !in setOf("http", "https")) return null
+    if (uri.scheme?.lowercase() != "https") return null
     if (uri.host.isNullOrBlank()) return null
     return uri.toString()
 }
 
-/** The first http(s) link in shared text, which browsers and X wrap in a title or a sentence. */
+/**
+ * The first https link in shared text, which browsers and X wrap in a title or a sentence. Chinese
+ * text often follows the link without a space, so the match stops at the first non-ASCII character
+ * before normalizing; a URL's non-ASCII content would be percent-encoded, never raw.
+ */
 internal fun firstHttpUrl(text: String?): String? =
-    text?.let { httpUrlPattern.find(it)?.value }?.let(::normalizeHttpUrl)
+    text?.let { httpUrlPattern.find(it)?.value?.takeWhile { character -> character.code in 33..126 } }
+        ?.let(::normalizeHttpUrl)
 
 /**
  * True when a directly fetched response is the article itself. Bot protection answers 200 with a

@@ -9,7 +9,7 @@ import org.junit.Test
 class ImportSourcePolicyTest {
     @Test fun `only http links reach the browser`() {
         assertEquals("https://openai.com/index/", normalizeHttpUrl("  https://openai.com/index/ "))
-        assertEquals("http://example.com/a", normalizeHttpUrl("http://example.com/a"))
+        assertNull(normalizeHttpUrl("http://example.com/a"))
         assertNull(normalizeHttpUrl("javascript:alert(1)"))
         assertNull(normalizeHttpUrl("file:///etc/passwd"))
         assertNull(normalizeHttpUrl("intent://scan/#Intent;scheme=zxing;end"))
@@ -22,6 +22,7 @@ class ImportSourcePolicyTest {
             "https://x.com/paulg/status/1?s=20",
             firstHttpUrl("Look at this thread https://x.com/paulg/status/1?s=20 — worth reading")
         )
+        assertEquals("https://example.com/a", firstHttpUrl("看这个 https://example.com/a，然后告诉我"))
         assertNull(firstHttpUrl("no link here"))
         assertNull(firstHttpUrl(null))
     }
