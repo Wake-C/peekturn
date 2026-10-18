@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import app.peekturn.reader.model.AppSettings
 import app.peekturn.reader.model.Book
+import app.peekturn.reader.reader.BuiltinBook
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +34,12 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
         viewModelScope.launch {
             try {
                 graph.store.load()
+                try {
+                    seedBuiltinBook()
+                } catch (e: CancellationException) { throw e
+                } catch (e: Exception) {
+                    Log.w("PeekturnStartup", "Included book import failed: ${e.javaClass.simpleName}")
+                }
                 _state.update { it.copy(ready = true) }
                 if (reopen) {
                     val id = graph.store.lastBookId()
@@ -53,6 +60,15 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
             }
         }
     }
+    private suspend fun seedBuiltinBook() {
+        if (!graph.seedBuiltinBook || graph.store.builtinBookSeeded()) return
+        val alreadyPresent = graph.store.books.value.any {
+            it.title == BuiltinBook.TITLE && it.author == BuiltinBook.AUTHOR
+        }
+        if (!alreadyPresent) graph.importer.importAsset(BuiltinBook.ASSET_PATH)
+        graph.store.markBuiltinBookSeeded()
+    }
+
     fun importBook(uri: Uri) {
         if (_state.value.busy) return
         if (uri.scheme != "content") { message("Choose a readable EPUB from the document picker."); return }

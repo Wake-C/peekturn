@@ -37,6 +37,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## The Prophet (Project Gutenberg)
+
+Peekturn includes the complete, unmodified EPUB edition of *The Prophet* by Kahlil Gibran from [Project Gutenberg eBook 58585](https://www.gutenberg.org/ebooks/58585).
+
+- Source file: `https://www.gutenberg.org/ebooks/58585.epub.noimages`.
+- Bundled file: `app/src/main/assets/books/the-prophet.epub`.
+- SHA-256: `88055c748e3bca864c406654314d97ba3e3d2ac8dc1051e918eb1690317a0368`.
+- Size: 116,878 bytes.
+- Rights: Project Gutenberg states that this eBook is public domain in the USA. Kahlil Gibran died in 1931. The Project Gutenberg licence and header inside the EPUB are retained; the file is not modified.
+- Provenance: `app/src/main/assets/books/PROVENANCE.md`.
+
 ## Readium Kotlin Toolkit
 
 EPUB parsing, rendering, navigation, selection and location support use the unmodified Readium Kotlin libraries distributed through Maven Central. Readium is copyright (c) 2017 Readium and licensed under BSD-3-Clause.

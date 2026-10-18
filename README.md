@@ -4,7 +4,7 @@
 
 An Android reader for finishing real English books.
 
-[简体中文](README.zh-CN.md) · Version 1.0.0 · Android 8.0+
+[简体中文](README.zh-CN.md) · Version 1.0.1 · Android 8.0+
 
 ## Have you ever finished an English book?
 
@@ -45,7 +45,8 @@ Tap a word to see its core meaning, what it means in this sentence, and an examp
 - Includes an offline dictionary, online pronunciation for words and examples, a US or UK accent choice, and optional autoplay.
 - Reads the current sentence and the next few sentences aloud, with play, pause, previous, next, speed and stop. It keeps playing with the screen off, and sentences you have heard can be replayed offline.
 - Offers five reading fonts, adjustable size, spacing and margins, five themes, and an interface language choice: Follow system, English or 简体中文.
-- Shows your actual reading time. There are no invented statistics, sample books or demo answers.
+- Shows your actual reading time. There are no invented statistics or demo answers.
+- A fresh install includes *The Prophet* by Kahlil Gibran from Project Gutenberg. It is public domain in the USA and stays in your local library like any imported book.
 
 Explanations use an AI provider you configure yourself. Add an HTTPS endpoint, model name and API key in Settings. Peekturn does not include a key or a canned answer. A connection test is a real request and may incur charges.
 
@@ -54,7 +55,7 @@ Explanations use an AI provider you configure yourself. Add an HTTPS endpoint, m
 - No whole-book translation. The book keeps its original layout.
 - No vocabulary drills, flashcards or streak mechanics.
 - No cloud library, accounts or sync.
-- No sample library and no fabricated reading data.
+- No invented sample library and no fabricated reading data. The one included book is a real public-domain edition.
 
 ## Build
 

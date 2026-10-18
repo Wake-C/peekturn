@@ -52,6 +52,20 @@ class EpubImporter(context: Context, private val engine: EpubEngine, private val
         }
     }
 
+    /** Imports a bundled, redistributable book into the private library on first launch. */
+    suspend fun importAsset(assetPath: String): Book = withContext(Dispatchers.IO) {
+        val archive = stagedArchive()
+        try {
+            context.assets.open(assetPath).use { input ->
+                archive.outputStream().use { output -> copyLimited(input, output) }
+            }
+            adopt(archive)
+        } catch (e: Exception) {
+            discard(archive)
+            throw e
+        }
+    }
+
     private fun stagedArchive(): File {
         val directory = File(context.filesDir, "books").apply { mkdirs() }
         return File(directory, "${UUID.randomUUID()}.epub")

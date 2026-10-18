@@ -93,6 +93,16 @@ class PeekturnStore internal constructor(private val context: Context, private v
         }
     }
     fun lastBookId(): Long? = prefs.getLong("last_book", -1L).takeIf { it >= 0 }
+
+    fun builtinBookSeeded(): Boolean = prefs.getBoolean("builtin_the_prophet_seeded", false)
+
+    suspend fun markBuiltinBookSeeded() = withContext(Dispatchers.IO) {
+        writes.withLock {
+            check(prefs.edit().putBoolean("builtin_the_prophet_seeded", true).commit()) {
+                "Could not record the included book"
+            }
+        }
+    }
     /**
      * Display-only cache of characters per page per layout signature. Page counts are derivatives,
      * never reading positions, and this only lets a book page counter appear before the reader meets

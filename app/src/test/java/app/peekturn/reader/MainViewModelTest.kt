@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
+import app.peekturn.reader.reader.BuiltinBook
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -36,7 +37,7 @@ class MainViewModelTest {
         context = ApplicationProvider.getApplicationContext()
         context.getSharedPreferences("peekturn", Context.MODE_PRIVATE).edit().clear().commit()
         context.deleteDatabase("peekturn.db")
-        graph = AppGraph(context)
+        graph = AppGraph(context, seedBuiltinBook = false)
     }
 
     @After fun tearDown() {
@@ -100,6 +101,28 @@ class MainViewModelTest {
         assertNull(vm.state.value.pendingBookId)
         assertNull(vm.state.value.message)
         assertTrue(graph.store.books.value.isEmpty())
+    }
+
+    @Test fun includedPublicDomainBookIsImportedOnceAndStaysDeleted() = runBlocking {
+        val seeded = AppGraph(context, seedBuiltinBook = true)
+        try {
+            val first = MainViewModel(seeded)
+            initialize(first, reopen = false)
+            val included = seeded.store.books.value.single {
+                it.title == BuiltinBook.TITLE && it.author == BuiltinBook.AUTHOR
+            }
+            assertTrue(File(included.filePath).isFile)
+
+            seeded.store.deleteBook(included.id)
+            val next = MainViewModel(seeded)
+            initialize(next, reopen = false)
+            assertTrue(seeded.store.books.value.none {
+                it.title == BuiltinBook.TITLE && it.author == BuiltinBook.AUTHOR
+            })
+        } finally {
+            seeded.scope.cancel()
+            seeded.speech.shutdown()
+        }
     }
 
     private fun viewModel(key: String) = MainViewModel(graph).also { viewModels.put(key, it) }

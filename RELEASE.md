@@ -25,12 +25,12 @@ The worktree must be clean. The release script reads the password from Keychain,
 Outputs:
 
 ```text
-app/build/outputs/delivery/release.*/peekturn-1.0.0-1-release.apk
-app/build/outputs/delivery/release.*/peekturn-1.0.0-1-release.aab
+app/build/outputs/delivery/release.*/peekturn-1.0.1-2-release.apk
+app/build/outputs/delivery/release.*/peekturn-1.0.1-2-release.aab
 app/build/outputs/delivery/release.*/receipt.json
 ```
 
-Install the release APK on a device and check the first-run, import, reading, explanation, pronunciation and narration paths before publishing. The receipt records runtime verification as `not_run`; a build is not a device acceptance result.
+Install the release APK on a device and check the first-run included book, import, reading, explanation, pronunciation and narration paths before publishing. The receipt records runtime verification as `not_run`; a build is not a device acceptance result.
 
 ## GitHub release
 
@@ -41,7 +41,7 @@ The repository release page is the download page. Pushing a `v*` tag runs `.gith
 3. Create a tag that matches `versionName` and push it:
 
 ```sh
-git tag -a v1.0.0 -m "Peekturn 1.0.0"
+git tag -a v1.0.1 -m "Peekturn 1.0.1"
 git push origin main --follow-tags
 ```
 
@@ -67,7 +67,7 @@ A private repository publishes private releases: only the owner and collaborator
 The package name `app.peekturn.reader` is permanent after the first upload. Check that it is available in Play Console before creating the app.
 
 1. Create the app in Play Console and enable Play App Signing.
-2. Upload `peekturn-1.0.0-1-release.aab`.
+2. Upload `peekturn-1.0.1-2-release.aab`.
 3. Complete the store listing, screenshots, short and full description, app icon and feature graphic.
 4. Publish a privacy policy at a public HTTPS URL. The repository README is not a privacy policy page.
 5. Complete Data safety, content rating, target audience and ads declarations.

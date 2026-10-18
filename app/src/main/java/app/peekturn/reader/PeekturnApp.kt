@@ -22,7 +22,7 @@ class PeekturnApp : Application() {
         AppLanguage.apply(this, graph.store.settings.value.uiLanguage)
     }
 }
-class AppGraph(context: Context) {
+class AppGraph(context: Context, val seedBuiltinBook: Boolean = true) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val store = PeekturnStore(context.applicationContext)
     val engine = EpubEngine(context.applicationContext)
