@@ -67,7 +67,11 @@ data class LookupContext(
     val before: String = "",
     val after: String = "",
     val bookTitle: String = "",
-    val chapterTitle: String = ""
+    val chapterTitle: String = "",
+    /** Library row identity; two books with the same title must never share an answer. */
+    val bookId: Long = 0L,
+    /** Stable resource identity inside the book, without fragment, query or directory-only prefixes. */
+    val chapterKey: String = ""
 )
 
 /**
@@ -104,6 +108,14 @@ internal fun contextAfterSelection(raw: String): String {
     return if (head.count { it == ' ' } >= 1) head else collapsed
 }
 
+/**
+ * One generated example. The English sentence is always the spoken form; the translation exists so
+ * a Chinese interface can show it under that sentence without changing what pronunciation reads.
+ */
+data class ExplanationExample(val text: String = "", val translation: String = "") {
+    val spokenText: String get() = text
+}
+
 data class Explanation(
     val term: String = "",
     val partOfSpeech: String = "",
@@ -111,7 +123,7 @@ data class Explanation(
     val usIpa: String = "",
     val meaning: String = "",
     val context: String = "",
-    val examples: List<String> = emptyList()
+    val examples: List<ExplanationExample> = emptyList()
 )
 
 data class DictionaryEntry(val word: String, val phonetic: String, val partOfSpeech: String, val meaning: String)

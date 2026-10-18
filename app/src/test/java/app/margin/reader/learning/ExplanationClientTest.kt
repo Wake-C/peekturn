@@ -19,7 +19,8 @@ import java.util.concurrent.TimeUnit
 
 class ExplanationClientTest {
     private lateinit var server: MockWebServer
-    private val payload = """{"term":"hello","partOfSpeech":"interjection","ukIpa":"","usIpa":"","meaning":"A greeting.","context":"Used to greet someone.","examples":["Hello, how are you?"]}"""
+    private val payload = """{"term":"hello","partOfSpeech":"interjection","ukIpa":"","usIpa":"","meaning":"A greeting.","context":"Used to greet someone.","examples":[{"text":"Hello, how are you?","translation":""}]}"""
+    private val bilingualPayload = """{"term":"turn down","partOfSpeech":"phrasal verb","ukIpa":"/tɜːn daʊn/","usIpa":"/tɝːn daʊn/","meaning":"拒绝","context":"这里表示拒绝某个提议。","examples":[{"text":"She turned down the offer.","translation":"她拒绝了那个提议。"}]}"""
     @Before fun setup() { server = MockWebServer(); server.start() }
     @After fun teardown() { server.shutdown() }
     private fun config() = ModelConfig(endpoint = server.url("/v1").toString(), model = "configured-model", apiKey = "test-key")
@@ -33,7 +34,7 @@ class ExplanationClientTest {
     @Test fun streamsValidatedFieldsAndUsesConfiguredTransport() = runBlocking {
         val split = payload.indexOf("\"context\"")
         server.enqueue(stream(chunk(reasoning = "private thoughts") + chunk(payload.take(split)) + chunk(payload.drop(split)) + chunk(finish = "stop") + "data: [DONE]\n\n"))
-        val events = ExplanationClient().explain(config(), LookupContext("hello", before = (1..40).joinToString(" ") { "before$it" })).toList()
+        val events = ExplanationClient().explain(config(), LookupContext("hello", before = (1..40).joinToString(" ") { "before$it" }), ExplanationLanguage.English).toList()
         assertTrue(events.first() is ExplanationEvent.Content)
         assertEquals("hello", (events.last() as ExplanationEvent.Complete).answer.term)
         assertFalse(events.toString().contains("private thoughts"))
@@ -47,10 +48,63 @@ class ExplanationClientTest {
         assertEquals("before11", context["before"].asString.substringBefore(' '))
     }
 
+    @Test fun chineseRequestAppliesChinesePolicyWithoutChangingTheBookPassage() = runBlocking {
+        server.enqueue(stream(chunk(bilingualPayload) + chunk(finish = "stop") + "data: [DONE]\n\n"))
+        val lookup = LookupContext("bank", "the river ", " was muddy", "Book", "Chapter")
+        val events = ExplanationClient().explain(config(), lookup, ExplanationLanguage.Chinese).toList()
+        val complete = events.last() as ExplanationEvent.Complete
+        assertEquals("拒绝", complete.answer.meaning)
+        assertEquals("这里表示拒绝某个提议。", complete.answer.context)
+        assertEquals("turn down", complete.answer.term)
+        assertEquals("/tɜːn daʊn/", complete.answer.ukIpa)
+        assertEquals("/tɝːn daʊn/", complete.answer.usIpa)
+        assertEquals("She turned down the offer.", complete.answer.examples.single().text)
+        assertEquals("她拒绝了那个提议。", complete.answer.examples.single().translation)
+
+        val json = JsonParser.parseString(server.takeRequest().body.readUtf8()).asJsonObject
+        val messages = json.getAsJsonArray("messages")
+        val system = messages[0].asJsonObject["content"].asString
+        val user = messages[1].asJsonObject["content"].asString
+        assertTrue("The Chinese learning policy must be requested from the provider", system.contains("Simplified Chinese"))
+        val passage = JsonParser.parseString(user).asJsonObject
+        assertEquals(setOf("selection", "before", "after", "bookTitle", "chapterTitle"), passage.keySet())
+        assertEquals(lookup.selection, passage["selection"].asString)
+        assertFalse("Locale policy belongs to the system instruction, not quoted book data", user.contains("Simplified Chinese"))
+        assertFalse(user.contains("language"))
+
+        val schema = JsonParser.parseString(system.substringAfter("Required JSON schema: ")).asJsonObject
+        val exampleItems = schema.getAsJsonObject("properties").getAsJsonObject("examples").getAsJsonObject("items")
+        assertEquals("object", exampleItems["type"].asString)
+        assertFalse(exampleItems["additionalProperties"].asBoolean)
+        assertEquals(setOf("text", "translation"), exampleItems.getAsJsonObject("properties").keySet())
+        assertEquals(setOf("text", "translation"), exampleItems.getAsJsonArray("required").map { it.asString }.toSet())
+    }
+
+    @Test fun englishRequestKeepsTheEnglishLearningExperience() = runBlocking {
+        val englishPayload = bilingualPayload.replace(
+            "\"translation\":\"她拒绝了那个提议。\"",
+            "\"translation\":\"\""
+        )
+        server.enqueue(stream(chunk(englishPayload) + chunk(finish = "stop") + "data: [DONE]\n\n"))
+        val lookup = LookupContext("bank", "the river ", " was muddy", "Book", "Chapter")
+        val events = ExplanationClient().explain(config(), lookup, ExplanationLanguage.English).toList()
+        val complete = events.last() as ExplanationEvent.Complete
+        assertEquals("She turned down the offer.", complete.answer.examples.single().text)
+        assertEquals("", complete.answer.examples.single().translation)
+
+        val json = JsonParser.parseString(server.takeRequest().body.readUtf8()).asJsonObject
+        val messages = json.getAsJsonArray("messages")
+        val system = messages[0].asJsonObject["content"].asString
+        assertTrue(system.contains("English"))
+        assertFalse("An English UI must not request Chinese output", system.contains("Simplified Chinese"))
+        val passage = JsonParser.parseString(messages[1].asJsonObject["content"].asString).asJsonObject
+        assertEquals(lookup.selection, passage["selection"].asString)
+    }
+
     @Test fun eofAndTokenLimitNeverBecomeSuccessfulCompletion() = runBlocking {
         listOf(chunk(payload), chunk(payload) + chunk(finish = "length"), chunk(payload.dropLast(2)) + chunk(finish = "stop")).forEach { body ->
             server.enqueue(stream(body))
-            val events = ExplanationClient().explain(config(), LookupContext("hello")).toList()
+            val events = ExplanationClient().explain(config(), LookupContext("hello"), ExplanationLanguage.English).toList()
             assertTrue(events.last() is ExplanationEvent.Failure)
             assertFalse(events.any { it is ExplanationEvent.Complete })
         }
@@ -58,14 +112,14 @@ class ExplanationClientTest {
 
     @Test fun malformedLaterFieldRetainsTheSameValidatedContentAcrossChunkBoundaries() = runBlocking {
         val validPrefix = """{"term":"hello","partOfSpeech":"interjection","ukIpa":"","usIpa":"","meaning":"A greeting.","""
-        val malformedSuffix = """"context":42,"examples":["Hello, how are you?"]}"""
+        val malformedSuffix = """"context":42,"examples":[{"text":"Hello, how are you?","translation":""}]}"""
         val bodies = listOf(
             chunk(validPrefix + malformedSuffix),
             chunk(validPrefix) + chunk(malformedSuffix)
         )
         val results = bodies.map { body ->
             server.enqueue(stream(body))
-            ExplanationClient().explain(config(), LookupContext("hello")).toList()
+            ExplanationClient().explain(config(), LookupContext("hello"), ExplanationLanguage.English).toList()
         }
         val retainedAnswers = results.map { events ->
             assertTrue("Malformed output must terminate with Failure", events.last() is ExplanationEvent.Failure)
@@ -75,7 +129,7 @@ class ExplanationClientTest {
             assertEquals("hello", retained?.term)
             assertEquals("A greeting.", retained?.meaning)
             assertEquals("", retained?.context)
-            assertEquals(emptyList<String>(), retained?.examples)
+            assertEquals(emptyList<app.margin.reader.model.ExplanationExample>(), retained?.examples)
             retained
         }
         assertEquals(retainedAnswers[0], retainedAnswers[1])
@@ -90,14 +144,59 @@ class ExplanationClientTest {
         )
         responses.forEach { response ->
             server.enqueue(response)
-            val events = ExplanationClient().explain(config(), LookupContext("hello")).toList()
+            val events = ExplanationClient().explain(config(), LookupContext("hello"), ExplanationLanguage.English).toList()
             assertTrue(events.last() is ExplanationEvent.Failure)
             assertFalse(events.toString().contains("private server diagnostic"))
         }
     }
 
+    @Test fun everyFailureKeepsAStableActionableCategory() = runBlocking {
+        val cases = listOf(
+            MockResponse().setResponseCode(401).setBody("private rejection") to ExplanationFailureCategory.Authentication,
+            MockResponse().setResponseCode(403) to ExplanationFailureCategory.Authentication,
+            MockResponse().setResponseCode(429) to ExplanationFailureCategory.Quota,
+            MockResponse().setResponseCode(400) to ExplanationFailureCategory.ProviderRejected,
+            MockResponse().setResponseCode(500) to ExplanationFailureCategory.ProviderRejected,
+            MockResponse().setHeader("Content-Type", "application/json").setBody("{}") to ExplanationFailureCategory.ProviderRejected,
+            stream("data: {\"error\":{\"message\":\"private\"}}\n\n") to ExplanationFailureCategory.ProviderRejected,
+            stream("data: {\"choices\":[{\"delta\":{\"refusal\":\"private\"}}]}\n\n") to ExplanationFailureCategory.Refusal,
+            stream(chunk("not JSON") + chunk(finish = "stop")) to ExplanationFailureCategory.MalformedResponse,
+            stream(chunk("{}") + chunk(finish = "stop")) to ExplanationFailureCategory.MalformedResponse,
+            stream("data: [\"private\"]\n\n") to ExplanationFailureCategory.MalformedResponse,
+            stream(chunk(payload)) to ExplanationFailureCategory.IncompleteResponse,
+            stream(chunk(payload) + chunk(finish = "length")) to ExplanationFailureCategory.IncompleteResponse,
+            stream(chunk(payload.dropLast(2)) + chunk(finish = "stop")) to ExplanationFailureCategory.IncompleteResponse,
+            stream("") to ExplanationFailureCategory.IncompleteResponse
+        )
+        cases.forEach { (response, expected) ->
+            server.enqueue(response)
+            val events = ExplanationClient().explain(config(), LookupContext("hello"), ExplanationLanguage.English).toList()
+            val failure = events.filterIsInstance<ExplanationEvent.Failure>().singleOrNull()
+            assertNotNull("Expected one failure for $expected", failure)
+            assertEquals("Unexpected category: ${failure?.message}", expected, failure?.category)
+            assertFalse("Provider text must not reach localized UI copy", events.toString().contains("private"))
+        }
+        val offline = ExplanationClient(OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).build())
+            .explain(config().copy(endpoint = "http://127.0.0.1:1/v1"), LookupContext("hello"), ExplanationLanguage.English)
+            .toList().filterIsInstance<ExplanationEvent.Failure>().single()
+        assertEquals(ExplanationFailureCategory.Connectivity, offline.category)
+        val requests = server.requestCount
+        val configurationCases = listOf(
+            config().copy(apiKey = ""),
+            config().copy(model = ""),
+            config().copy(temperature = 2.1),
+            config().copy(endpoint = "not a url")
+        )
+        configurationCases.forEach { profile ->
+            val failure = ExplanationClient().explain(profile, LookupContext("hello"), ExplanationLanguage.English)
+                .toList().filterIsInstance<ExplanationEvent.Failure>().single()
+            assertEquals(ExplanationFailureCategory.Configuration, failure.category)
+        }
+        assertEquals("Configuration failures never reach the provider", requests, server.requestCount)
+    }
+
     @Test fun missingKeyDoesNotConnect() = runBlocking {
-        val events = ExplanationClient().explain(config().copy(apiKey = ""), LookupContext("hello")).toList()
+        val events = ExplanationClient().explain(config().copy(apiKey = ""), LookupContext("hello"), ExplanationLanguage.English).toList()
         assertTrue(events.single() is ExplanationEvent.Failure)
         assertEquals(0, server.requestCount)
     }
@@ -114,7 +213,7 @@ class ExplanationClientTest {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
         val http = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()
         val events = mutableListOf<ExplanationEvent>()
-        val job = launch(Dispatchers.Default) { ExplanationClient(http).explain(config(), LookupContext("hello")).toList(events) }
+        val job = launch(Dispatchers.Default) { ExplanationClient(http).explain(config(), LookupContext("hello"), ExplanationLanguage.English).toList(events) }
         assertNotNull(withContext(Dispatchers.IO) { server.takeRequest(5, TimeUnit.SECONDS) })
         withTimeout(3_000) { job.cancelAndJoin() }
         assertTrue(events.isEmpty())
@@ -126,7 +225,7 @@ class ExplanationClientTest {
         val contentArrived = CompletableDeferred<Unit>()
         val events = mutableListOf<ExplanationEvent>()
         val job = launch(Dispatchers.Default) {
-            ExplanationClient().explain(config(), LookupContext("hello")).collect { event ->
+            ExplanationClient().explain(config(), LookupContext("hello"), ExplanationLanguage.English).collect { event ->
                 events += event
                 if (event is ExplanationEvent.Content) contentArrived.complete(Unit)
             }
@@ -142,7 +241,7 @@ class ExplanationClientTest {
         server.enqueue(stream(chunk(payload) + chunk(finish = "stop") + "data: [DONE]\n\n"))
         assertTrue(ExplanationClient().testConnection(profile).isSuccess)
         server.enqueue(stream(chunk(payload) + chunk(finish = "stop") + "data: [DONE]\n\n"))
-        ExplanationClient().explain(profile, LookupContext("hello")).toList()
+        ExplanationClient().explain(profile, LookupContext("hello"), ExplanationLanguage.English).toList()
         repeat(2) { index ->
             val request = server.takeRequest()
             assertEquals("/v1/chat/completions", request.path)
@@ -159,7 +258,7 @@ class ExplanationClientTest {
 
     @Test fun providerRejectionStaysVisibleExactlyOnceWithoutRetryingOrRewritingTheModel() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(422).setBody("temperature 0.7 is unsupported"))
-        val events = ExplanationClient().explain(config().copy(temperature = 0.7), LookupContext("hello")).toList()
+        val events = ExplanationClient().explain(config().copy(temperature = 0.7), LookupContext("hello"), ExplanationLanguage.English).toList()
         val failure = events.single()
         assertTrue(failure is ExplanationEvent.Failure)
         assertTrue((failure as ExplanationEvent.Failure).message.contains("temperature", true))
@@ -172,7 +271,7 @@ class ExplanationClientTest {
 
     @Test fun unusableTemperatureNeverReachesTheProvider() = runBlocking {
         listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -0.1, 2.1).forEach { value ->
-            val events = ExplanationClient().explain(config().copy(temperature = value), LookupContext("hello")).toList()
+            val events = ExplanationClient().explain(config().copy(temperature = value), LookupContext("hello"), ExplanationLanguage.English).toList()
             assertTrue("$value must fail before transport", events.single() is ExplanationEvent.Failure)
         }
         assertEquals(0, server.requestCount)
@@ -180,7 +279,7 @@ class ExplanationClientTest {
 
     @Test fun malformedEnvelopeNeverLeaksJsonOrReasoningInAnError() = runBlocking {
         server.enqueue(stream("data: [\"private reasoning and passage\"]\n\n"))
-        val events = ExplanationClient().explain(config(), LookupContext("hello")).toList()
+        val events = ExplanationClient().explain(config(), LookupContext("hello"), ExplanationLanguage.English).toList()
         assertTrue(events.single() is ExplanationEvent.Failure)
         assertFalse(events.toString().contains("private reasoning and passage"))
     }

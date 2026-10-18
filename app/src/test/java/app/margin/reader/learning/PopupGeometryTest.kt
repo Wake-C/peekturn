@@ -4,33 +4,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PopupGeometryTest {
-    @Test fun shortSidesYieldUsefulBoundedOverlayInsteadOfNeedlessScrolling() {
-        val selection = PopupSelectionBounds(90, 350, 180, 390)
-        val popup = learningPopupGeometry(360, 720, 336, 590, selection, 12, 420)
-        assertEquals(590, popup.height)
-        assertEquals(65, popup.y)
-        assertTrue(popup.y < selection.top && popup.y + popup.height > selection.bottom)
+    @Test fun streamingAnswerGrowsUpwardWithoutMovingItsBottomEdge() {
+        val loading = learningPopupGeometry(360, 720, 440, 190, 12, 24)
+        val completed = learningPopupGeometry(360, 720, 440, 590, 12, 24)
+        assertEquals(loading.y + loading.height, completed.y + completed.height)
+        assertEquals(720 - 24 - 12, completed.y + completed.height)
+        assertTrue(completed.y < loading.y)
+        assertEquals(590, completed.height)
     }
 
-    @Test fun generousSideKeepsAnswerBesideSelection() {
-        val selection = PopupSelectionBounds(90, 90, 180, 130)
-        val popup = learningPopupGeometry(360, 900, 336, 700, selection, 12, 420)
-        assertEquals(700, popup.height)
-        assertTrue(popup.y >= selection.bottom + 12)
-    }
-
-    @Test fun loadingUsesNaturalHeightRatherThanAnEmptyFixedPanel() {
-        val selection = PopupSelectionBounds(90, 350, 180, 390)
-        val popup = learningPopupGeometry(360, 720, 336, 190, selection, 12, 420)
-        assertEquals(190, popup.height)
-        assertEquals((720 - 190) / 2, popup.y)
-    }
-
-    @Test fun noSelectionAndShortWindowsRemainWithinViewport() {
-        listOf(null, PopupSelectionBounds(12, 140, 80, 170)).forEach { selection ->
-            val popup = learningPopupGeometry(320, 300, 420, 520, selection, 12)
-            assertTrue(popup.x >= 12 && popup.x + popup.width <= 308)
-            assertTrue(popup.y >= 12 && popup.y + popup.height <= 288)
+    @Test fun shortWindowsKeepTheWholeAnswerInsideTheSafeArea() {
+        for ((width, height) in listOf(320 to 300, 720 to 320, 360 to 720)) {
+            val popup = learningPopupGeometry(width, height, 640, 900, 12, 32)
+            assertTrue(popup.x >= 12)
+            assertTrue(popup.x + popup.width <= width - 12)
+            assertTrue(popup.y >= 12)
+            assertEquals(height - 32 - 12, popup.y + popup.height)
         }
+    }
+
+    @Test fun wideWindowsCenterTheBoundedReadingColumn() {
+        val popup = learningPopupGeometry(1200, 900, 600, 700, 16, 30)
+        assertEquals(600, popup.width)
+        assertEquals(1200, 2 * popup.x + popup.width)
+        assertEquals(900 - 30 - 16, popup.y + popup.height)
     }
 }

@@ -2,7 +2,6 @@ package app.margin.reader.learning
 
 import android.app.Activity
 import android.content.ContextWrapper
-import android.graphics.RectF
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -50,16 +49,19 @@ import app.margin.reader.ui.AudioAttribution
 import kotlinx.coroutines.CancellationException
 import kotlin.math.roundToInt
 
-/** Quiet native ink-and-paper utility: meaning first, compact controls, no scrim or entrance motion. */
+/** Bottom-docked native ink-and-paper answer; content and lookup ownership are unchanged. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LearningPopup(
     context: LookupContext,
-    anchor: RectF?,
     settings: AppSettings,
     session: LearningSession,
     dictionary: OfflineDictionary,
     speech: PronunciationPlayer,
     initialDictionary: Boolean = false,
+    // Resolved from the Activity's actual configuration at request time; "follow system" therefore
+    // works without a second stored language, and an explicit app language already won there.
+    language: ExplanationLanguage = ExplanationLanguage.forLocale(LocalConfiguration.current.locales[0]),
     onClose: () -> Unit,
     onCancel: () -> Unit,
     onAdjust: () -> Unit
@@ -93,12 +95,16 @@ fun LearningPopup(
     LaunchedEffect(context) {
         if (latestSettings.autoPronounce) speech.speakWord(context.selection, latestSettings.accent)
     }
-    LaunchedEffect(context, explanationRequested, settings.activeProfileId, settings.model) {
-        if (explanationRequested) session.open(context, settings.activeProfileId, settings.model)
+    LaunchedEffect(context, explanationRequested, settings.activeProfileId, settings.model, language) {
+        if (explanationRequested) session.open(context, settings.activeProfileId, settings.model, language)
     }
     // Resolved in composition: reading a resource from inside the coroutine would need a Context
     // and would not follow a language or configuration change.
     val dictionaryErrorMessage = stringResource(R.string.reader_lookup_dictionary_error)
+    // Failures carry an app-owned category. Both interface languages localize the same distinction
+    // instead of showing or translating provider text.
+    val explanationFailure = explanation.failure
+    val explanationErrorMessage = if (explanationFailure != null) stringResource(explanationFailureMessage(explanationFailure)) else null
     LaunchedEffect(context, dictionaryTab, dictionaryRetry) {
         if (!dictionaryTab || entry != null && dictionaryRetry == 0) return@LaunchedEffect
         dictionaryLoading = true
@@ -111,13 +117,13 @@ fun LearningPopup(
     }
     val density = LocalDensity.current
     val inset = with(density) { 12.dp.roundToPx() }
-    val minimumHeight = with(density) { 420.dp.roundToPx() }
-    val bounds = anchor?.let { PopupSelectionBounds(it.left.roundToInt(), it.top.roundToInt(), it.right.roundToInt(), it.bottom.roundToInt()) }
-    val position = remember(bounds, inset, minimumHeight) {
+    val bottomInset = WindowInsets.navigationBarsIgnoringVisibility
+        .union(WindowInsets.displayCutout).getBottom(density)
+    val position = remember(inset, bottomInset) {
         object : PopupPositionProvider {
             override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
                 val geometry = learningPopupGeometry(windowSize.width, windowSize.height,
-                    popupContentSize.width, popupContentSize.height, bounds, inset, minimumHeight)
+                    popupContentSize.width, popupContentSize.height, inset, bottomInset)
                 return IntOffset(geometry.x, geometry.y)
             }
         }
@@ -128,7 +134,7 @@ fun LearningPopup(
         val windowWidth = windowSize.width.takeIf { it > 0 } ?: configuration.screenWidthDp.dp.roundToPx()
         val windowHeight = windowSize.height.takeIf { it > 0 } ?: configuration.screenHeightDp.dp.roundToPx()
         learningPopupGeometry(windowWidth, windowHeight, 440.dp.roundToPx(), (windowHeight * .82f).roundToInt(),
-            bounds, inset, minimumHeight)
+            inset, bottomInset)
     }
     val width = with(density) { geometry.width.toDp() }
     val height = with(density) { geometry.height.toDp() }
@@ -150,7 +156,7 @@ fun LearningPopup(
             val phonetic = if (dictionaryTab) entry?.phonetic.orEmpty() else if (accent == "UK") answer.ukIpa else answer.usIpa
             val partOfSpeech = if (dictionaryTab) entry?.partOfSpeech.orEmpty() else answer.partOfSpeech
             val loading = if (dictionaryTab) dictionaryLoading else explanation.loading
-            val error = if (dictionaryTab) dictionaryError else explanation.error
+            val error = if (dictionaryTab) dictionaryError else explanationErrorMessage
             Column {
                 Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 4.dp),
                     verticalAlignment = Alignment.CenterVertically) {
@@ -194,9 +200,17 @@ fun LearningPopup(
                                     // stays on its own first line: a wrapped example can no longer
                                     // push its glyph into the middle of the text block.
                                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                                        Text(example, modifier = Modifier.weight(1f), fontSize = 14.sp, lineHeight = 20.sp)
-                                        SpeakButton(example, speech, playback.text, playback.playing, firstLine = true) {
-                                            speech.speakExample(example, accent)
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            example.displayLines(language).forEachIndexed { index, line ->
+                                                Text(line,
+                                                    fontSize = if (index == 0) 14.sp else 13.sp,
+                                                    lineHeight = if (index == 0) 20.sp else 18.sp,
+                                                    color = if (index == 0) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                        // Speech always reads the English sentence, never its translation.
+                                        SpeakButton(example.spokenText, speech, playback.text, playback.playing, firstLine = true) {
+                                            speech.speakExample(example.spokenText, accent)
                                         }
                                     }
                                 }
@@ -215,7 +229,7 @@ fun LearningPopup(
                             Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
                             TextButton(onClick = {
                                 if (dictionaryTab) dictionaryRetry++
-                                else session.retry(context, latestSettings.activeProfileId, latestSettings.model)
+                                else session.retry(context, latestSettings.activeProfileId, latestSettings.model, language)
                             }, enabled = !loading) { Text(stringResource(R.string.reader_lookup_retry)) }
                         }
                         playback.notice?.let {
@@ -244,6 +258,22 @@ fun LearningPopup(
             }
         }
     }
+}
+
+/**
+ * Maps the app-owned failure category to localized, actionable copy. Providers can return text in
+ * any language, so no provider message is placed into either interface.
+ */
+internal fun explanationFailureMessage(category: ExplanationFailureCategory): Int = when (category) {
+    ExplanationFailureCategory.Configuration -> R.string.reader_lookup_explanation_failure_configuration
+    ExplanationFailureCategory.Authentication -> R.string.reader_lookup_explanation_failure_authentication
+    ExplanationFailureCategory.Quota -> R.string.reader_lookup_explanation_failure_quota
+    ExplanationFailureCategory.Connectivity -> R.string.reader_lookup_explanation_failure_connectivity
+    ExplanationFailureCategory.MalformedResponse -> R.string.reader_lookup_explanation_failure_malformed
+    ExplanationFailureCategory.IncompleteResponse -> R.string.reader_lookup_explanation_failure_incomplete
+    ExplanationFailureCategory.Refusal -> R.string.reader_lookup_explanation_failure_refusal
+    ExplanationFailureCategory.ProviderRejected -> R.string.reader_lookup_explanation_failure_rejected
+    ExplanationFailureCategory.Unknown -> R.string.reader_lookup_explanation_failure_unknown
 }
 
 @Composable
