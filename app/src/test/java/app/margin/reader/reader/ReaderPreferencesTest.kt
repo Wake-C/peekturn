@@ -50,4 +50,33 @@ class ReaderPreferencesTest {
         val html = "<html><head><style>p { color: red }</style></head><body><p>Hello  world</p><!-- note --></body></html>"
         assertEquals(10, textCharacters(html.toByteArray()))
     }
+
+    @Test fun `bundled font ids and legacy generic choices reach Readium as real families`() {
+        assertEquals("Literata", ReaderPreferences(fontFamily = "serif").toEpub("dark").fontFamily!!.name)
+        assertEquals("Source Sans 3", ReaderPreferences(fontFamily = "sans-serif").toEpub("dark").fontFamily!!.name)
+        assertEquals("Source Serif 4", ReaderPreferences(fontFamily = "source-serif-4").toEpub("dark").fontFamily!!.name)
+        assertEquals("Noto Serif", ReaderPreferences(fontFamily = "noto-serif").toEpub("dark").fontFamily!!.name)
+        assertEquals("Atkinson Hyperlegible", ReaderPreferences(fontFamily = "atkinson-hyperlegible").toEpub("dark").fontFamily!!.name)
+        assertEquals("Source Sans 3", ReaderPreferences(fontFamily = "source-sans-3").toEpub("dark").fontFamily!!.name)
+    }
+
+
+    @Test fun `layout signature tracks every typography input and collapses identical legacy fonts`() {
+        val base = ReaderPreferences(fontFamily = "literata")
+        val signature = readerLayoutSignature(base, width = 800, height = 1200)
+        assertEquals(signature, readerLayoutSignature(base.copy(), 800, 1200))
+        // The pre-bundled "serif" value and its replacement draw the same page, so they must not
+        // create parallel page-density entries.
+        assertEquals(signature, readerLayoutSignature(base.copy(fontFamily = "serif"), 800, 1200))
+        assertNotEquals(signature, readerLayoutSignature(base.copy(letterSpacing = 0.1), 800, 1200))
+        assertNotEquals(signature, readerLayoutSignature(base.copy(fontFamily = "noto-serif"), 800, 1200))
+        assertNotEquals(signature, readerLayoutSignature(base.copy(fontSize = 140.0), 800, 1200))
+        assertNotEquals(signature, readerLayoutSignature(base.copy(lineHeight = 1.9), 800, 1200))
+        assertNotEquals(signature, readerLayoutSignature(base.copy(paragraphSpacing = 1.2), 800, 1200))
+        assertNotEquals(signature, readerLayoutSignature(base.copy(pageMargins = 1.4), 800, 1200))
+        assertNotEquals(signature, readerLayoutSignature(base.copy(topPaddingDp = 40.0), 800, 1200))
+        assertNotEquals(signature, readerLayoutSignature(base.copy(bottomPaddingDp = 60.0), 800, 1200))
+        assertNotEquals(signature, readerLayoutSignature(base, 801, 1200))
+        assertNotEquals(signature, readerLayoutSignature(base, 800, 1201))
+    }
 }

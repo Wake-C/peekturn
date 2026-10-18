@@ -29,7 +29,7 @@ private const val PUBLICATION_CSP = "default-src 'none'; " +
     "script-src https://readium/assets/readium/scripts/readium-reflowable.js https://readium/assets/readium/scripts/readium-fixed.js; " +
     "style-src 'unsafe-inline' https://readium/publication/ https://readium/assets/readium/; " +
     "img-src https://readium/publication/ data:; " +
-    "font-src https://readium/publication/ https://readium/assets/readium/fonts/ data:; " +
+    "font-src https://readium/publication/ https://readium/assets/readium/fonts/ https://readium/assets/fonts/ data:; " +
     "media-src https://readium/publication/; " +
     "connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; " +
     "object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'none'"

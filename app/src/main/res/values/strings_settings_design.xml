@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_interface_section">Interface</string>
+    <string name="settings_language_follow">Follow system</string>
+    <string name="settings_reading_location">Reading controls live on the page: tap the centre, then Options.</string>
+    <string name="shell_opening_book">Opening your book…</string>
+    <string name="shell_original_preserved">Original content stays intact.</string>
+    <string name="shell_cover_description">Cover of %1$s</string>
+</resources>

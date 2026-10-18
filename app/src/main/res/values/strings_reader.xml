@@ -18,32 +18,24 @@
     <string name="reader_lookup_pronounce">Pronounce</string>
     <string name="reader_lookup_stop_pronouncing">Stop pronunciation</string>
     <string name="reader_lookup_dictionary_error">The offline dictionary could not be opened. Try again.</string>
+    <string name="reader_lookup_explanation_failure_configuration">Check the model configuration in Settings: add an API key, choose a model, and verify the provider URL and temperature.</string>
+    <string name="reader_lookup_explanation_failure_authentication">The provider rejected the API key or access permissions. Check this model profile in Settings.</string>
+    <string name="reader_lookup_explanation_failure_quota">The provider\'s rate or quota limit was reached. Retry later or switch profiles.</string>
+    <string name="reader_lookup_explanation_failure_connectivity">The provider could not be reached or the connection ended. Check your network and provider URL, then retry.</string>
+    <string name="reader_lookup_explanation_failure_malformed">The provider returned an answer this app could not read. Retry, or choose a provider and model that support structured or JSON output.</string>
+    <string name="reader_lookup_explanation_failure_incomplete">The provider stopped before the answer was complete. Retry, or choose a model with a larger output limit.</string>
+    <string name="reader_lookup_explanation_failure_refusal">The provider refused to explain this selection. Try another selection or model profile.</string>
+    <string name="reader_lookup_explanation_failure_rejected">The provider rejected the request, model, or JSON output mode. Check compatibility in Settings, or retry later.</string>
+    <string name="reader_lookup_explanation_failure_unknown">The explanation could not be loaded. Try again.</string>
+
+    <!-- Native selection actions -->
+            <string name="reader_selection_copy">Copy</string>
 
     <!-- Reader dialogs -->
-    <string name="reader_contents_title">Chapters</string>
+    <string name="reader_contents_title">Contents</string>
     <string name="reader_contents_empty">This book has no table of contents.</string>
     <string name="reader_chapter_untitled">Untitled chapter</string>
     <string name="reader_close">Close</string>
-    <string name="reader_appearance_title">Reading appearance</string>
-    <string name="reader_appearance_typeface">Typeface</string>
-    <string name="reader_appearance_typeface_serif">Serif</string>
-    <string name="reader_appearance_typeface_sans">Sans</string>
-    <string name="reader_appearance_typeface_selected">✓ %1$s</string>
-    <string name="reader_appearance_font_size">Font size</string>
-    <string name="reader_appearance_font_size_value">%1$d%%</string>
-    <string name="reader_appearance_line_height">Line height</string>
-    <string name="reader_appearance_line_height_value">%1$.2f×</string>
-    <string name="reader_appearance_paragraph_spacing">Paragraph spacing</string>
-    <string name="reader_appearance_paragraph_spacing_value">%1$.2f em</string>
-    <string name="reader_appearance_side_margins">Side margins</string>
-    <string name="reader_appearance_side_margins_value">%1$.2f×</string>
-    <string name="reader_appearance_top_distance">Top text distance</string>
-    <string name="reader_appearance_bottom_distance">Bottom text distance</string>
-    <string name="reader_appearance_distance_value">%1$d dp</string>
-    <string name="reader_appearance_continuous">Continuous scrolling</string>
-    <string name="reader_appearance_immersive">Immersive reading</string>
-    <string name="reader_apply">Apply</string>
-    <string name="reader_cancel">Cancel</string>
 
     <!-- Reader toasts -->
     <string name="reader_toast_position_not_saved">Reading position could not be saved.</string>

@@ -18,7 +18,9 @@ import org.readium.r2.navigator.preferences.Theme
  */
 internal fun ReaderPreferences.toEpub(appTheme: String) = EpubPreferences(
     fontSize = fontSize / 100.0,
-    fontFamily = FontFamily(fontFamily),
+    fontFamily = FontFamily(readerFontFor(fontFamily).familyName),
+    // Readium 3.1 maps its spacing preference to rem by dividing by two.
+    letterSpacing = letterSpacing.takeIf { it.isFinite() && it > 0.0 }?.coerceIn(0.0, 1.0)?.times(2.0),
     lineHeight = lineHeight,
     pageMargins = pageMargins,
     paragraphSpacing = paragraphSpacing,
@@ -35,6 +37,17 @@ internal fun ReaderPreferences.toEpub(appTheme: String) = EpubPreferences(
 )
 
 internal data class ReaderTextInsets(val topDp: Double, val bottomDp: Double)
+
+/**
+ * Everything that changes how much text a page holds, including letter spacing. Page-density
+ * measurements are keyed by this, so a spacing or typeface change cannot reuse a stale page count.
+ * Legacy ids resolve to the drawn family, so "serif" and "literata" share one measurement.
+ */
+internal fun readerLayoutSignature(preferences: ReaderPreferences, width: Int, height: Int): String = listOf(
+    readerFontFor(preferences.fontFamily).id, preferences.fontSize, preferences.letterSpacing,
+    preferences.lineHeight, preferences.paragraphSpacing, preferences.pageMargins,
+    preferences.topPaddingDp, preferences.bottomPaddingDp, width, height
+).joinToString("|")
 
 // These are actual viewport distances, not multipliers or additions to Readium's default padding.
 internal fun readerTextInsets(preferences: ReaderPreferences) = ReaderTextInsets(

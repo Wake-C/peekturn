@@ -1,0 +1,7 @@
+<resources>
+    <string name="web_import_preview_only">只读到了页面预览。请打开全文或登录后，再重试导入。</string>
+    <string name="web_import_sign_in">请在此浏览器中登录以阅读全文，然后重试导入。</string>
+    <string name="web_import_no_article">此页面没有找到可导入的文章。</string>
+    <string name="web_import_error_page">此页面不可用。请检查链接后重试。</string>
+    <string name="web_import_not_ready">页面仍在加载。请稍候再重试导入。</string>
+</resources>

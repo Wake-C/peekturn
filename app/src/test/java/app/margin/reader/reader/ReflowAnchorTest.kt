@@ -30,6 +30,31 @@ class ReflowAnchorTest {
         assertEquals(0.42, anchor.locations.totalProgression!!, 0.0)
     }
 
+    @Test fun `image element visible before its caption anchors the illustration`() {
+        val selector = "html > body:nth-of-type(1) > figure:nth-of-type(1) > img:nth-of-type(1)"
+        val visible = JSONObject("""{"resourceHref":"https://readium/publication/chapter.xhtml","kind":"element","cssSelector":"$selector"}""")
+        val anchor = requireNotNull(reflowLocator(current, visible))
+        assertEquals(selector, anchor.locations.otherLocations["cssSelector"])
+        // Readium's own firstVisibleElementLocator uses this shape for image elements; an empty
+        // non-null highlight makes loadLocator take the selector path.
+        assertEquals("", anchor.text.highlight)
+        assertNull(anchor.text.before)
+        assertNull(anchor.text.after)
+        assertEquals(current.href, anchor.href)
+        assertEquals(0.65, anchor.locations.progression!!, 0.0)
+        assertEquals(0.42, anchor.locations.totalProgression!!, 0.0)
+    }
+
+    @Test fun `image anchor from another resource cannot bind to the current chapter`() {
+        val visible = JSONObject("""{"resourceHref":"https://readium/publication/next.xhtml","kind":"element","cssSelector":"html > body:nth-of-type(1) > img:nth-of-type(1)"}""")
+        assertNull(reflowLocator(current, visible))
+    }
+
+    @Test fun `element probe without a selector keeps the current locator`() {
+        val visible = JSONObject("""{"resourceHref":"https://readium/publication/chapter.xhtml","kind":"element"}""")
+        assertSame(current, reflowLocator(current, visible))
+    }
+
     @Test fun `missing visible range preserves existing locator rather than guessing a block start`() {
         assertSame(current, reflowLocator(current, null))
         assertSame(current, reflowLocator(current, JSONObject("""{"text":{"highlight":""}}""")))

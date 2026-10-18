@@ -45,6 +45,9 @@ internal class ChapterTitles private constructor(
             ?: carriedTitles[resources.alignedResource(key) ?: key].orEmpty()
     }
 
+    /** Stable chapter identity for reuse: the reading-order resource, never its display title. */
+    fun keyFor(locator: Locator): String = locator.href.toString().resourceKey()
+
     private fun tableOfContentsTitle(href: String, key: String): String? {
         tocExact[href]?.let { return it }
         tocExact[key]?.let { return it }

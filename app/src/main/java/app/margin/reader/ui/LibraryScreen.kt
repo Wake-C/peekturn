@@ -34,7 +34,13 @@ private enum class ShelfFilter(@StringRes val label: Int) {
 }
 
 @Composable
-fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Unit, onDelete: (Book) -> Unit) {
+fun LibraryScreen(
+    books: List<Book>,
+    onOpen: (Book) -> Unit,
+    onImportFile: () -> Unit,
+    onImportUrl: () -> Unit,
+    onDelete: (Book) -> Unit
+) {
     var query by rememberSaveable { mutableStateOf("") }
     var filterName by rememberSaveable { mutableStateOf(ShelfFilter.All.name) }
     var deletingId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -63,8 +69,10 @@ fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Uni
     ) {
         item {
             MarginScreenHeader(stringResource(R.string.shell_library_title)) {
-                IconButton(onClick = onImport, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.shell_add_book))
+                ImportSourceMenu(onImportFile, onImportUrl) { openMenu ->
+                    IconButton(onClick = openMenu, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.shell_add_book))
+                    }
                 }
             }
         }
@@ -73,10 +81,12 @@ fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Uni
                 Column(Modifier.fillMaxWidth().padding(vertical = 64.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(20.dp)) {
                     Text(stringResource(R.string.shell_empty_library), style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-                    FilledTonalButton(onClick = onImport, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Icon(Icons.Outlined.Add, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.shell_add_book))
+                    ImportSourceMenu(onImportFile, onImportUrl) { openMenu ->
+                        FilledTonalButton(onClick = openMenu, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Icon(Icons.Outlined.Add, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.shell_add_book))
+                        }
                     }
                 }
             }
@@ -145,6 +155,37 @@ fun LibraryScreen(books: List<Book>, onOpen: (Book) -> Unit, onImport: () -> Uni
                 Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) },
             confirmButton = { TextButton(onClick = { deletingId = null; onDelete(book) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.shell_remove)) } },
             dismissButton = { TextButton(onClick = { deletingId = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.shell_keep_book)) } })
+    }
+}
+
+/**
+ * The source chooser is a menu belonging to whichever add control opened it, so it opens under that
+ * control instead of covering the screen. Both choices close it before they act: From a file hands
+ * straight to the system picker, From a link to the URL entry dialog.
+ */
+@Composable
+private fun ImportSourceMenu(
+    onImportFile: () -> Unit,
+    onImportUrl: () -> Unit,
+    anchor: @Composable (openMenu: () -> Unit) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        anchor { expanded = true }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.widthIn(min = 208.dp)
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.shell_import_from_file), maxLines = 1) },
+                onClick = { expanded = false; onImportFile() }
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.shell_import_from_url), maxLines = 1) },
+                onClick = { expanded = false; onImportUrl() }
+            )
+        }
     }
 }
 

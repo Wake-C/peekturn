@@ -1,21 +1,13 @@
 package app.margin.reader.ui
 
-import android.app.LocaleManager
-import android.os.Build
-import android.content.res.Resources
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.foundation.verticalScroll
@@ -24,16 +16,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -59,11 +45,18 @@ fun SettingsScreen(
     settings: AppSettings,
     onSave: ((AppSettings) -> AppSettings) -> Unit,
     onTestConnection: suspend (ModelConfig) -> Result<String>,
-    speech: PronunciationPlayer
+    speech: PronunciationPlayer,
+    onExplanationCacheBytes: suspend () -> Long,
+    onClearExplanationCache: suspend () -> Unit,
+    onNarrationCacheBytes: suspend () -> Long,
+    onClearNarrationCache: suspend () -> Unit
 ) {
     var editingProfile by remember { mutableStateOf<LlmProfile?>(null) }
     var addingProfile by remember { mutableStateOf(false) }
     var deletingProfile by remember { mutableStateOf<LlmProfile?>(null) }
+    var pronunciationOpen by rememberSaveable { mutableStateOf(false) }
+    var explanationCacheOpen by rememberSaveable { mutableStateOf(false) }
+    var narrationCacheOpen by rememberSaveable { mutableStateOf(false) }
     val unnamedProfile = stringResource(R.string.settings_unnamed_profile)
     val playback by speech.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -72,16 +65,19 @@ fun SettingsScreen(
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer); speech.stop() }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+        .widthIn(max = 640.dp).padding(horizontal = 24.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineLarge)
-        Text(stringResource(R.string.settings_appearance), style = MaterialTheme.typography.titleLarge)
-        ThemeGroup(settings.appTheme) { value -> onSave { latest -> latest.copy(appTheme = value) } }
-        Text(stringResource(R.string.settings_language), style = MaterialTheme.typography.titleLarge)
-        LanguageGroup(settings.uiLanguage) { value -> onSave { latest -> latest.copy(uiLanguage = value) } }
-        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+        Text(stringResource(R.string.settings_interface_section), style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        AppearancePreference(settings.appTheme) { value -> onSave { latest -> latest.copy(appTheme = value) } }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        LanguagePreference(settings.uiLanguage) { value -> onSave { latest -> latest.copy(uiLanguage = value) } }
+        Spacer(Modifier.height(16.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.settings_ai_profiles), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.settings_ai_profiles), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             TextButton(onClick = {
                 addingProfile = true
                 editingProfile = LlmProfile(UUID.randomUUID().toString(), ModelConfig(name = ""))
@@ -93,36 +89,65 @@ fun SettingsScreen(
         }
         Column(Modifier.selectableGroup()) {
             settings.profiles.forEach { profile ->
-                val active = profile.id == settings.activeProfileId
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f).heightIn(min = 64.dp)
-                        .selectable(selected = active, role = Role.RadioButton, onClick = {
-                            onSave { latest ->
-                                if (latest.profiles.any { it.id == profile.id }) latest.copy(activeProfileId = profile.id) else latest
-                            }
-                        }), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = active, onClick = null)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(profile.config.name.ifBlank { unnamedProfile }, style = MaterialTheme.typography.titleMedium)
-                            Text(if (profile.config.apiKey.isBlank()) stringResource(R.string.settings_not_configured) else profile.config.model,
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                ProfilePreference(
+                    title = profile.config.name.ifBlank { unnamedProfile },
+                    subtitle = if (profile.config.apiKey.isBlank()) stringResource(R.string.settings_not_configured) else profile.config.model,
+                    selected = profile.id == settings.activeProfileId,
+                    onSelect = {
+                        onSave { latest ->
+                            if (latest.profiles.any { it.id == profile.id }) latest.copy(activeProfileId = profile.id) else latest
                         }
-                    }
-                    IconButton(onClick = { addingProfile = false; editingProfile = profile }, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Outlined.Edit, contentDescription = stringResource(R.string.settings_edit_profile, profile.config.name))
-                    }
-                    IconButton(onClick = { deletingProfile = profile }, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Outlined.DeleteOutline, contentDescription = stringResource(R.string.settings_delete_profile, profile.config.name))
+                    },
+                    onEdit = { addingProfile = false; editingProfile = profile },
+                    onDelete = { deletingProfile = profile }
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsDisclosure(
+            stringResource(R.string.settings_pronunciation),
+            stringResource(if (settings.accent == "US") R.string.settings_us_english else R.string.settings_uk_english)
+        ) { pronunciationOpen = true }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsDisclosure(
+            stringResource(R.string.settings_explanation_cache),
+            stringResource(R.string.settings_explanation_cache_summary)
+        ) { explanationCacheOpen = true }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsDisclosure(
+            stringResource(R.string.settings_narration_cache),
+            stringResource(R.string.settings_narration_cache_summary)
+        ) { narrationCacheOpen = true }
+        Text(stringResource(R.string.settings_reading_location), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (pronunciationOpen) {
+        Dialog(onDismissRequest = { pronunciationOpen = false }) {
+            Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    PronunciationSection(settings, playback, speech, onSave)
+                    TextButton(onClick = { pronunciationOpen = false }, modifier = Modifier.align(Alignment.End)) {
+                        Text(stringResource(R.string.shell_close))
                     }
                 }
             }
         }
-        HorizontalDivider()
-        PreferenceSwitch(stringResource(R.string.settings_quick_explain), stringResource(R.string.settings_quick_explain_detail),
-            settings.quickExplain) { enabled -> onSave { latest -> latest.copy(quickExplain = enabled) } }
-        HorizontalDivider()
-        PronunciationSection(settings, playback, speech, onSave)
+    }
+    if (explanationCacheOpen) {
+        ExplanationCacheDialog(
+            onLoadBytes = onExplanationCacheBytes,
+            onClear = onClearExplanationCache,
+            onDismiss = { explanationCacheOpen = false }
+        )
+    }
+    if (narrationCacheOpen) {
+        NarrationCacheDialog(
+            onLoadBytes = onNarrationCacheBytes,
+            onClear = onClearNarrationCache,
+            onDismiss = { narrationCacheOpen = false }
+        )
     }
     editingProfile?.let { profile ->
         ModelConfigurationDialog(initial = profile.config, onDismiss = { editingProfile = null },
@@ -150,128 +175,131 @@ fun SettingsScreen(
     }
 }
 
-/**
- * Five themes sit in a 3 + 2 grid: the second row uses the same fixed tile width as the first and
- * is centred, so every tile has one width and one height rather than two half-width tiles stretching
- * wider than the row above. Past 1.8x text the columns are too narrow for their labels on a phone,
- * so the same tiles stack at full width instead of breaking words to fit.
- */
-@Composable
-private fun ThemeGroup(selected: String, onSelect: (String) -> Unit) {
-    val stacked = LocalDensity.current.fontScale >= 1.8f
-    val tiles = listOf(
-        "dark" to stringResource(R.string.settings_theme_dark),
-        "light" to stringResource(R.string.settings_theme_light),
-        "warm" to stringResource(R.string.settings_theme_warm),
-        "oled" to stringResource(R.string.settings_theme_oled),
-        "sage" to stringResource(R.string.settings_theme_sage)
-    )
-    if (stacked) {
-        Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            tiles.forEach { (value, label) -> Tile(value, label, selected, Modifier.fillMaxWidth(), onSelect) }
-        }
-    } else {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val gap = 8.dp
-            val tileWidth = (maxWidth - gap * 2) / 3
-            Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    tiles.take(3).forEach { (value, label) -> Tile(value, label, selected, Modifier.width(tileWidth), onSelect) }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)) {
-                    tiles.drop(3).forEach { (value, label) -> Tile(value, label, selected, Modifier.width(tileWidth), onSelect) }
-                }
-            }
-        }
-    }
-}
 
 @Composable
-private fun Tile(value: String, label: String, selected: String, modifier: Modifier, onSelect: (String) -> Unit) {
-    val preview = marginColorScheme(value)
-    ThemeChoice(label, selected == value, preview.background, preview.onBackground, preview.primary, modifier) {
-        onSelect(value)
-    }
-}
-
-/**
- * Language uses the accent selector's chip idiom: one choice per chip, the stored choice selected.
- * "Follow system" spells out the language it currently resolves to (Chinese only for a zh system,
- * otherwise the English fallback), so the option is never an unexplained promise.
- */
-@Composable
-private fun LanguageGroup(selected: String, onSelect: (String) -> Unit) {
-    // The system locale, not the app's: a per-app language overrides both Resources.getSystem() and
-    // the activity configuration, so the device's own locale list is read instead. "Follow system"
-    // must name what it would actually resolve to.
-    val context = LocalContext.current
-    val systemLanguage = remember(context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.getSystemService(LocaleManager::class.java)?.systemLocales?.get(0)?.language
-        } else {
-            // Before per-app locales exist, the system resources are the device's own.
-            Resources.getSystem().configuration.locales[0]?.language
-        }
-    }
-    val systemName = stringResource(if (systemLanguage == "zh") R.string.settings_language_zh else R.string.settings_language_en)
-    val options = listOf(
-        "system" to stringResource(R.string.settings_language_system, systemName),
-        "en" to stringResource(R.string.settings_language_en),
-        "zh" to stringResource(R.string.settings_language_zh)
-    )
-    // The full "Follow system (…)" label needs the whole row once the type grows; below that the
-    // three chips stay one compact row.
-    val stacked = LocalDensity.current.fontScale >= 1.5f
-    if (stacked) {
-        Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            options.forEach { (value, label) -> LanguageChoice(label, selected == value, Modifier.fillMaxWidth()) { onSelect(value) } }
-        }
-    } else {
-        Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            options.forEach { (value, label) ->
-                // The system chip carries the resolved language in its label, so it gets the extra
-                // column width; the two explicit languages need one short word each.
-                val weight = if (value == "system") 1.4f else 0.8f
-                LanguageChoice(label, selected == value, Modifier.weight(weight)) { onSelect(value) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LanguageChoice(label: String, selected: Boolean, modifier: Modifier = Modifier, onSelect: () -> Unit) {
-    FilterChip(selected = selected, onClick = onSelect, label = {
-        // Two lines on every chip keep the row one height even when only "Follow system" wraps.
-        Text(label, textAlign = TextAlign.Center, maxLines = 2, minLines = 2, style = MaterialTheme.typography.labelLarge)
-    }, modifier = modifier.heightIn(min = 48.dp))
-}
-
-@Composable
-private fun ThemeChoice(
-    label: String, selected: Boolean, paper: Color, ink: Color, accent: Color,
-    modifier: Modifier = Modifier, onSelect: () -> Unit
+private fun ExplanationCacheDialog(
+    onLoadBytes: suspend () -> Long,
+    onClear: suspend () -> Unit,
+    onDismiss: () -> Unit
 ) {
-    val colors = MaterialTheme.colorScheme
-    Surface(
-        modifier = modifier.selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
-        shape = MaterialTheme.shapes.medium,
-        color = if (selected) colors.primaryContainer else colors.surface,
-        contentColor = if (selected) colors.onPrimaryContainer else colors.onSurface,
-        border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) colors.primary else colors.outline)
-    ) {
-        Column(Modifier.fillMaxWidth().heightIn(min = 72.dp).padding(horizontal = 8.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.sizeIn(minWidth = 40.dp, minHeight = 40.dp).background(paper, MaterialTheme.shapes.small)
-                .padding(horizontal = 6.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Aa", color = ink, fontFamily = FontFamily.Serif, style = MaterialTheme.typography.titleMedium)
-                    // The accent is part of the scheme too, so the preview shows all three roles.
-                    Box(Modifier.width(16.dp).height(2.dp).background(accent))
+    val context = LocalContext.current
+    var bytes by remember { mutableStateOf<Long?>(null) }
+    var clearing by remember { mutableStateOf(false) }
+    var cleared by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { bytes = runCatching { onLoadBytes() }.getOrNull() }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(stringResource(R.string.settings_explanation_cache), style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.settings_explanation_cache_detail),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    stringResource(
+                        R.string.settings_explanation_cache_usage,
+                        bytes?.let { android.text.format.Formatter.formatShortFileSize(context, it) }
+                            ?: stringResource(R.string.settings_explanation_cache_calculating)
+                    ),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (cleared) {
+                    Text(stringResource(R.string.settings_explanation_cache_cleared),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary)
+                }
+                Button(onClick = {
+                    clearing = true
+                    cleared = false
+                    scope.launch {
+                        try {
+                            onClear()
+                            bytes = 0L
+                            cleared = true
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // A failed delete leaves the existing entries visible; keep the button usable.
+                        } finally {
+                            clearing = false
+                        }
+                    }
+                }, enabled = !clearing, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    if (clearing) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(stringResource(R.string.settings_explanation_cache_clear))
+                }
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
+                    Text(stringResource(R.string.shell_close))
                 }
             }
-            // Two label lines are reserved so all five tiles keep one height at every text scale, even
-            // when only the longest name ("Classic White") needs the second line.
-            Text(label, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 2, minLines = 2)
+        }
+    }
+}
+
+@Composable
+private fun NarrationCacheDialog(
+    onLoadBytes: suspend () -> Long,
+    onClear: suspend () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var bytes by remember { mutableStateOf<Long?>(null) }
+    var clearing by remember { mutableStateOf(false) }
+    var cleared by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { bytes = runCatching { onLoadBytes() }.getOrNull() }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(stringResource(R.string.settings_narration_cache), style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.settings_narration_cache_detail),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    stringResource(
+                        R.string.settings_narration_cache_usage,
+                        bytes?.let { android.text.format.Formatter.formatShortFileSize(context, it) }
+                            ?: stringResource(R.string.settings_narration_cache_calculating)
+                    ),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (cleared) {
+                    Text(stringResource(R.string.settings_narration_cache_cleared),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary)
+                }
+                Button(onClick = {
+                    clearing = true
+                    cleared = false
+                    scope.launch {
+                        try {
+                            onClear()
+                            bytes = 0L
+                            cleared = true
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // A failed clear leaves the existing entries visible; keep the button usable.
+                        } finally {
+                            clearing = false
+                        }
+                    }
+                }, enabled = !clearing, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    if (clearing) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(stringResource(R.string.settings_narration_cache_clear))
+                }
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
+                    Text(stringResource(R.string.shell_close))
+                }
+            }
         }
     }
 }
@@ -295,8 +323,6 @@ private fun PronunciationSection(
     val sentencePreview = playback.playing && playback.text == PREVIEW_SENTENCE
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(stringResource(R.string.settings_pronunciation), style = MaterialTheme.typography.titleLarge)
-        PreferenceSwitch(stringResource(R.string.settings_auto_pronounce), stringResource(R.string.settings_auto_pronounce_detail),
-            settings.autoPronounce) { enabled -> onSave { latest -> latest.copy(autoPronounce = enabled) } }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             listOf("US", "UK").forEach { accent ->
                 FilterChip(selected = settings.accent == accent, onClick = {
@@ -345,17 +371,6 @@ private fun PreviewAction(label: String, playing: Boolean, modifier: Modifier = 
     }
 }
 
-@Composable
-private fun PreferenceSwitch(title: String, detail: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-            .then(Modifier.semantics { contentDescription = title }))
-    }
-}
 
 @Composable
 private fun ModelConfigurationDialog(

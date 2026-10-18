@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reader toolbar, typography sheet and reading options. -->
+<resources>
+    <!-- Fixed bottom toolbar: four equal labelled entries. -->
+    <string name="reader_control_contents">Contents</string>
+    <string name="reader_control_typography">Layout</string>
+    <string name="reader_control_options">Features</string>
+    <string name="reader_control_read_aloud">Listen</string>
+
+    <!-- Expanded reading tools -->
+    <string name="reader_tools_title">Reading tools</string>
+    <string name="reader_tools_close">Hide reading tools</string>
+    <string name="reader_contents_search">Search the whole book</string>
+    <string name="reader_contents_back">Back to contents</string>
+
+    <!-- Typography sheet -->
+    <string name="reader_typography_title">Typography</string>
+    <string name="reader_typography_font">Font</string>
+    <string name="reader_typography_system_font">System font</string>
+    <string name="reader_typography_size">Size</string>
+    <string name="reader_typography_size_value">%1$d%%</string>
+    <string name="reader_typography_letter_spacing">Letter spacing</string>
+    <string name="reader_typography_letter_spacing_value">%1$.2f em</string>
+    <string name="reader_typography_line_height">Line height</string>
+    <string name="reader_typography_line_height_value">%1$.2f×</string>
+    <string name="reader_typography_paragraph_spacing">Paragraph spacing</string>
+    <string name="reader_typography_paragraph_spacing_value">%1$.2f em</string>
+    <string name="reader_typography_side_margins">Side margins</string>
+    <string name="reader_typography_side_margins_value">%1$.2f×</string>
+    <string name="reader_typography_top_distance">Top text distance</string>
+    <string name="reader_typography_bottom_distance">Bottom text distance</string>
+    <string name="reader_typography_distance_value">%1$d dp</string>
+    <string name="reader_typography_apply">Apply</string>
+    <string name="reader_typography_cancel">Cancel</string>
+
+    <!-- Options sheet -->
+    <string name="reader_options_title">Reading features</string>
+    <string name="reader_options_immersive">Immersive reading</string>
+    <string name="reader_options_immersive_detail">Hide the system bars while reading.</string>
+    <string name="reader_options_scroll">Continuous scrolling</string>
+    <string name="reader_options_scroll_detail">Scroll through a chapter instead of turning pages.</string>
+    <string name="reader_options_quick_explain">Quick Explain</string>
+    <string name="reader_options_quick_explain_detail">Explain a selection once you release it. Off keeps Explain as an explicit action.</string>
+    <string name="reader_options_auto_pronounce">Auto-pronounce</string>
+    <string name="reader_options_auto_pronounce_detail">Speak the selected word or phrase once when a lookup opens.</string>
+    <string name="reader_options_done">Done</string>
+
+    <!-- Continuous narration -->
+    <string name="reader_options_narration_cache">Sentence audio cache</string>
+    <string name="reader_options_narration_cache_size">%1$s saved privately</string>
+    <string name="reader_options_narration_clear">Clear</string>
+    <string name="reader_options_narration_note">Microsoft Read Aloud is free and key-free, but unofficial and not guaranteed to stay available. Only the current sentence and up to two following sentences leave the device. Cached sentence audio stays in private app storage and can be cleared here. Popup word and example pronunciation stays memory-only.</string>
+
+    <string name="reader_narration_status_playing">Reading aloud</string>
+    <string name="reader_narration_status_paused">Paused</string>
+    <string name="reader_narration_play">Play</string>
+    <string name="reader_narration_pause">Pause</string>
+    <string name="reader_narration_previous">Previous sentence</string>
+    <string name="reader_narration_next">Next sentence</string>
+    <string name="reader_narration_stop">Stop reading aloud</string>
+    <string name="reader_narration_speed">Speed</string>
+    <string name="reader_narration_speed_value">%1$s×</string>
+    <string name="reader_narration_cached">Saved for offline replay</string>
+    <string name="reader_narration_retry">Retry</string>
+    <string name="reader_narration_error_unavailable">This sentence could not be fetched. Check your connection, then retry; sentences already saved still play offline.</string>
+    <string name="reader_narration_error_too_long">This sentence is too long to read aloud in one piece.</string>
+    <string name="reader_narration_error_storage">This sentence audio could not be saved. Free some storage, then retry.</string>
+    <string name="reader_narration_error_playback">This sentence audio could not be played. Retry, or stop and start narration again.</string>
+    <string name="reader_narration_error_content">The book text for this sentence could not be read.</string>
+    <string name="reader_narration_error_start">Read aloud could not start. Close and open this book again.</string>
+    <string name="reader_narration_error_voice">Choose US or UK pronunciation in Settings, then start again.</string>
+    <string name="reader_narration_error_open">Read aloud could not open this book.</string>
+</resources>

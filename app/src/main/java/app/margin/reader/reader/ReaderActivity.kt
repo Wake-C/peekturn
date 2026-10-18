@@ -2,12 +2,14 @@
 
 package app.margin.reader.reader
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
-import android.graphics.RectF
+import android.content.ServiceConnection
 import android.os.Bundle
+import android.os.IBinder
 import android.view.ActionMode
 import android.view.Menu
 import android.view.MenuItem
@@ -27,15 +29,9 @@ import org.readium.r2.navigator.input.Key
 import org.readium.r2.navigator.input.KeyEvent
 import org.readium.r2.navigator.util.DirectionalNavigationAdapter
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.FragmentContainerView
 import androidx.lifecycle.lifecycleScope
@@ -44,7 +40,12 @@ import app.margin.reader.R
 import app.margin.reader.data.ReadingTracker
 import app.margin.reader.learning.LearningPopup
 import app.margin.reader.learning.LearningSession
+import app.margin.reader.narration.canonicalSentence
+import app.margin.reader.narration.sentenceContaining
 import app.margin.reader.model.*
+import app.margin.reader.narration.NarrationPlayback
+import app.margin.reader.narration.NarrationService
+import app.margin.reader.narration.NarrationState
 import app.margin.reader.ui.BookSearchDialog
 import app.margin.reader.ui.BookSearchState
 import app.margin.reader.ui.BookSearchStatus
@@ -58,8 +59,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
+import org.readium.r2.navigator.Decoration
 import org.readium.r2.navigator.Selection
 import org.json.JSONObject
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
@@ -94,6 +98,8 @@ class ReaderActivity : AppCompatActivity() {
     private var lastPagination: Triple<Int, Int, Locator>? = null
     private var chapterLabel by mutableStateOf("")
     private var chrome by mutableStateOf(ReaderChromeState())
+    /** True only while a lookup's own pause owns the narration session. */
+    private var lookupPausedNarration = false
     private var panel by mutableStateOf<String?>(null)
     private var lookup by mutableStateOf<LookupRequest?>(null)
     private var releaseJob: Job? = null
@@ -113,13 +119,42 @@ class ReaderActivity : AppCompatActivity() {
     private var mode: ActionMode? = null
     private var selectionFocus: android.view.View? = null
     private var openedMarked = false
-    private val learningSession = LearningSession()
+    private val learningSession by lazy { LearningSession(cache = graph.explanationCache) }
     private var locatorJob: Job? = null
     private var renderedPreferences: Pair<ReaderPreferences, String>? = null
     private val readerViewport = ReaderViewport { readerTextInsets(graph.store.settings.value.reading) }
     private var paddingGestureJob: Job? = null
     private var readerInputEpoch = 0L
     private var handledPaddingGesture = false
+    private var narrationBinder: NarrationService.Binder? = null
+    private var narrationPlayback: NarrationPlayback? = null
+    private var narrationUi by mutableStateOf(NarrationState())
+    private var narrationCacheBytes by mutableStateOf(0L)
+    private var narrationObserveJob: Job? = null
+    private var narrationFailureJob: Job? = null
+    private var narrationSyncJob: Job? = null
+    private var narrationBound = false
+    private var pendingNarration: PendingNarration? = null
+
+    private val narrationConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as? NarrationService.Binder ?: return
+            narrationBinder = binder
+            pendingNarration?.let {
+                pendingNarration = null
+                binder.start(it.bookId, it.locatorJson, it.speed, it.startSentence)
+            }
+            observeNarration(binder)
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            clearNarrationBinding()
+        }
+
+        override fun onNullBinding(name: ComponentName?) {
+            clearNarrationBinding()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Fragment snapshots contain runtime page indexes. Recreate only from the durable locator,
@@ -134,10 +169,18 @@ class ReaderActivity : AppCompatActivity() {
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (narrationUi.active && panel == null && lookup == null && mode == null) {
+                    stopNarration(showChrome = true)
+                    return
+                }
+                readerPanelBackTarget(panel)?.let {
+                    panel = it
+                    return
+                }
                 when (chrome.back(lookup != null || mode != null, panel != null)) {
                     ReaderBackAction.DismissLookup -> dismissLookup(true, "back")
                     ReaderBackAction.DismissPanel -> panel = null
-                    ReaderBackAction.HideChrome -> chrome = ReaderChromeState()
+                    ReaderBackAction.HideChrome -> requestChromeVisibility(false)
                     ReaderBackAction.Exit -> finish()
                 }
             }
@@ -154,50 +197,111 @@ class ReaderActivity : AppCompatActivity() {
                         if (book == null) {
                             CircularProgressIndicator(Modifier.align(Alignment.Center))
                         } else {
-                            // Only stable cutout / explicitly enabled bars reserve space. Chrome and
-                            // transient system bars cannot resize this viewport or repaginate Readium.
                             val stableInsets = WindowInsets.displayCutout
                                 .union(if (settings.reading.immersive) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBarsIgnoringVisibility)
-                            AndroidView(
-                                modifier = Modifier.fillMaxSize().windowInsetsPadding(stableInsets),
-                                factory = { context ->
-                                    ReaderHostView(context,
-                                        onTap = { x, width ->
-                                            handlePaddingGesture { nav ->
-                                                if (isReaderCenterTap(x, width)) chrome = chrome.tap(x, width)
-                                                else navigate { if (x < width / 2) nav.goBackward() else nav.goForward() }
+                            // The publication viewport is stable in all four states: system
+                            // insets only, never the chrome or narration surfaces.
+                            Box(Modifier.fillMaxSize()) {
+                                AndroidView(
+                                    modifier = Modifier.fillMaxSize().windowInsetsPadding(stableInsets),
+                                    factory = { context ->
+                                        ReaderHostView(context,
+                                            onTap = { x, width ->
+                                                when (readerTapAction(x, width)) {
+                                                    ReaderTapAction.ToggleChrome -> handlePaddingGesture { requestChromeToggle() }
+                                                    ReaderTapAction.PreviousPage -> handlePaddingGesture { nav -> navigate { nav.goBackward() } }
+                                                    ReaderTapAction.NextPage -> handlePaddingGesture { nav -> navigate { nav.goForward() } }
+                                                    ReaderTapAction.Ignore -> Unit
+                                                }
+                                            },
+                                            onSwipe = { forward ->
+                                                handlePaddingGesture { nav -> navigate { if (forward) nav.goForward() else nav.goBackward() } }
                                             }
-                                        },
-                                        onSwipe = { forward ->
-                                            handlePaddingGesture { nav -> navigate { if (forward) nav.goForward() else nav.goBackward() } }
+                                        ).apply {
+                                            addView(FragmentContainerView(context).apply {
+                                                id = NAVIGATOR_ID
+                                                layoutParams = FrameLayout.LayoutParams(-1, -1)
+                                                post { if (!isFinishing && !isDestroyed) attachNavigator() }
+                                            })
                                         }
-                                    ).apply {
-                                        addView(FragmentContainerView(context).apply {
-                                            id = NAVIGATOR_ID
-                                            layoutParams = FrameLayout.LayoutParams(-1, -1)
-                                            post { if (!isFinishing && !isDestroyed) attachNavigator() }
-                                        })
                                     }
+                                )
+                                ReaderPosition(chapterLabel, positionLabel, settings.appTheme, stableInsets)
+                                if (chrome.visible) {
+                                    ReaderChrome(
+                                        theme = settings.appTheme,
+                                        immersive = settings.reading.immersive,
+                                        narration = narrationUi.takeIf { it.active },
+                                        onHide = { requestChromeVisibility(false) },
+                                        onContents = { dismissLookup(true, "chrome contents"); panel = "contents" },
+                                        onTypography = { dismissLookup(true, "chrome typography"); panel = "typography" },
+                                        onOptions = {
+                                            dismissLookup(true, "chrome options")
+                                            refreshNarrationCacheSize()
+                                            panel = "options"
+                                        },
+                                        onReadAloud = { if (!narrationUi.active) startNarration() },
+                                        onPlayPause = {
+                                            if (narrationUi.playing) narrationPlayback?.pause() else narrationPlayback?.play()
+                                        },
+                                        onPrevious = { narrationPlayback?.previous() },
+                                        onNext = { narrationPlayback?.next() },
+                                        onSpeed = { narrationPlayback?.setSpeed(nextNarrationSpeed(narrationUi.speed)) },
+                                        onStop = { stopNarration(showChrome = true) },
+                                        onRetry = { narrationPlayback?.retry() },
+                                    )
+                                } else if (narrationUi.active) {
+                                    ReaderCompactNarration(
+                                        theme = settings.appTheme,
+                                        immersive = settings.reading.immersive,
+                                        state = narrationUi,
+                                        onPlayPause = {
+                                            if (narrationUi.playing) narrationPlayback?.pause() else narrationPlayback?.play()
+                                        },
+                                        onPrevious = { narrationPlayback?.previous() },
+                                        onNext = { narrationPlayback?.next() }
+                                    )
                                 }
-                            )
+                            }
                         }
-                        ReaderPosition(chapterLabel, positionLabel, settings.appTheme, settings.reading.immersive)
-                        if (chrome.visible) ReaderChrome(
-                            theme = settings.appTheme,
-                            onContents = { dismissLookup(true, "chrome contents"); panel = "contents" },
-                            onSearch = { dismissLookup(true, "chrome search"); panel = "search" },
-                            onAppearance = { dismissLookup(true, "chrome appearance"); panel = "type" }
-                        )
                     }
                     when (panel) {
-                        "contents" -> ContentsDialog()
+                        "contents" -> ReaderContentsSheet(
+                            chapters = remember(publication) {
+                                flattenContents(publication?.tableOfContents.orEmpty())
+                            },
+                            currentChapter = chapterLabel,
+                            onOpen = { link -> panel = null; goSafely(link) },
+                            onSearch = { panel = "search" },
+                            onDismiss = { panel = null }
+                        )
                         "search" -> SearchDialog()
-                        "type" -> TypographyDialog(settings)
+                        "typography" -> ReaderTypographySheet(
+                            settings = settings,
+                            onApply = { reading ->
+                                // Merge into the latest settings, not the draft's snapshot: an
+                                // immersive or scroll toggle made while the sheet was open wins.
+                                graph.scope.launch { graph.store.updateSettings { it.withTypography(reading) } }
+                                panel = null
+                            },
+                            onDismiss = { panel = null }
+                        )
+                        "options" -> ReaderOptionsSheet(
+                            options = settings.readerOptions(),
+                            onChange = { option, enabled ->
+                                graph.scope.launch {
+                                    graph.store.updateSettings { it.withReaderOption(option, enabled) }
+                                }
+                            },
+                            cacheBytes = narrationCacheBytes,
+                            onClearCache = { clearNarrationCache() },
+                            onDismiss = { panel = null }
+                        )
                     }
                     lookup?.let { request ->
                         key(request) {
                             LearningPopup(
-                                context = request.context, anchor = request.anchor, settings = settings,
+                                context = request.context, settings = settings,
                                 session = learningSession, dictionary = graph.dictionary, speech = graph.speech,
                                 initialDictionary = request.dictionary,
                                 onClose = { dismissLookup(true, "popup close") },
@@ -261,6 +365,9 @@ class ReaderActivity : AppCompatActivity() {
                     }
                 }
                 book = loaded
+                // The service may have connected before the library lookup finished; re-evaluate
+                // its playback now that this Activity knows which book it is showing.
+                narrationBinder?.let(::observeNarration)
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) {
                 graph.store.clearLastBook()
@@ -313,21 +420,29 @@ class ReaderActivity : AppCompatActivity() {
                 }
             },
             configuration = EpubNavigatorFragment.Configuration(
-                // Readium 3.1 quotes generic families in --USER__fontFamily. An unquoted
-                // root inline family keeps its normal descendant inheritance working.
+                // Packaged face files are served at https://readium/assets/fonts/...
+                servedAssets = ReaderFonts.servedAssetPatterns,
+                // Readium 3.1 quotes every family in --USER__fontFamily, including generic
+                // "serif"/"sans-serif", which would ask for fonts literally named that. The
+                // resolved bundled family plus an unquoted generic fallback is applied to the root
+                // element instead; the declared @font-face still makes the real face load, and CJK
+                // text keeps the platform serif/sans fallback.
                 //
                 // Readium CSS paints the native selection from --RS__selectionBackgroundColor, and
                 // its stock #b4d8fe is the platform blue that fights every Margin theme: the theme
                 // accent is injected here instead, in the same inline root style, per chapter.
                 readiumCssRsProperties = org.readium.r2.navigator.epub.css.RsProperties(
                     overrides = mapOf(
-                        "font-family" to if (settings.reading.fontFamily == "sans-serif") "sans-serif" else "serif",
+                        "font-family" to readerFontFor(settings.reading.fontFamily).cssStack,
                         "--RS__selectionBackgroundColor" to readerSelectionBackground(settings.appTheme)
                     )
                 ),
                 selectionActionModeCallback = selectionActions,
                 shouldApplyInsetsPadding = false
-            ).apply { useReadiumCssFontSize = true }
+            ).apply {
+                useReadiumCssFontSize = true
+                registerReaderFonts()
+            }
         )
         val fragment = supportFragmentManager.fragmentFactory.instantiate(classLoader, EpubNavigatorFragment::class.java.name) as EpubNavigatorFragment
         supportFragmentManager.beginTransaction().replace(NAVIGATOR_ID, fragment).commitNow()
@@ -337,8 +452,8 @@ class ReaderActivity : AppCompatActivity() {
             override fun onTap(event: TapEvent): Boolean {
                 // Readium excludes links, handled gestures and active selection before this callback.
                 val width = fragment.publicationView.width.toFloat()
-                if (!isReaderCenterTap(event.point.x, width)) return false
-                chrome = chrome.tap(event.point.x, width)
+                if (readerTapAction(event.point.x, width) != ReaderTapAction.ToggleChrome) return false
+                requestChromeToggle()
                 tracker?.interact()
                 return true
             }
@@ -347,13 +462,14 @@ class ReaderActivity : AppCompatActivity() {
                 if (event.type != KeyEvent.Type.Down || event.modifiers.isNotEmpty()) return false
                 // Reveal controls without stealing Tab traversal or arrow/space navigation.
                 if (event.key == Key.Tab || event.key == Key.ContextMenu) {
-                    chrome = ReaderChromeState(visible = true)
+                    requestChromeVisibility(true)
                     return event.key == Key.ContextMenu
                 }
                 return false
             }
         })
         fragment.addInputListener(DirectionalNavigationAdapter(fragment))
+        narrationPlayback?.location?.value?.let(::syncNarration)
         // Readium 3.1 starts this StateFlow with initialLocator and emits subsequent locations
         // only after State.Ready and the requested resource is loaded (notifyCurrentLocation).
         locatorJob = lifecycleScope.launch {
@@ -375,11 +491,207 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
+    private fun bindNarration() {
+        if (narrationBound) return
+        narrationBound = true
+        NarrationService.bind(this, narrationConnection)
+    }
+
+    private fun unbindNarration() {
+        if (narrationBound) {
+            narrationBound = false
+            NarrationService.unbind(this, narrationConnection)
+        }
+        clearNarrationBinding()
+    }
+
+    /**
+     * Narration surfaces are overlays, so their state changes never alter the publication
+     * viewport and need no viewport transaction.
+     */
+    private fun applyNarrationState(next: NarrationState) {
+        narrationUi = next
+        if (!next.active) lookupPausedNarration = false
+    }
+
+    private fun clearNarrationBinding() {
+        narrationObserveJob?.cancel()
+        narrationObserveJob = null
+        narrationSyncJob?.cancel()
+        narrationSyncJob = null
+        narrationFailureJob?.cancel()
+        narrationFailureJob = null
+        narrationBinder = null
+        narrationPlayback = null
+        pendingNarration = null
+        narrationBound = false
+        applyNarrationState(NarrationState())
+    }
+
+    private fun observeNarration(binder: NarrationService.Binder) {
+        narrationObserveJob?.cancel()
+        narrationObserveJob = lifecycleScope.launch {
+            binder.playback.collectLatest { playback ->
+                narrationPlayback = playback
+                if (playback == null || playback.bookId != book?.id) {
+                    applyNarrationState(NarrationState())
+                    clearNarrationHighlight()
+                    return@collectLatest
+                }
+                launch {
+                    playback.state.collect { state ->
+                        applyNarrationState(state)
+                        if (!state.active) clearNarrationHighlight()
+                    }
+                }
+                launch {
+                    playback.location.collect { locator -> locator?.let(::syncNarration) }
+                }
+            }
+        }
+        narrationFailureJob?.cancel()
+        narrationFailureJob = lifecycleScope.launch {
+            binder.failure.collect { message ->
+                if (message != null) Toast.makeText(this@ReaderActivity, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /**
+     * Options starts at the first visible word of the current page. A stale search match or an
+     * earlier selection is never substituted for the page the reader is actually looking at.
+     */
+    private fun startNarration() {
+        val nav = navigator ?: return
+        val id = book?.id ?: return
+        lifecycleScope.launch {
+            // Capture the page and intra-block offset before narration follows it.
+            val base = runCatching { nav.firstVisibleElementLocator() }.getOrNull()
+                ?: nav.currentLocator.value
+            if (!isSafeReaderLocator(base)) return@launch
+            val source = base.text.highlight.orEmpty()
+            val offset = runCatching { nav.evaluateJavascript(narrationVisibleOffsetScript) }
+                .getOrNull()
+                ?.let { runCatching { JSONObject(it).optInt("offset", -1) }.getOrDefault(-1) }
+                ?: -1
+            val range = if (source.isNotEmpty() && offset in source.indices) {
+                sentenceContaining(source, offset)
+            } else {
+                null
+            }
+            val sentenceRange = range?.takeUnless { it.isEmpty() }
+            val startSentence = sentenceRange?.let { canonicalSentence(source.substring(it)) }
+            // The initial locator must keep its block cssSelector; the sentence skipper moves
+            // Readium's first utterance to the containing sentence.
+            val locator = if (sentenceRange != null) {
+                val target = startSentence ?: return@launch
+                base.copy(text = Locator.Text(
+                    before = source.substring(0, sentenceRange.first),
+                    highlight = target,
+                    after = source.substring(sentenceRange.last + 1)
+                ))
+            } else {
+                base
+            }
+            requestChromeVisibility(true)
+            beginNarration(id, locator, startSentence, "read aloud")
+        }
+    }
+
+    private fun beginNarration(id: Long, locator: Locator, startSentence: String?, reason: String) {
+        dismissLookup(true, reason)
+        graph.speech.stop()
+        val locatorJson = locator.toJSON().toString()
+        val binder = narrationBinder
+        if (binder != null) {
+            binder.start(id, locatorJson, narrationUi.speed, startSentence)
+        } else {
+            pendingNarration = PendingNarration(id, locatorJson, narrationUi.speed, startSentence)
+            bindNarration()
+        }
+    }
+
+    private fun stopNarration(showChrome: Boolean = false) {
+        narrationBinder?.stop()
+        if (narrationBinder == null) stopService(Intent(this, NarrationService::class.java))
+        pendingNarration = null
+        lookupPausedNarration = false
+        narrationUi = narrationUi.copy(active = false, playing = false, cached = false, error = null)
+        if (showChrome) chrome = ReaderChromeState(visible = true)
+        clearNarrationHighlight()
+    }
+
+    /**
+     * The background service owns audio and publication lifetime. This only follows its current
+     * sentence in the foreground reader and paints the optional highlight; it never starts audio.
+     */
+    private fun syncNarration(locator: Locator) {
+        val nav = navigator ?: return
+        if (!resumed || lookup != null || narrationPlayback?.bookId != book?.id) return
+        narrationSyncJob?.cancel()
+        narrationSyncJob = lifecycleScope.launch {
+            if (navigator !== nav || !resumed || lookup != null) return@launch
+            // Clear the previous group first: a page turn can repaint an old decoration while the
+            // next apply is still in flight, which otherwise leaves two sentences highlighted.
+            runCatching { nav.applyDecorations(emptyList(), NARRATION_DECORATION_GROUP) }
+            runCatching { nav.go(locator, false) }
+            runCatching {
+                nav.applyDecorations(
+                    listOf(
+                        Decoration(
+                            NARRATION_DECORATION_ID,
+                            locator,
+                            Decoration.Style.Highlight(NARRATION_HIGHLIGHT)
+                        )
+                    ),
+                    NARRATION_DECORATION_GROUP
+                )
+            }
+        }
+    }
+
+    private fun clearNarrationHighlight() {
+        narrationSyncJob?.cancel()
+        narrationSyncJob = null
+        val nav = navigator ?: return
+        lifecycleScope.launch {
+            runCatching { nav.applyDecorations(emptyList(), NARRATION_DECORATION_GROUP) }
+        }
+    }
+
+    private fun refreshNarrationCacheSize() {
+        lifecycleScope.launch {
+            narrationCacheBytes = graph.sentenceAudio.sizeBytes()
+        }
+    }
+
+    /**
+     * Stopping the service first cancels its current and queued synthesis. The provider gate then
+     * waits for any write already in flight before deleting the cache, so a late prefetch cannot
+     * repopulate it immediately after an explicit clear.
+     */
+    private fun clearNarrationCache() {
+        stopNarration()
+        lifecycleScope.launch {
+            graph.narrationProviderGate.withLock { graph.sentenceAudio.clear() }
+            narrationCacheBytes = graph.sentenceAudio.sizeBytes()
+        }
+    }
+
+    /** Chrome is an overlay; toggling it never changes the publication viewport. */
+    private fun requestChromeToggle() {
+        chrome = ReaderChromeState(visible = !chrome.visible)
+    }
+
+    private fun requestChromeVisibility(target: Boolean) {
+        if (chrome.visible != target) chrome = ReaderChromeState(visible = target)
+    }
+
     private suspend fun refreshPreferences(settings: AppSettings) {
         val fragment = navigator ?: return
         if (renderedPreferences == (settings.reading to settings.appTheme)) return
-        // Readium's firstVisibleElementLocator quotes the entire block, which can
-        // span many pages. Capture the visible intra-block words without selection.
+        // Typography rebuilds the navigator, so capture the visible intra-block words before the
+        // old view is removed and let the new navigator open at that precise anchor.
         val current = fragment.currentLocator.value
         val visible = fragment.evaluateJavascript(visibleReflowAnchorScript)?.let { result ->
             runCatching { JSONObject(result) }.getOrNull()
@@ -402,6 +714,9 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun queuePosition(locator: Locator) {
+        // While narration owns this book, the service persists the spoken locator after each
+        // utterance. A stale visual locator (especially the onPause flush) must not overwrite it.
+        if (narrationUi.active && narrationPlayback?.bookId == book?.id) return
         val json = locator.toJSON().toString()
         if (latestQueued != json) {
             latestQueued = json
@@ -434,6 +749,9 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun navigate(action: (EpubNavigatorFragment) -> Unit) {
+        // A deliberate page, contents or search move ends continuous reading; only the service's
+        // own locator-follow path is allowed to turn pages without that decision.
+        if (narrationUi.active) stopNarration()
         dismissLookup(true, "navigation")
         tracker?.interact()
         navigator?.let(action)
@@ -466,9 +784,19 @@ class ReaderActivity : AppCompatActivity() {
             selectionSession.beginNativeMode()
             selectionTrace("native selection toolbar created held=${selectionSession.pointerHeld}")
             menu.clear()
-            menu.add(0, EXPLAIN, 0, "Explain")
-            menu.add(0, DICTIONARY, 1, "Dictionary")
-            menu.add(0, android.R.id.copy, 2, "Copy")
+            readerSelectionActions().forEachIndexed { index, action ->
+                when (action) {
+                    ReaderSelectionAction.EXPLAIN ->
+                        menu.add(0, EXPLAIN, index, getString(R.string.reader_lookup_tab_explain))
+                            .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM or MenuItem.SHOW_AS_ACTION_WITH_TEXT)
+                    ReaderSelectionAction.DICTIONARY ->
+                        menu.add(0, DICTIONARY, index, getString(R.string.reader_lookup_tab_dictionary))
+                            .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM or MenuItem.SHOW_AS_ACTION_WITH_TEXT)
+                    ReaderSelectionAction.COPY ->
+                        menu.add(0, android.R.id.copy, index, getString(R.string.reader_selection_copy))
+                            .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM or MenuItem.SHOW_AS_ACTION_WITH_TEXT)
+                }
+            }
             if (!selectionSession.pointerHeld) {
                 // A long press can end before the toolbar exists; the finger is already up.
                 scheduleReleasedSelection()
@@ -590,7 +918,11 @@ class ReaderActivity : AppCompatActivity() {
         if (totalBookChars < 1) return ""
         val key = resourceKeyFor(locator.href.toString()) ?: return ""
         val chars = charsByResource[key] ?: return ""
-        val signature = layoutSignature(reading)
+        val signature = readerLayoutSignature(
+            reading,
+            navigator?.view?.width ?: 0,
+            navigator?.view?.height ?: 0
+        )
         // A title page or a one-page separator is mostly a partial page, so it cannot teach the
         // layout's density; a chapter that fills at least one page can.
         val measured = if (chapterPages >= PAGE_DENSITY_MIN_PAGES) chars.toDouble() / chapterPages else null
@@ -612,13 +944,6 @@ class ReaderActivity : AppCompatActivity() {
         return charsByResource.keys.firstOrNull { it.substringAfterLast('/') == key.substringAfterLast('/') }
     }
 
-    /** Everything that changes how much text a page holds. */
-    private fun layoutSignature(reading: ReaderPreferences): String = listOf(
-        reading.fontFamily, reading.fontSize, reading.lineHeight, reading.paragraphSpacing,
-        reading.pageMargins, reading.topPaddingDp, reading.bottomPaddingDp,
-        navigator?.view?.width ?: 0, navigator?.view?.height ?: 0
-    ).joinToString("|")
-
     private suspend fun showLookup(dictionary: Boolean, token: Long, captured: Selection? = null) {
         val nav = navigator ?: return
         if (!selectionSession.isCurrent(token)) return
@@ -639,43 +964,28 @@ class ReaderActivity : AppCompatActivity() {
         val identity = selection.identity()
         if (identity != null) selectionSession.releasedSelection(token, identity)
         selectionSession.lookupOpened(token, identity)
-        selectionFocus = nav.view?.findFocus()
-        val offset = IntArray(2)
-        nav.view?.getLocationInWindow(offset)
-        val anchor = selection.rect?.let {
-            val bounds = readium31SelectionAnchor(it.left, it.top, it.right, it.bottom, offset[0], offset[1], currentPageTopPadding(nav))
-            RectF(bounds.left, bounds.top, bounds.right, bounds.bottom)
+        // Narration and lookup pronunciation are separate owners. A lookup pauses only a playing
+        // session, and the service records that this pause belongs to the lookup; a manual pause is
+        // left exactly as the reader set it. Popup word/example audio stays latest-only.
+        if (lookup == null && narrationUi.active) {
+            // The service returns false for a session that was already manually paused, so only a
+            // pause it actually caused can be resumed later.
+            lookupPausedNarration = narrationBinder?.pauseForLookup() == true
         }
+        selectionFocus = nav.view?.findFocus()
         lookup = LookupRequest(
             LookupContext(
                 text,
                 contextBeforeSelection(locator.text.before.orEmpty()),
                 contextAfterSelection(locator.text.after.orEmpty()),
                 book?.title.orEmpty(),
-                chapterTitles?.titleFor(locator).orEmpty()
+                chapterTitles?.titleFor(locator).orEmpty(),
+                bookId = book?.id ?: 0L,
+                chapterKey = chapterTitles?.keyFor(locator).orEmpty()
             ),
-            anchor, dictionary
+            dictionary
         )
         tracker?.interact()
-    }
-
-    private fun currentPageTopPadding(nav: EpubNavigatorFragment): Int {
-        val visibleBounds = android.graphics.Rect()
-        var largestArea = 0L
-        var padding = 0
-        // Readium 3.1's current page is a child Fragment. Its public root view has the
-        // exact padding used by adjustedToViewport(), including page/scroll and cutout insets.
-        // Adjacent preloaded pages are clipped by the pager, not selected by list order.
-        for (fragment in nav.childFragmentManager.fragments) {
-            val view = fragment.view ?: continue
-            if (!view.getGlobalVisibleRect(visibleBounds)) continue
-            val area = visibleBounds.width().toLong() * visibleBounds.height()
-            if (area > largestArea) {
-                largestArea = area
-                padding = view.paddingTop
-            }
-        }
-        return padding
     }
 
     /**
@@ -694,8 +1004,14 @@ class ReaderActivity : AppCompatActivity() {
     private fun dismissLookup(clearSelection: Boolean, reason: String) {
         releaseJob?.cancel()
         selectionProbeJob?.cancel()
+        // Only the reader's own close of a lookup may undo the pause that lookup caused. Adjust,
+        // navigation, lifecycle and reflow clears keep narration paused.
+        val resumeNarration = clearSelection && lookupPausedNarration && reason in LOOKUP_RESUME_REASONS
+        lookupPausedNarration = false
         lookup = null
+        // Popup word/example pronunciation must be silent before the book resumes.
         graph.speech.stop()
+        if (resumeNarration) narrationBinder?.resumeAfterLookup()
         if (clearSelection) {
             selectionTrace("cleared native selection reason=$reason")
             selectionSession.clear()
@@ -726,6 +1042,7 @@ class ReaderActivity : AppCompatActivity() {
         selectionTrace("location change during a held gesture kept the native selection")
         releaseJob?.cancel()
         selectionProbeJob?.cancel()
+        lookupPausedNarration = false
         lookup = null
         graph.speech.stop()
     }
@@ -750,21 +1067,6 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    @Composable private fun ContentsDialog() {
-        val chapters = remember(publication) { flattenContents(publication?.tableOfContents.orEmpty()) }
-        AlertDialog(onDismissRequest = { panel = null }, title = { Text(stringResource(R.string.reader_contents_title)) },
-            text = {
-                LazyColumn(Modifier.heightIn(max = 480.dp)) {
-                    if (chapters.isEmpty()) item { Text(stringResource(R.string.reader_contents_empty)) }
-                    items(chapters) { (depth, link) ->
-                        TextButton(onClick = { panel = null; goSafely(link) }, modifier = Modifier.fillMaxWidth().padding(start = (depth.coerceAtMost(5) * 12).dp)) {
-                            Text(link.title ?: stringResource(R.string.reader_chapter_untitled), Modifier.fillMaxWidth())
-                        }
-                    }
-                }
-            }, confirmButton = { TextButton(onClick = { panel = null }) { Text(stringResource(R.string.reader_close)) } })
-    }
-
     @Composable private fun SearchDialog() {
         DisposableEffect(Unit) { onDispose { closeSearch() } }
         BookSearchDialog(
@@ -778,8 +1080,12 @@ class ReaderActivity : AppCompatActivity() {
             onQueryChange = { searchQuery = it },
             onSearch = { startSearch(searchQuery) },
             onMoreResults = { nextSearchPage() },
-            onOpen = { locator -> panel = null; goSafely(locator) },
-            onDismiss = { panel = null }
+            onOpen = { locator ->
+                panel = null
+                goSafely(locator)
+            },
+            onBack = { panel = readerPanelBackTarget("search") },
+            onDismiss = { panel = readerPanelBackTarget("search") }
         )
     }
 
@@ -826,40 +1132,6 @@ class ReaderActivity : AppCompatActivity() {
         searchBusy = false
     }
 
-    @Composable private fun TypographyDialog(settings: AppSettings) {
-        var preferences by remember { mutableStateOf(settings.reading) }
-        AlertDialog(onDismissRequest = { panel = null }, title = { Text(stringResource(R.string.reader_appearance_title)) }, text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text(stringResource(R.string.reader_appearance_typeface))
-                Row {
-                    TextButton(onClick = { preferences = preferences.copy(fontFamily = "serif") }) { val serif = stringResource(R.string.reader_appearance_typeface_serif); Text(if (preferences.fontFamily == "serif") stringResource(R.string.reader_appearance_typeface_selected, serif) else serif) }
-                    TextButton(onClick = { preferences = preferences.copy(fontFamily = "sans-serif") }) { val sans = stringResource(R.string.reader_appearance_typeface_sans); Text(if (preferences.fontFamily != "serif") stringResource(R.string.reader_appearance_typeface_selected, sans) else sans) }
-                }
-                PreferenceSlider(stringResource(R.string.reader_appearance_font_size), stringResource(R.string.reader_appearance_font_size_value, preferences.fontSize.toInt()), preferences.fontSize, 100f..180f) { preferences = preferences.copy(fontSize = it) }
-                PreferenceSlider(stringResource(R.string.reader_appearance_line_height), stringResource(R.string.reader_appearance_line_height_value, preferences.lineHeight), preferences.lineHeight, 1f..2.4f) { preferences = preferences.copy(lineHeight = it) }
-                PreferenceSlider(stringResource(R.string.reader_appearance_paragraph_spacing), stringResource(R.string.reader_appearance_paragraph_spacing_value, preferences.paragraphSpacing), preferences.paragraphSpacing, 0f..2f) { preferences = preferences.copy(paragraphSpacing = it) }
-                PreferenceSlider(stringResource(R.string.reader_appearance_side_margins), stringResource(R.string.reader_appearance_side_margins_value, preferences.pageMargins), preferences.pageMargins, 0.3f..2.5f) { preferences = preferences.copy(pageMargins = it) }
-                PreferenceSlider(stringResource(R.string.reader_appearance_top_distance), stringResource(R.string.reader_appearance_distance_value, preferences.topPaddingDp.toInt()), preferences.topPaddingDp, 16f..120f) { preferences = preferences.copy(topPaddingDp = it) }
-                PreferenceSlider(stringResource(R.string.reader_appearance_bottom_distance), stringResource(R.string.reader_appearance_distance_value, preferences.bottomPaddingDp.toInt()), preferences.bottomPaddingDp, 24f..140f) { preferences = preferences.copy(bottomPaddingDp = it) }
-                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.reader_appearance_continuous), Modifier.padding(top = 12.dp))
-                    Switch(checked = preferences.scroll, onCheckedChange = { preferences = preferences.copy(scroll = it) })
-                }
-                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.reader_appearance_immersive), Modifier.weight(1f).padding(top = 12.dp))
-                    Switch(checked = preferences.immersive, onCheckedChange = { preferences = preferences.copy(immersive = it) })
-                }
-            }
-        }, confirmButton = {
-            TextButton(onClick = {
-                val changed = preferences
-                // The settings observer applies typography and viewport geometry together.
-                graph.scope.launch { graph.store.updateSettings { latest -> latest.copy(reading = changed) } }
-                panel = null
-            }) { Text(stringResource(R.string.reader_apply)) }
-        }, dismissButton = { TextButton(onClick = { panel = null }) { Text(stringResource(R.string.reader_cancel)) } })
-    }
-
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         handledPaddingGesture = false
         when (event.actionMasked) {
@@ -898,6 +1170,16 @@ class ReaderActivity : AppCompatActivity() {
         return handled
     }
     override fun onUserInteraction() { super.onUserInteraction(); tracker?.interact() }
+    override fun onStart() {
+        super.onStart()
+        bindNarration()
+        refreshNarrationCacheSize()
+    }
+    override fun onStop() {
+        clearNarrationHighlight()
+        unbindNarration()
+        super.onStop()
+    }
     override fun onResume() {
         super.onResume()
         resumed = true
@@ -940,6 +1222,9 @@ class ReaderActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
     }
     override fun onDestroy() {
+        narrationObserveJob?.cancel()
+        narrationFailureJob?.cancel()
+        unbindNarration()
         learningSession.close()
         locatorJob?.cancel()
         paddingGestureJob?.cancel()
@@ -954,7 +1239,14 @@ class ReaderActivity : AppCompatActivity() {
         publication?.close()
     }
 
-    private class LookupRequest(val context: LookupContext, val anchor: RectF?, val dictionary: Boolean)
+    private class LookupRequest(val context: LookupContext, val dictionary: Boolean)
+
+    private data class PendingNarration(
+        val bookId: Long,
+        val locatorJson: String,
+        val speed: Float,
+        val startSentence: String?
+    )
     companion object {
         private const val EXTRA_BOOK = "book_id"
         private const val STATE_LOCATOR = "reader_locator"
@@ -962,6 +1254,10 @@ class ReaderActivity : AppCompatActivity() {
         private const val EXPLAIN = 0x4D01
         private const val DICTIONARY = 0x4D02
         private const val SELECTION_LOG_TAG = "MarginSelection"
+        private val LOOKUP_RESUME_REASONS = setOf("popup close", "popup outside dismissal", "back")
+        private const val NARRATION_DECORATION_ID = "narration-utterance"
+        private const val NARRATION_DECORATION_GROUP = "narration"
+        private val NARRATION_HIGHLIGHT = 0x2EFFC107.toInt()
 
         // Readium's release-time selection read is a JavaScript round trip into the WebView, so a
         // released selection is confirmed by agreeing reads instead of trusting one asynchronous value.
@@ -971,14 +1267,6 @@ class ReaderActivity : AppCompatActivity() {
 
         fun intent(context: Context, bookId: Long): Intent = Intent(context, ReaderActivity::class.java).putExtra(EXTRA_BOOK, bookId)
     }
-}
-
-@Composable private fun PreferenceSlider(title: String, label: String, value: Double, range: ClosedFloatingPointRange<Float>, onChange: (Double) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(title)
-        Text(label, style = MaterialTheme.typography.labelLarge)
-    }
-    Slider(value = value.toFloat().coerceIn(range), onValueChange = { onChange(it.toDouble()) }, valueRange = range)
 }
 
 internal fun flattenContents(links: List<Link>): List<Pair<Int, Link>> = buildList {

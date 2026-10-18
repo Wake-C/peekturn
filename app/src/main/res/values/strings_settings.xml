@@ -9,8 +9,6 @@
     <string name="settings_theme_oled">Midnight</string>
     <string name="settings_theme_sage">Sage</string>
     <string name="settings_language">Language</string>
-    <!-- %1$s is the language the app would use on the current system setting. -->
-    <string name="settings_language_system">Follow system (%1$s)</string>
     <string name="settings_language_en">English</string>
     <string name="settings_language_zh">简体中文</string>
     <string name="settings_ai_profiles">AI profiles</string>
@@ -18,7 +16,6 @@
     <string name="settings_unnamed_profile">Unnamed profile</string>
     <string name="settings_not_configured">Not configured</string>
     <string name="settings_edit_profile">Edit %1$s</string>
-    <string name="settings_delete_profile">Delete %1$s</string>
     <string name="settings_quick_explain">Quick Explain</string>
     <string name="settings_quick_explain_detail">Explain a selection once you release it. Off keeps Explain as an explicit action.</string>
     <string name="settings_delete_profile_title">Delete %1$s?</string>
@@ -49,4 +46,18 @@
     <string name="settings_testing_connection">Testing connection</string>
     <string name="settings_test_connection">Test connection</string>
     <string name="settings_save_profile">Save profile</string>
+    <string name="settings_explanation_cache">Explanation cache</string>
+    <string name="settings_explanation_cache_summary">Saved 15 days · 1 GB limit</string>
+    <string name="settings_explanation_cache_detail">Complete explanations are kept for 15 days after they finish, so the same word in the same context does not need another paid request. Failed, partial or malformed answers are never saved. The cache is private to this app and excluded from backups.</string>
+    <string name="settings_explanation_cache_usage">Stored: %1$s</string>
+    <string name="settings_explanation_cache_calculating">Calculating…</string>
+    <string name="settings_explanation_cache_clear">Clear cache</string>
+    <string name="settings_explanation_cache_cleared">Cache cleared.</string>
+    <string name="settings_narration_cache">Sentence audio cache</string>
+    <string name="settings_narration_cache_summary">No expiry · 4 GB limit</string>
+    <string name="settings_narration_cache_detail">Narration audio is saved privately for offline replay. It has no expiry; least-recently-used sentence clips make room only when the cache exceeds 4 GB. Clearing stops active narration and removes sentence audio only; books, reading progress and settings are untouched.</string>
+    <string name="settings_narration_cache_usage">Stored: %1$s</string>
+    <string name="settings_narration_cache_calculating">Calculating…</string>
+    <string name="settings_narration_cache_clear">Clear sentence audio</string>
+    <string name="settings_narration_cache_cleared">Sentence audio cleared.</string>
 </resources>

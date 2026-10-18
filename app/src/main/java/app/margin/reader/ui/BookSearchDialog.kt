@@ -21,6 +21,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Toc
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -173,6 +174,7 @@ internal fun BookSearchDialog(
     onSearch: () -> Unit,
     onMoreResults: () -> Unit,
     onOpen: (Locator) -> Unit,
+    onBack: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val hasResults = state.results.isNotEmpty()
@@ -190,7 +192,21 @@ internal fun BookSearchDialog(
             ) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(stringResource(R.string.shell_search_title), style = MaterialTheme.typography.headlineMedium)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (onBack != null) {
+                                IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                                    Icon(
+                                        Icons.Outlined.Toc,
+                                        contentDescription = stringResource(R.string.reader_contents_back)
+                                    )
+                                }
+                            }
+                            Text(
+                                stringResource(R.string.shell_search_title),
+                                style = MaterialTheme.typography.headlineMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                         OutlinedTextField(
                             value = state.query,
                             onValueChange = onQueryChange,

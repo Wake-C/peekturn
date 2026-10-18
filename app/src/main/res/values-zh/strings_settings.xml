@@ -8,15 +8,13 @@
     <string name="settings_theme_oled">午夜黑</string>
     <string name="settings_theme_sage">鼠尾草</string>
     <string name="settings_language">语言</string>
-    <string name="settings_language_system">跟随系统（%1$s）</string>
-    <string name="settings_language_en">英语</string>
+    <string name="settings_language_en">English</string>
     <string name="settings_language_zh">简体中文</string>
     <string name="settings_ai_profiles">AI 配置</string>
     <string name="settings_add">添加</string>
     <string name="settings_unnamed_profile">未命名配置</string>
     <string name="settings_not_configured">未配置</string>
     <string name="settings_edit_profile">编辑 %1$s</string>
-    <string name="settings_delete_profile">删除 %1$s</string>
     <string name="settings_quick_explain">快速解释</string>
     <string name="settings_quick_explain_detail">松开选中文本后立即解释。关闭后，解释仍是需要手动点按的操作。</string>
     <string name="settings_delete_profile_title">删除 %1$s 配置？</string>
@@ -47,4 +45,18 @@
     <string name="settings_testing_connection">正在测试连接</string>
     <string name="settings_test_connection">测试连接</string>
     <string name="settings_save_profile">保存配置</string>
+    <string name="settings_explanation_cache">解释缓存</string>
+    <string name="settings_explanation_cache_summary">保存 15 天 · 上限 1 GB</string>
+    <string name="settings_explanation_cache_detail">完整解释在完成后保留 15 天；相同语境中的同一个词无需再次付费请求。失败、不完整或格式错误的回答绝不会保存。缓存仅存于本应用，不参与备份。</string>
+    <string name="settings_explanation_cache_usage">已占用：%1$s</string>
+    <string name="settings_explanation_cache_calculating">正在计算…</string>
+    <string name="settings_explanation_cache_clear">清除缓存</string>
+    <string name="settings_explanation_cache_cleared">缓存已清除。</string>
+    <string name="settings_narration_cache">句子音频缓存</string>
+    <string name="settings_narration_cache_summary">不自动过期 · 上限 4 GB</string>
+    <string name="settings_narration_cache_detail">朗读音频保存在应用私有存储中，可离线重播。音频不会自动过期；仅在缓存超过 4 GB 时按最久未使用顺序腾出空间。清除会先停止正在进行的朗读，只删除句子音频，不影响书籍、阅读进度或设置。</string>
+    <string name="settings_narration_cache_usage">已占用：%1$s</string>
+    <string name="settings_narration_cache_calculating">正在计算…</string>
+    <string name="settings_narration_cache_clear">清除句子音频</string>
+    <string name="settings_narration_cache_cleared">句子音频已清除。</string>
 </resources>

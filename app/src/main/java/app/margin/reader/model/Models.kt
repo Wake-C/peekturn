@@ -35,8 +35,11 @@ data class ModelConfig(
 
 data class ReaderPreferences(
     val fontSize: Double = 100.0,
-    val fontFamily: String = "serif",
+    /** System default or a bundled font id; explicit saved choices remain unchanged. */
+    val fontFamily: String = "system",
     val lineHeight: Double = 1.6,
+    /** Extra spacing between letters in em, matching Readium's own EpubPreferences unit. */
+    val letterSpacing: Double = 0.0,
     val pageMargins: Double = 1.0,
     val paragraphSpacing: Double = 0.7,
     val scroll: Boolean = false,

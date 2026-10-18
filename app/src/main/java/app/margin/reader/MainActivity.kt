@@ -1,9 +1,7 @@
 package app.margin.reader
 
 import android.content.Intent
-import android.net.Uri
 import android.graphics.drawable.ColorDrawable
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -11,8 +9,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.app.AppCompatDelegate
-import androidx.core.os.LocaleListCompat
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
@@ -24,6 +20,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -31,6 +28,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.margin.reader.R
 import app.margin.reader.model.AppSettings
+import app.margin.reader.narration.NarrationService
 import app.margin.reader.reader.ReaderActivity
 import app.margin.reader.ui.*
 import app.margin.reader.webimport.WebImportActivity
@@ -43,18 +41,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // The in-app choice is the source of truth, so it is pushed to the per-app locale API as the
-        // first thing the screen does: Compose then resolves stringResource in that locale on this
-        // first composition. Changing the language later recreates this activity (AppCompatDelegate
-        // does it); the tab state survives in the retained ViewModel, settings live in MarginStore,
-        // and the reader is not open while this screen is shown - it later reopens from its stored
-        // Readium locator, so neither settings nor reading position are lost.
-        applyAppLanguage(graph.store.settings.value.uiLanguage)
+        AppLanguage.apply(this, graph.store.settings.value.uiLanguage)
         applyAppTheme(graph.store.settings.value.appTheme)
         vm.initialize(reopen = savedInstanceState == null)
         setContent {
             val settings by graph.store.settings.collectAsStateWithLifecycle()
-            LaunchedEffect(settings.uiLanguage) { applyAppLanguage(settings.uiLanguage) }
+            LaunchedEffect(settings.uiLanguage) { AppLanguage.apply(this@MainActivity, settings.uiLanguage) }
             DisposableEffect(settings.appTheme) {
                 applyAppTheme(settings.appTheme)
                 onDispose { }
@@ -66,16 +58,6 @@ class MainActivity : AppCompatActivity() {
                     onOpen = { id -> startActivity(ReaderActivity.intent(this, id)) }
                 )
             }
-        }
-    }
-    /** Empty list means "follow the system"; official per-app locale API, no custom locale plumbing. */
-    private fun applyAppLanguage(language: String) {
-        val locales = when (language) {
-            "en", "zh" -> LocaleListCompat.forLanguageTags(language)
-            else -> LocaleListCompat.getEmptyLocaleList()
-        }
-        if (AppCompatDelegate.getApplicationLocales() != locales) {
-            AppCompatDelegate.setApplicationLocales(locales)
         }
     }
     private fun applyAppTheme(theme: String) {
@@ -103,8 +85,8 @@ private fun MarginHome(
     val books by vm.graph.store.books.collectAsStateWithLifecycle()
     val stats by vm.graph.store.stats.collectAsStateWithLifecycle()
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
+    val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
-    var addMenu by remember { mutableStateOf(false) }
     var urlDialog by remember { mutableStateOf(false) }
     var urlText by rememberSaveable { mutableStateOf("") }
     var urlInvalid by remember { mutableStateOf(false) }
@@ -146,40 +128,26 @@ private fun MarginHome(
         Box(Modifier.fillMaxSize().padding(padding)) {
             if (!state.ready) CircularProgressIndicator(Modifier.align(Alignment.Center))
             else when (state.tab) {
-                0 -> LibraryScreen(books, vm::open, { addMenu = true }, vm::delete)
+                0 -> LibraryScreen(books, vm::open, onImportFile, { urlDialog = true }, vm::delete)
                 1 -> StatisticsScreen(stats, books, vm::open)
-                else -> SettingsScreen(settings, vm::save, vm.graph.explanations::testConnection, vm.graph.speech)
+                else -> SettingsScreen(
+                    settings, vm::save, vm.graph.explanations::testConnection, vm.graph.speech,
+                    vm.graph.explanationCache::sizeBytes, vm.graph.explanationCache::clear,
+                    vm.graph.sentenceAudio::sizeBytes,
+                    { NarrationService.clearCache(context) }
+                )
             }
             if (state.busy) Surface(color = MaterialTheme.colorScheme.background.copy(alpha = .96f), modifier = Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(20.dp))
-                    Text("Opening your EPUB…", style = MaterialTheme.typography.titleLarge)
-                    Text("Original content stays intact.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.shell_opening_book), style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(R.string.shell_original_preserved), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
     }
 
-    if (addMenu) {
-        AlertDialog(
-            onDismissRequest = { addMenu = false },
-            title = { Text(stringResource(R.string.shell_import_menu_title)) },
-            text = {
-                Column {
-                    TextButton(onClick = { addMenu = false; onImportFile() }, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.shell_import_from_file))
-                    }
-                    TextButton(onClick = { addMenu = false; urlDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.shell_import_from_url))
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { addMenu = false }) { Text(stringResource(R.string.shell_cancel)) }
-            }
-        )
-    }
     if (urlDialog) {
         AlertDialog(
             onDismissRequest = { urlDialog = false },
@@ -189,6 +157,10 @@ private fun MarginHome(
                     value = urlText,
                     onValueChange = { urlText = it; urlInvalid = false },
                     singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                        autoCorrectEnabled = false
+                    ),
                     label = { Text(stringResource(R.string.shell_import_url_hint)) },
                     isError = urlInvalid,
                     supportingText = if (urlInvalid) {

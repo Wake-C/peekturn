@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -20,6 +21,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.margin.reader.model.Book
+import app.margin.reader.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -46,10 +48,11 @@ internal fun BookCover(book: Book, modifier: Modifier = Modifier) {
             }
         }
     }
+    val coverDescription = stringResource(R.string.shell_cover_description, book.title)
     val frame = modifier.aspectRatio(2f / 3f)
         .background(MaterialTheme.colorScheme.surfaceVariant)
         .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        .semantics { contentDescription = "Cover of ${book.title}" }
+        .semantics { contentDescription = coverDescription }
     if (cover != null) {
         Image(cover!!, contentDescription = null, modifier = frame, contentScale = ContentScale.Fit)
     } else {

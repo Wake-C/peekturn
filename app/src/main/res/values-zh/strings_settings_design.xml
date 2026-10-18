@@ -1,0 +1,8 @@
+<resources>
+    <string name="settings_interface_section">界面</string>
+    <string name="settings_language_follow">跟随系统</string>
+    <string name="settings_reading_location">阅读时轻点页面中央，在「选项」中设置阅读习惯。</string>
+    <string name="shell_opening_book">正在打开图书…</string>
+    <string name="shell_original_preserved">保留原书内容与排版。</string>
+    <string name="shell_cover_description">%1$s 的封面</string>
+</resources>

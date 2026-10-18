@@ -161,7 +161,13 @@ class MarginStore internal constructor(private val context: Context, private val
                 "dark", "light", "warm", "oled", "sage" -> settings.appTheme
                 else -> "dark"
             },
-            uiLanguage = when (settings.uiLanguage) { "en", "zh" -> settings.uiLanguage; else -> "system" }
+            uiLanguage = when (settings.uiLanguage) { "en", "zh" -> settings.uiLanguage; else -> "system" },
+            // Readium accepts letter spacing in em from 0 to 1; anything else is repaired rather
+            // than failing the whole typography preference.
+            reading = settings.reading.copy(
+                letterSpacing = settings.reading.letterSpacing
+                    .takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.0
+            )
         )
     }
 

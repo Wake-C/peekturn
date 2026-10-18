@@ -1,0 +1,7 @@
+<resources>
+    <string name="web_import_preview_only">Only a preview of this page was readable. Open the full article or sign in, then import again.</string>
+    <string name="web_import_sign_in">Sign in in this browser to read the full article, then import again.</string>
+    <string name="web_import_no_article">No readable article was found on this page.</string>
+    <string name="web_import_error_page">This page is unavailable. Check the link and try again.</string>
+    <string name="web_import_not_ready">The page is still loading. Wait a moment, then import again.</string>
+</resources>
