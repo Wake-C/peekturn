@@ -1,0 +1,110 @@
+name: Release APK
+
+# A pushed v* tag builds a signed APK and attaches it to a GitHub Release.
+# The release page is the download page: github.com/<owner>/<repo>/releases
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      # The runner image ships an SDK, but the exact compileSdk may lag behind
+      # app/build.gradle.kts. Install the platform only when it is missing.
+      - name: Ensure Android SDK platform 35
+        run: |
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          if [ ! -d "$sdk/platforms/android-35" ]; then
+            "$sdk/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+          fi
+
+      # release.gradle.kts falls back to an unsigned build when these are absent.
+      # Fail early instead of publishing an APK that no device will install.
+      - name: Check signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PEEKTURN_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.PEEKTURN_STORE_PASSWORD }}
+        run: |
+          for name in KEYSTORE_BASE64 STORE_PASSWORD; do
+            [ -n "$(printenv "$name")" ] || { echo "Missing secret $name" >&2; exit 1; }
+          done
+
+      - name: Decode upload keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PEEKTURN_KEYSTORE_BASE64 }}
+        run: |
+          umask 077
+          target="$RUNNER_TEMP/peekturn-upload.jks"
+          printenv KEYSTORE_BASE64 | base64 --decode > "$target"
+          test -s "$target"
+          echo "PEEKTURN_STORE_FILE=$target" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        env:
+          PEEKTURN_STORE_PASSWORD: ${{ secrets.PEEKTURN_STORE_PASSWORD }}
+          PEEKTURN_KEY_ALIAS: ${{ secrets.PEEKTURN_KEY_ALIAS }}
+          PEEKTURN_KEY_PASSWORD: ${{ secrets.PEEKTURN_KEY_PASSWORD }}
+        run: ./gradlew --console=plain :app:testDebugUnitTest :app:assembleRelease
+
+      # Naming, checksum and signature check mirror tools/release.sh so the CI
+      # artifact is the same shape as a local one.
+      - name: Verify and collect artifact
+        id: collect
+        env:
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+          apk=app/build/outputs/apk/release/app-release.apk
+          test -s "$apk"
+          read -r version_name version_code < <(python3 - <<'PY'
+          import json
+          element = json.load(open('app/build/outputs/apk/release/output-metadata.json'))['elements'][0]
+          print(element['versionName'], element['versionCode'])
+          PY
+          )
+          # The tag is the public version. Stop if the build number drifted.
+          test "$TAG" = "v$version_name" || {
+            echo "Tag $TAG does not match versionName $version_name" >&2; exit 1; }
+
+          apksigner=$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs "$apk"
+
+          name="peekturn-${version_name}-${version_code}-release.apk"
+          mkdir -p dist
+          cp "$apk" "dist/$name"
+          (cd dist && sha256sum "$name" > "$name.sha256")
+          {
+            echo "name=$name"
+            echo "version=$version_name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          NAME: ${{ steps.collect.outputs.name }}
+          VERSION: ${{ steps.collect.outputs.version }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --title "Peekturn $VERSION" --generate-notes
+          gh release upload "$TAG" "dist/$NAME" "dist/$NAME.sha256" --clobber

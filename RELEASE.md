@@ -34,17 +34,33 @@ Install the release APK on a device and check the first-run, import, reading, ex
 
 ## GitHub release
 
-1. Confirm the release APK installs, launches and opens a real EPUB.
-2. Commit every change and confirm `git status` is clean.
-3. Create a signed tag:
+The repository release page is the download page. Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds a signed release APK on CI and attaches the APK and its `.sha256` to a GitHub Release.
+
+1. Confirm the release APK installs, launches and opens a real EPUB. A build is not a device acceptance result.
+2. Bump `versionName` and `versionCode` in `app/build.gradle.kts`, then commit and confirm `git status` is clean.
+3. Create a tag that matches `versionName` and push it:
 
 ```sh
-git tag -s v1.0.0 -m "Peekturn 1.0.0"
+git tag -a v1.0.0 -m "Peekturn 1.0.0"
 git push origin main --follow-tags
 ```
 
-4. Create a GitHub Release from `v1.0.0`. Attach the release APK, its `.sha256`, and the AAB if you want to keep both artifacts together.
-5. Use the version name and the user-facing changes in the release notes. Do not describe tests that were not run.
+4. Review the generated release notes and replace them with the user-facing changes. Do not describe tests that were not run.
+
+The workflow fails when the tag and `versionName` disagree, and when the signing secrets are absent. It never publishes an unsigned APK.
+
+CI signs with the same upload keystore as `tools/release.sh`, supplied as repository secrets:
+
+| Secret | Value |
+| --- | --- |
+| `PEEKTURN_KEYSTORE_BASE64` | `base64 -i ~/.config/peekturn/peekturn-upload.jks`, newlines removed |
+| `PEEKTURN_STORE_PASSWORD` | keystore password from Keychain |
+| `PEEKTURN_KEY_ALIAS` | `peekturn-upload` |
+| `PEEKTURN_KEY_PASSWORD` | key password |
+
+CI builds the APK only. Run `tools/release.sh` locally when you need the AAB for Play.
+
+A private repository publishes private releases: only the owner and collaborators can download them. Make the repository public before the download link is meant to work for anyone else.
 
 ## Google Play first release
 
