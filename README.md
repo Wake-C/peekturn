@@ -30,22 +30,28 @@ The goal is not to memorise a definition and move on. It is to understand a word
   <img src="docs/images/reader-expanded.png" width="31%" alt="Expanded narration controls">
   <img src="docs/images/reader-compact.png" width="31%" alt="Compact narration controls">
 </p>
-<p align="center"><sub>Accepted A interaction prototype, shown in Simplified Chinese. Demo text, not a bundled book.</sub></p>
+
+## Look up a word without leaving the page
+
+<p align="center"><img src="docs/images/reader-lookup.png" width="46%" alt="A word explained in context"></p>
+
+Tap a word to see its core meaning, what it means in this sentence, and an example. Close it and keep reading. If the book was being read aloud, it continues from the same moment instead of starting the sentence again.
 
 ## What it does
 
-- Imports original EPUB files through Readium, plus articles from HTTPS links or Android sharing. Available titles and authors are kept; preview pages and unavailable articles are not saved as successes.
-- Keeps the book in Readium's own navigator. Reading positions use locators, not page numbers, so they survive restarts and typography changes.
-- Opens contextual help on a selected word or phrase: a core meaning, a meaning in this context, and examples. Quick Explain opens it directly.
-- Keeps completed explanations for 15 days when the exact context, book or chapter identity, interface language and model profile still match. Settings shows cache usage and clears it.
-- Includes an offline dictionary, online word and example pronunciation with system speech as fallback, US or UK accent choice and optional autoplay.
-- Reads the current sentence and a bounded lookahead aloud, with play, pause, previous, next, speed, stop and retry. Narration keeps playing with the screen off and stores sentence audio privately for offline replay.
-- Supports five bundled reading fonts, adjustable size, spacing and margins, five app themes, and an interface language choice: Follow system, English or 简体中文.
-- Records actual foreground reading time with idle detection. There are no invented statistics, sample books or demo answers.
+- Imports original EPUB books and articles from links or Android sharing. Imported books keep their available titles and authors.
+- Keeps your place when you close the app, restart the phone or change the text size.
+- Shows an explanation for the selected word or phrase, including its meaning in the current sentence and examples.
+- Includes an offline dictionary, online pronunciation for words and examples, a US or UK accent choice, and optional autoplay.
+- Reads the current sentence and the next few sentences aloud, with play, pause, previous, next, speed and stop. It keeps playing with the screen off, and sentences you have heard can be replayed offline.
+- Offers five reading fonts, adjustable size, spacing and margins, five themes, and an interface language choice: Follow system, English or 简体中文.
+- Shows your actual reading time. There are no invented statistics, sample books or demo answers.
+
+Explanations use an AI provider you configure yourself. Add an HTTPS endpoint, model name and API key in Settings. Peekturn does not include a key or a canned answer. A connection test is a real request and may incur charges.
 
 ## What it does not do
 
-- No whole-book translation or flattened chapter text.
+- No whole-book translation. The book keeps its original layout.
 - No vocabulary drills, flashcards or streak mechanics.
 - No cloud library, accounts or sync.
 - No sample library and no fabricated reading data.
@@ -70,17 +76,16 @@ To build only the debug APK:
 
 The debug APK is universal. On macOS the Gradle wrapper selects an installed JDK 17 when `JAVA_HOME` is unset. On other platforms, provide Java 17.
 
+For a signed release, see the [release process](RELEASE.md).
+
 ## Privacy
 
-Books, progress, preferences and reading statistics stay on the device. Model requests contain only the selected text, bounded nearby snippets and available book or chapter titles. API keys are encrypted with Android Keystore, and app backup is disabled.
+Books, progress, preferences and reading statistics stay on the device. There are no accounts and no cloud library.
 
-Word and sentence audio uses public, key-free services. Only the text you asked to hear leaves the device, never surrounding book text or credentials. The offline dictionary does not contact a provider. See the [third-party notices](THIRD_PARTY_NOTICES.md) for the exact routes and attribution.
+When you ask for an explanation, only the selected text, a short surrounding snippet and the available book or chapter title are sent to the provider you configured. Your API key is encrypted on the device. Word and sentence audio uses public, key-free services; only the text you asked to hear leaves the device. The offline dictionary does not contact a provider. See the [third-party notices](THIRD_PARTY_NOTICES.md) for the exact audio routes and attribution.
 
-## Documentation
+## More
 
-- [Domain terminology](CONTEXT.md)
+- [Release process](RELEASE.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 - [Apache-2.0 license](LICENSE)
-- [Release process](RELEASE.md)
-
-The offline dictionary is built independently from ECDICT. Its source revision, hashes, licence and rebuild command are recorded in the [notices](THIRD_PARTY_NOTICES.md#ecdict-offline-dictionary).
