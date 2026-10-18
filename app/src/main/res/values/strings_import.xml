@@ -1,0 +1,18 @@
+<resources>
+    <string name="shell_import_menu_title">Add to library</string>
+    <string name="shell_import_from_file">From a file</string>
+    <string name="shell_import_from_url">From a link</string>
+    <string name="shell_import_url_hint">https://…</string>
+    <string name="shell_import_url_invalid">Enter an http(s) link.</string>
+    <string name="shell_import_open">Open</string>
+    <string name="shell_cancel">Cancel</string>
+    <string name="web_import_title">Import article</string>
+    <string name="web_import_close">Close</string>
+    <string name="web_import_loading">Loading page…</string>
+    <string name="web_import_ready">Ready to import</string>
+    <string name="web_import_action">Import this page</string>
+    <string name="web_import_extracting">Reading the article…</string>
+    <string name="web_import_building">Building the book…</string>
+    <string name="web_import_saving">Saving…</string>
+    <string name="web_import_failed">This page could not be imported.</string>
+</resources>

@@ -555,3 +555,38 @@ font, confirming the single whole-book counter and the forward section name.
 Verified: 270 unit tests with no failures, errors or skips. Not verified: the estimate against a second
 publication, and page counts after a rotation that changes the viewport (the signature includes viewport
 size, but no device rotation was exercised this round).
+
+## Web page import (2026-10-18)
+
+**What was built.** The add control offers a file or a link, and a shared link opens the same flow. The
+link is fetched directly first; anything that is not clearly the article (403, non-HTML, a challenge page)
+falls back to the app's own browser, which uses the device's network and can show a login or challenge for
+the reader to complete. The vendored converter (Mozilla Readability plus the save-as-ebook extractor and
+EPUB writer, both unmodified) runs inside that page and hands the archive to the existing importer, so no
+site-specific code exists.
+
+**Network evidence.** From the host, `curl` with a browser user agent got HTTP 403 for openai.com, and
+headless Chrome got Cloudflare's "Just a moment"; the emulator's real Chrome loaded the OpenAI news page.
+Inside the app, the import browser's WebView (user agent without the `; wv` token) loaded and extracted an
+OpenAI page without a challenge.
+
+**Device evidence (API 35 probe emulator).** Shared
+`https://www.anthropic.com/news/claude-discovers-novel-enzyme-system`: extraction produced 12,611
+characters of reader-mode content, the generated EPUB imported, and the reader opened at
+"Claude discovers a novel enzyme system" with `1 / 28`; article intro, italics and images render.
+`https://paulgraham.com/greatwork.html` imported as "How to Do Great Work" with `1 / 168`.
+`https://openai.com/index/gpt-4o-system-card/` imported as "GPT-4o System Card" with `1 / 46`, which
+confirms the browser passes the bot wall; that particular page's main content is a navigation list, so its
+first pages are links rather than prose. The direct activity path with a pasted link was exercised by
+starting the import browser for the Anthropic URL and pressing "Import this page", which produced the same
+`1 / 28` book.
+
+Delivered as `margin-1.4.0-8-debug.apk` (versionCode 8); the delivered APK installed over the previous
+build, a shared Anthropic link opened in the import browser without the fetch shortcut, and the imported
+article opened at `1 / 28`.
+
+Verified: 276 unit tests (link policy, direct-fetch acceptance, chunk assembly) with no failures, errors or
+skips; the pipeline ran on the device for three publications. Not verified: an X/Twitter long-form article
+or thread, an interactive challenge completed by hand, rotation during import, and multiple images from
+cross-origin CDNs that refuse a CORS fetch.
+

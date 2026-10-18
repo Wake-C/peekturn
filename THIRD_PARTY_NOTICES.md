@@ -64,3 +64,22 @@ Pronouncing a phrase, a generated example or a word whose dictionary recording i
 Downloaded audio is decoded from a bounded in-memory response for playback only. It is not persisted, not cached as a local library and not bundled in the APK, so no service audio is distributed under Margin's code license. A request carries only the exact text the reader asked to hear — a phrase, an example or a single word — and never surrounding context, book text, chapter titles or credentials; the Baidu request is a plain GET that is refused rather than followed if it redirects, and the Microsoft audio is read over a WebSocket the app opens to that host, so the text is never sent to a host the app did not choose. Because the services state no creator and no license, the app credits whichever one supplied the audio by name and address only ("Microsoft Read Aloud", <https://speech.platform.bing.com> or "Baidu Translate", <https://fanyi.baidu.com>) and implies no endorsement by either.
 
 Earlier builds requested an alternative public speech endpoint, Google Translate's `translate_tts`; it was removed because that host was unreachable from the reader's network — the same network where the Microsoft and Baidu endpoints answered — and no request is made to it now.
+
+## Web page import
+
+Margin converts a web page into an EPUB before importing it, so the reader, dictionary, speech and
+statistics keep working on one format. The conversion runs on the device inside the import browser.
+
+- [save-as-ebook](https://github.com/alexadam/save-as-ebook), MIT. Files vendored under
+  `app/src/main/assets/webimport/`: `extractHtml.js`, `sanitizeHtml.js`, `cssSanitizer.js`,
+  `utils.js`, `saveEbook.js`. Upstream revision `8a8c030db758efdfedb09d675eceab76d7836d86`.
+  Margin does not modify these files; `margin-shim.js` supplies the small extension host they expect
+  and `margin-import.js` sequences their extraction and build calls.
+- [Mozilla Readability](https://github.com/mozilla/readability), Apache-2.0, vendored as
+  `readability.js` from the same upstream (its `libs/readability.js`).
+- [JSZip](https://stuk.github.io/jszip/), MIT, vendored as `jszip.js` from the same upstream
+  (its `libs/jszip.js`).
+
+The license texts above are those of the upstream projects; the MIT and Apache-2.0 terms are the
+same as the retained ECDICT MIT text and the Readium BSD terms already recorded in this file.
+

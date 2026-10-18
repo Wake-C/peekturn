@@ -10,6 +10,12 @@ Independent Android EPUB reader for people learning English through sustained re
 - Keep credentials, private book text and temporary verification data out of tracked files and logs.
 - Behavior changes require verification on Android, not only unit tests.
 
+## Code structure
+
+- Build in layers, a sandwich rather than spaghetti: pure decision/policy functions, a thin bridge or controller that only moves data between boundaries, and a surface layer that only renders or hosts. Each layer has one responsibility and its own tests.
+- A single change should land in one layer. Never let a UI class own parsing, persistence or conversion, and never repeat a rule in two places.
+- Prefer composing small, named units over one class that does everything; keep orchestration explicit and local.
+
 ## Task context
 
 - For code changes, shared actors, boundaries and state ownership: [architecture](agent-doc/essential/ARCHITECTURE.md).

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
@@ -32,6 +33,9 @@ import app.margin.reader.R
 import app.margin.reader.model.AppSettings
 import app.margin.reader.reader.ReaderActivity
 import app.margin.reader.ui.*
+import app.margin.reader.webimport.WebImportActivity
+import app.margin.reader.webimport.firstHttpUrl
+import app.margin.reader.webimport.normalizeHttpUrl
 
 class MainActivity : AppCompatActivity() {
     private val graph get() = (application as MarginApp).graph
@@ -50,7 +54,8 @@ class MainActivity : AppCompatActivity() {
         applyAppTheme(graph.store.settings.value.appTheme)
         val incoming = extractIncoming(intent)
         intent = Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN)
-        vm.initialize(reopen = savedInstanceState == null, incoming = incoming)
+        (incoming as? Incoming.Web)?.let { startActivity(WebImportActivity.intent(this, it.url, direct = true)) }
+        vm.initialize(reopen = savedInstanceState == null, incoming = (incoming as? Incoming.Epub)?.uri)
         setContent {
             val settings by graph.store.settings.collectAsStateWithLifecycle()
             LaunchedEffect(settings.uiLanguage) { applyAppLanguage(settings.uiLanguage) }
@@ -60,7 +65,8 @@ class MainActivity : AppCompatActivity() {
             }
             MarginTheme(theme = settings.appTheme) {
                 MarginHome(vm, settings,
-                    onImport = { pickEpub.launch(arrayOf("application/epub+zip", "application/zip", "application/octet-stream")) },
+                    onImportFile = { pickEpub.launch(arrayOf("application/epub+zip", "application/zip", "application/octet-stream")) },
+                    onImportUrl = { url -> startActivity(WebImportActivity.intent(this, url)) },
                     onOpen = { id -> startActivity(ReaderActivity.intent(this, id)) }
                 )
             }
@@ -88,17 +94,44 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        extractIncoming(intent)?.let(vm::importBook)
+        when (val incoming = extractIncoming(intent)) {
+            is Incoming.Epub -> vm.importBook(incoming.uri)
+            is Incoming.Web -> startActivity(WebImportActivity.intent(this, incoming.url, direct = true))
+            null -> Unit
+        }
         setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
     }
     override fun onPause() { graph.speech.stop(); super.onPause() }
-    private fun extractIncoming(intent: Intent?): Uri? = try {
-        when (intent?.action) {
-            Intent.ACTION_VIEW -> intent.data
-            Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-                else @Suppress("DEPRECATION") (intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri)
+    private sealed interface Incoming {
+        data class Epub(val uri: Uri) : Incoming
+        data class Web(val url: String) : Incoming
+    }
+
+    /**
+     * Two kinds of share arrive here: a document (the EPUB picker or a share sheet attachment) and a
+     * link (a browser or X share). A link only carries the address, never the rendered page, so it
+     * opens the import browser, which tries a direct fetch first.
+     */
+    private fun extractIncoming(intent: Intent?): Incoming? = try {
+        val source = intent
+        when (source?.action) {
+            Intent.ACTION_VIEW -> source.data
+                ?.takeIf { it.scheme == "content" }
+                ?.let(Incoming::Epub)
+            Intent.ACTION_SEND -> {
+                if (source.type?.startsWith("text/") == true) {
+                    firstHttpUrl(source.getStringExtra(Intent.EXTRA_TEXT))?.let(Incoming::Web)
+                } else {
+                    val stream = if (Build.VERSION.SDK_INT >= 33) {
+                        source.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                    } else {
+                        @Suppress("DEPRECATION") (source.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri)
+                    }
+                    stream?.takeIf { it.scheme == "content" }?.let(Incoming::Epub)
+                }
+            }
             else -> null
-        }?.takeIf { it.scheme == "content" }
+        }
     } catch (e: RuntimeException) {
         android.util.Log.w("MarginImport", "Unreadable incoming attachment: ${e.javaClass.simpleName}")
         null
@@ -106,12 +139,22 @@ class MainActivity : AppCompatActivity() {
 }
 
 @Composable
-private fun MarginHome(vm: MainViewModel, settings: AppSettings, onImport: () -> Unit, onOpen: (Long) -> Unit) {
+private fun MarginHome(
+    vm: MainViewModel,
+    settings: AppSettings,
+    onImportFile: () -> Unit,
+    onImportUrl: (String) -> Unit,
+    onOpen: (Long) -> Unit
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     val books by vm.graph.store.books.collectAsStateWithLifecycle()
     val stats by vm.graph.store.stats.collectAsStateWithLifecycle()
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val snackbar = remember { SnackbarHostState() }
+    var addMenu by remember { mutableStateOf(false) }
+    var urlDialog by remember { mutableStateOf(false) }
+    var urlText by rememberSaveable { mutableStateOf("") }
+    var urlInvalid by remember { mutableStateOf(false) }
     LaunchedEffect(state.pendingBookId, lifecycle) {
         val id = state.pendingBookId
         if (id != null && lifecycle.isAtLeast(Lifecycle.State.RESUMED)) {
@@ -150,7 +193,7 @@ private fun MarginHome(vm: MainViewModel, settings: AppSettings, onImport: () ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             if (!state.ready) CircularProgressIndicator(Modifier.align(Alignment.Center))
             else when (state.tab) {
-                0 -> LibraryScreen(books, vm::open, onImport, vm::delete)
+                0 -> LibraryScreen(books, vm::open, { addMenu = true }, vm::delete)
                 1 -> StatisticsScreen(stats, books, vm::open)
                 else -> SettingsScreen(settings, vm::save, vm.graph.explanations::testConnection, vm.graph.speech)
             }
@@ -163,5 +206,53 @@ private fun MarginHome(vm: MainViewModel, settings: AppSettings, onImport: () ->
                 }
             }
         }
+    }
+
+    if (addMenu) {
+        AlertDialog(
+            onDismissRequest = { addMenu = false },
+            title = { Text(stringResource(R.string.shell_import_menu_title)) },
+            text = {
+                Column {
+                    TextButton(onClick = { addMenu = false; onImportFile() }, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.shell_import_from_file))
+                    }
+                    TextButton(onClick = { addMenu = false; urlDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.shell_import_from_url))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { addMenu = false }) { Text(stringResource(R.string.shell_cancel)) }
+            }
+        )
+    }
+    if (urlDialog) {
+        AlertDialog(
+            onDismissRequest = { urlDialog = false },
+            title = { Text(stringResource(R.string.shell_import_from_url)) },
+            text = {
+                OutlinedTextField(
+                    value = urlText,
+                    onValueChange = { urlText = it; urlInvalid = false },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.shell_import_url_hint)) },
+                    isError = urlInvalid,
+                    supportingText = if (urlInvalid) {
+                        { Text(stringResource(R.string.shell_import_url_invalid)) }
+                    } else null
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val url = normalizeHttpUrl(urlText)
+                    if (url == null) urlInvalid = true
+                    else { urlDialog = false; urlText = ""; onImportUrl(url) }
+                }) { Text(stringResource(R.string.shell_import_open)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { urlDialog = false }) { Text(stringResource(R.string.shell_cancel)) }
+            }
+        )
     }
 }

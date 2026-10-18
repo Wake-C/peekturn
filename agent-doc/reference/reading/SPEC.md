@@ -6,6 +6,12 @@ Import via Android document picker and ACTION_VIEW/ACTION_SEND readable content 
 
 Display actual title, author and cover where available; a generated typographic cover is an honest fallback. Find books by title/author. Removal requires confirmation, removes local book/cover/location/time data, and does not modify the original external file.
 
+## Web page import
+
+The add control offers a file or an http(s) link, and an ACTION_SEND text share carrying a link opens the same import flow; every other scheme is refused. A link is first fetched directly; when that response is not clearly the article — a non-200 status, a non-HTML body, too little text, or a bot-challenge marker — the app loads the page in its own browser instead. The browser uses the reader's network and login state, so a challenge or an account wall can be completed by hand before importing, and nothing is fetched by a server.
+
+Conversion is local and generic: the vendored pipeline extracts the article with Mozilla Readability and assembles an EPUB. The app adds no per-site selectors or cleanup rules; a failed extraction reports the failure and creates no library entry. The produced archive enters the ordinary EPUB importer, so dictionary, speech, page counts and statistics apply unchanged, and generated temporary files are removed on failure or after import. Site content that a reader cannot reach without signing in, including many X/Twitter threads, is not promised.
+
 ## Reading and restoration
 
 Use Readium navigation and supported EPUB preferences. Font size, serif/sans typeface, line height, paragraph spacing and horizontal margins must affect rendered book content, not only saved controls. Font-size percentage is translated into the renderer's scale units. Independent top/bottom content distances are configurable with displayed values; they reserve comfortable text boundaries while reading gestures remain usable.

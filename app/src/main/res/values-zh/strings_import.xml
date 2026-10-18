@@ -1,0 +1,18 @@
+<resources>
+    <string name="shell_import_menu_title">添加到书架</string>
+    <string name="shell_import_from_file">从文件导入</string>
+    <string name="shell_import_from_url">从链接导入</string>
+    <string name="shell_import_url_hint">https://…</string>
+    <string name="shell_import_url_invalid">请输入 http(s) 链接。</string>
+    <string name="shell_import_open">打开</string>
+    <string name="shell_cancel">取消</string>
+    <string name="web_import_title">导入文章</string>
+    <string name="web_import_close">关闭</string>
+    <string name="web_import_loading">正在加载页面…</string>
+    <string name="web_import_ready">可以导入</string>
+    <string name="web_import_action">导入此页</string>
+    <string name="web_import_extracting">正在提取正文…</string>
+    <string name="web_import_building">正在生成电子书…</string>
+    <string name="web_import_saving">正在保存…</string>
+    <string name="web_import_failed">这个页面无法导入。</string>
+</resources>
