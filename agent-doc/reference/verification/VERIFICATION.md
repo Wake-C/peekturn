@@ -551,9 +551,9 @@ At 100% font Part One measures `1 / 47`, which implies about 184 book pages, but
 re-measured on device after the switch from positions to characters.
 Text loads asynchronously, so the label is rebuilt when it arrives instead of waiting for the next page turn.
 
-Delivered as `margin-1.3.1-5-debug.apk` (versionCode 5); the delivered APK installed over the previous
-build on the probe emulator, launched, and still showed `1 / 142 · 约 636 页` at 176% font, confirming the
-package carries this behavior.
+Delivered as `margin-1.3.2-6-debug.apk` (versionCode 6); the delivered APK installed over the previous
+build on the probe emulator, launched into Part Two, and read "Part Two" with `1 / 356 · 约 559 页` at
+176% font, confirming the package carries the forward name and the character-based estimate.
 
 Verified: 270 unit tests with no failures, errors or skips. Not verified: the estimate against a second
 publication, and page counts after a rotation that changes the viewport (the signature includes viewport
