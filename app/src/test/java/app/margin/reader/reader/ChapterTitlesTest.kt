@@ -68,12 +68,31 @@ class ChapterTitlesTest {
         )
     }
 
-    @Test fun `a shared file name in another directory cannot label an unrelated chapter`() {
+    @Test fun `an untitled resource carries the nearest preceding section name`() {
         val toc = listOf(chapter("part1/chapter.xhtml", "Part One"))
         val spine = listOf(chapter("part1/chapter.xhtml"), chapter("part2/chapter.xhtml"))
-        // Only the resource the table of contents actually names may take its title.
-        assertEquals("", chapterTitleFor(position("part2/chapter.xhtml"), toc, spine))
+        // Mainstream readers run the last named section forward over untitled resources.
         assertEquals("Part One", chapterTitleFor(position("part1/chapter.xhtml"), toc, spine))
+        assertEquals("Part One", chapterTitleFor(position("part2/chapter.xhtml"), toc, spine))
+    }
+
+    @Test fun `a part title page names the body that follows it`() {
+        // The shape The Alchemist uses: the table of contents names only the part's title page,
+        // and the part's body file has no entry at all.
+        val toc = listOf(
+            chapter("OEBPS/part0006.xhtml", "Part One"),
+            chapter("OEBPS/part0008.xhtml", "Part Two")
+        )
+        val spine = listOf(
+            chapter("OEBPS/part0006.xhtml"),
+            chapter("OEBPS/part0007.xhtml"),
+            chapter("OEBPS/part0008.xhtml"),
+            chapter("OEBPS/part0009.xhtml")
+        )
+        assertEquals("Part One", chapterTitleFor(position("OEBPS/part0007.xhtml"), toc, spine))
+        assertEquals("Part Two", chapterTitleFor(position("OEBPS/part0009.xhtml"), toc, spine))
+        // The next named section stops the previous name from running on.
+        assertEquals("Part Two", chapterTitleFor(position("OEBPS/part0008.xhtml"), toc, spine))
     }
 
     @Test fun `a shortened table of contents entry cannot claim several resources`() {
@@ -119,8 +138,8 @@ class ChapterTitlesTest {
         )
     }
 
-    /** A titled part names the untitled chapters under it, and only those. */
-    @Test fun `a named part covers its untitled children but not a following chapter`() {
+    /** A titled part names its untitled children and the untitled resources that follow them. */
+    @Test fun `a named part covers its untitled children and the resources after them`() {
         val part = chapter(
             "part1/first.xhtml", "Part One",
             children = listOf(chapter("part1/second.xhtml"), chapter("part1/third.xhtml"))
@@ -128,7 +147,7 @@ class ChapterTitlesTest {
         val spine = listOf(chapter("part1/first.xhtml"), chapter("part1/second.xhtml"), chapter("part1/third.xhtml"), chapter("part2/other.xhtml"))
         assertEquals("Part One", chapterTitleFor(position("part1/second.xhtml"), listOf(part), spine))
         assertEquals("Part One", chapterTitleFor(position("part1/third.xhtml"), listOf(part), spine))
-        assertEquals("", chapterTitleFor(position("part2/other.xhtml"), listOf(part), spine))
+        assertEquals("Part One", chapterTitleFor(position("part2/other.xhtml"), listOf(part), spine))
     }
 
     /** Readium reports the resource name when its table-of-contents match fails; that is not a title. */

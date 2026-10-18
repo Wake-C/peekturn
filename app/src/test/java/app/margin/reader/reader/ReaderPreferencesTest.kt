@@ -35,10 +35,15 @@ class ReaderPreferencesTest {
 
     @Test fun `book page estimate scales chapter density to the whole publication`() {
         // 20 measured pages over 40 positions, 500 positions in the book.
-        assertEquals(250, bookPageEstimate(chapterPages = 20, chapterPositions = 40, totalPositions = 500))
+        assertEquals(250, bookPageEstimate(chapterPages = 20, chapterChars = 40_000, totalChars = 500_000))
         // Unusable measurements produce no estimate rather than a fabricated number.
-        assertNull(bookPageEstimate(chapterPages = 0, chapterPositions = 40, totalPositions = 500))
-        assertNull(bookPageEstimate(chapterPages = 2, chapterPositions = 2, totalPositions = 500))
-        assertNull(bookPageEstimate(chapterPages = 20, chapterPositions = 60, totalPositions = 50))
+        assertNull(bookPageEstimate(chapterPages = 0, chapterChars = 40_000, totalChars = 500_000))
+        assertNull(bookPageEstimate(chapterPages = 2, chapterChars = 2_000, totalChars = 500_000))
+        assertNull(bookPageEstimate(chapterPages = 20, chapterChars = 60_000, totalChars = 50_000))
+    }
+
+    @Test fun `text characters skip markup, scripts and whitespace`() {
+        val html = "<html><head><style>p { color: red }</style></head><body><p>Hello  world</p><!-- note --></body></html>"
+        assertEquals(10, textCharacters(html.toByteArray()))
     }
 }

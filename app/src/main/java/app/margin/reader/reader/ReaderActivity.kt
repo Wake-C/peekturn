@@ -53,7 +53,9 @@ import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -63,7 +65,6 @@ import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.publication.Locator
-import org.readium.r2.shared.publication.services.positionsByReadingOrder
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.util.getOrElse
 import org.readium.r2.shared.publication.services.search.SearchIterator
@@ -79,9 +80,13 @@ class ReaderActivity : AppCompatActivity() {
     private var initialLocator: Locator? = null
     private var lastLocator: Locator? = null
     private var positionLabel by mutableStateOf("")
-    /** Readium positions per resource and for the whole book; absent until loaded. */
-    private var positionsByResource by mutableStateOf<Map<String, Int>>(emptyMap())
-    private var totalPositions by mutableStateOf(0)
+    /**
+     * Non-whitespace characters per resource and for the whole book. Readium's positions have a floor
+     * of one per resource, so a ten-character title page counts as a whole chunk and inflates a
+     * position-based estimate; actual text length does not.
+     */
+    private var charsByResource by mutableStateOf<Map<String, Int>>(emptyMap())
+    private var totalBookChars by mutableStateOf(0)
     /**
      * Measured pages and positions per layout signature. A single short chapter ends in a nearly
      * blank page, so its density underestimates the layout; only an accumulated sample is trusted.
@@ -218,16 +223,25 @@ class ReaderActivity : AppCompatActivity() {
                 chapterTitles = ChapterTitles.of(opened.tableOfContents, opened.readingOrder)
                 lifecycleScope.launch {
                     // Readium paginates a single resource, so a whole-book count is derived from the
-                    // publication's own positions (each chapter's count is proportional to its text).
-                    val byOrder: List<List<Locator>> = runCatching { opened.positionsByReadingOrder() }
-                        .getOrNull().orEmpty()
-                    val perResource = byOrder.mapIndexedNotNull { index, list ->
-                        val href = opened.readingOrder.getOrNull(index)?.href?.toString() ?: return@mapIndexedNotNull null
-                        href.substringBefore('#').substringBefore('?') to list.size
-                    }.toMap()
-                    positionsByResource = perResource
-                    totalPositions = byOrder.sumOf { it.size }
-                    // Positions arrive after the first page; rebuild the label when they do.
+                    // publication's text: the layout's characters-per-page measured on real chapters
+                    // divides the book's own character total.
+                    val perResource = withContext(Dispatchers.IO) {
+                        val counts = linkedMapOf<String, Int>()
+                        for (link in opened.readingOrder) {
+                            val resource = opened.get(link) ?: continue
+                            val length = runCatching { resource.length().getOrNull() }.getOrNull() ?: continue
+                            if (length < 1) continue
+                            val bytes = runCatching { resource.read(0L..(length - 1)).getOrNull() }
+                                .getOrNull() ?: continue
+                            val key = link.href.toString().substringBefore('#').substringBefore('?')
+                            counts[key] = textCharacters(bytes)
+                        }
+                        counts
+                    }
+                    if (perResource.isEmpty()) return@launch
+                    charsByResource = perResource
+                    totalBookChars = perResource.values.sum()
+                    // Text arrives after the first page; rebuild the label when it does.
                     lastPagination?.let { (page, total, locator) ->
                         positionLabel = pageLabel(page, total, locator, graph.store.settings.value.reading)
                     }
@@ -571,9 +585,9 @@ class ReaderActivity : AppCompatActivity() {
         val progression = locator.locations.progression
         if (reading.scroll) return chapterPositionLabel(true, page, chapterPages, progression)
         val chapter = getString(R.string.reader_position_pages, page, chapterPages)
-        if (totalPositions < 1) return chapter
+        if (totalBookChars < 1) return chapter
         val key = locator.href.toString().substringBefore('#').substringBefore('?')
-        val here = positionsByResource[key] ?: positionsByResource.entries
+        val here = charsByResource[key] ?: charsByResource.entries
             .firstOrNull { (href, _) -> href.substringAfterLast('/') == key.substringAfterLast('/') }?.value
             ?: return chapter
         val signature = listOf(
@@ -582,12 +596,14 @@ class ReaderActivity : AppCompatActivity() {
             navigator?.view?.width ?: 0, navigator?.view?.height ?: 0
         ).joinToString("|")
         val sampleKey = "$signature|$key"
-        if (measuredChapters.add(sampleKey)) {
+        // Short resources (title pages, separators) are mostly partial pages and would drag the
+        // density down, so only chapters long enough to contain a full page contribute.
+        if (chapterPages >= BOOK_ESTIMATE_MIN_PAGES && measuredChapters.add(sampleKey)) {
             val (sampledPages, sampledPositions) = pageSamples[signature] ?: (0 to 0)
             pageSamples = pageSamples + (signature to ((sampledPages + chapterPages) to (sampledPositions + here)))
         }
         val sample = pageSamples[signature] ?: (0 to 0)
-        val estimate = bookPageEstimate(sample.first, sample.second, totalPositions) ?: return chapter
+        val estimate = bookPageEstimate(sample.first, sample.second, totalBookChars) ?: return chapter
         return getString(R.string.reader_position_book_pages, page, chapterPages, estimate)
     }
 

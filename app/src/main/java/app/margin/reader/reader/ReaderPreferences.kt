@@ -41,21 +41,28 @@ internal fun readerTextInsets(preferences: ReaderPreferences) = ReaderTextInsets
 
 /**
  * Whole-book page estimate for the current layout. Readium paginates one resource at a time, so a
- * book-wide page count can only be derived: a chapter's measured pages over its own positions gives
- * the pages-per-position density of this typography, and applying that density to the publication's
- * positions total estimates the book. It is an estimate, never presented as a measured count, and it
+ * book-wide page count can only be derived: a chapter's measured pages over its own text length gives
+ * the characters-per-page density of this typography, and applying that density to the publication's
+ * character total estimates the book. It is an estimate, never presented as a measured count, and it
  * is recomputed when the layout signature changes because the density changes with it.
  */
 /** A sample shorter than this is dominated by chapter-start and chapter-end partial pages. */
 internal const val BOOK_ESTIMATE_MIN_PAGES = 5
 
-internal fun bookPageEstimate(chapterPages: Int, chapterPositions: Int, totalPositions: Int): Int? {
-    if (chapterPages < BOOK_ESTIMATE_MIN_PAGES || chapterPositions < 1) return null
-    if (totalPositions < chapterPositions) return null
-    val estimate = (chapterPages.toLong() * totalPositions + chapterPositions.toLong() / 2) / chapterPositions
+internal fun bookPageEstimate(chapterPages: Int, chapterChars: Int, totalChars: Int): Int? {
+    if (chapterPages < BOOK_ESTIMATE_MIN_PAGES || chapterChars < 1) return null
+    if (totalChars < chapterChars) return null
+    val estimate = (chapterPages.toLong() * totalChars + chapterChars.toLong() / 2) / chapterChars
     return estimate.coerceAtLeast(chapterPages.toLong()).toInt()
 }
 
 internal fun chapterPositionLabel(scroll: Boolean, page: Int, total: Int, progression: Double?): String =
     if (scroll) progression?.let { "Chapter ${(it.coerceIn(0.0, 1.0) * 100).toInt()}%" } ?: "Chapter"
     else if (page in 1..total) "$page / $total" else ""
+
+private val markupBlocks = Regex("<(script|style)\\b[^>]*>.*?</\\1\\s*>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+private val markupTags = Regex("<[^>]*>")
+
+/** Non-whitespace book text characters in an (X)HTML resource, without markup or whitespace. */
+internal fun textCharacters(bytes: ByteArray): Int =
+    markupTags.replace(markupBlocks.replace(String(bytes, Charsets.UTF_8), " "), " ").count { !it.isWhitespace() }

@@ -24,8 +24,15 @@ internal class ChapterTitles private constructor(
     private val tocExact: Map<String, String>,
     private val tocByResource: Map<String, String>,
     private val resources: Set<String>,
-    private val spineTitles: Map<String, String>
+    private val spineTitles: Map<String, String>,
+    private val carriedTitles: Map<String, String> = emptyMap()
 ) {
+    /**
+     * Mainstream readers run the nearest preceding section name forward: a resource the table of
+     * contents does not name keeps the last named section until the next named section begins. This
+     * is what names Part One's untitled body after the part's title page, and why Part Two's own
+     * entry stops Part One's name.
+     */
     /** Readium's own title, else this publication's name for the locator's resource, else blank. */
     fun titleFor(locator: Locator): String {
         val href = locator.href.toString()
@@ -34,7 +41,8 @@ internal class ChapterTitles private constructor(
         // and a reader must never see "part0005" where a chapter name belongs. A name that is only the
         // file or its stem is therefore not a title, and resolution continues below.
         cleanChapterTitle(locator.title)?.takeUnless { it.namesResource(key) }?.let { return it }
-        return tableOfContentsTitle(href, key) ?: spineTitle(key).orEmpty()
+        return tableOfContentsTitle(href, key) ?: spineTitle(key)
+            ?: carriedTitles[resources.alignedResource(key) ?: key].orEmpty()
     }
 
     private fun tableOfContentsTitle(href: String, key: String): String? {
@@ -50,6 +58,10 @@ internal class ChapterTitles private constructor(
             .filterKeys { it.alignsWith(resource) && resources.alignedResource(it) == resource }
             .values.distinct().singleOrNull()
     }
+
+    /** This resource's own name from the table of contents or reading order, without inheritance. */
+    private fun ownTitle(href: String, key: String): String? =
+        tableOfContentsTitle(href, key) ?: spineTitle(key)
 
     private fun spineTitle(key: String): String? =
         (resources.alignedResource(key) ?: key).let { spineTitles[it] }
@@ -87,9 +99,22 @@ internal class ChapterTitles private constructor(
                 cleanChapterTitle(link.title)?.takeUnless { it.namesResource(key) }
                     ?.let { spineTitles[key] = it }
             }
-            // Reading-order position of every resource, so a title can be attributed to the chapter
-            // at or before a position even when its own entry is untitled.
-            return ChapterTitles(exact, byResource, resources, spineTitles)
+            val titles = ChapterTitles(exact, byResource, resources, spineTitles)
+            // Run each named section forward over the untitled resources that follow it, stopping at
+            // the next named section, so a part's body carries the part's name.
+            val carried = linkedMapOf<String, String>()
+            var current: String? = null
+            for (link in readingOrder) {
+                val linkHref = link.href.toString()
+                val linkKey = linkHref.resourceKey()
+                val own = titles.ownTitle(linkHref, linkKey)
+                if (own != null) {
+                    current = own
+                } else if (current != null && titles.ownTitle(linkHref, linkKey) == null) {
+                    carried[resources.alignedResource(linkKey) ?: linkKey] = current
+                }
+            }
+            return ChapterTitles(exact, byResource, resources, spineTitles, carried)
         }
     }
 }

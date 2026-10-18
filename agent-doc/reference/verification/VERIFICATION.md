@@ -528,25 +528,33 @@ resource stays blank. Device evidence: the Prologue page reads "Prologue" and th
 chapter name; the unmatched body file of Part One also stays blank, as the table of contents names only
 the part page and the earlier rule forbids lending a name across resources.
 
+**Section names run forward.** A resource the table of contents does not name keeps the nearest preceding
+named section until the next named section begins, the way mainstream readers render a running header.
+Part One's title page itself is in the table of contents while its 47-page body file is not, so the body
+now reads "Part One"; Part Two's own entry stops the name and its body reads "Part Two".
+
 **Chapter pages versus the book total.** The bottom-left counter is `current / total` for the loaded
 chapter, straight from Readium's `PaginationListener`; Readium paginates one resource at a time and never
-reports a whole-book page count. A book total is therefore derived: measured chapter pages over that
-chapter's Readium positions gives the pages-per-position density of the current typography, and applying it
-to the publication's position total estimates the book. It is shown as approximate, appears only after at
-least five measured pages (short chapters are dominated by partial first and last pages), samples each
+reports a whole-book page count. A book total is therefore derived from measured pages over the chapter's
+own text characters, applied to the publication's character total. Characters are used instead of Readium
+positions because positions have a floor of one per resource: a position-based estimate ran 14-22% high
+because short title pages counted as full chunks. The estimate is shown as approximate, appears only after
+at least five measured pages, samples only chapters long enough to contain a full page, samples each
 chapter once per layout signature, and is recomputed when that signature changes.
 
 Device evidence on the API 35 probe emulator, Chinese interface, Sage theme: the Prologue shows
-`1 / 2` with no estimate; Part One (47,881 characters) shows `1 / 47 · 约 210 页`; raising the font to
-176% reflows to `1 / 142 · 约 636 页`, preserving the derived ratio (47,881 characters over 47 pages is
-1,019 characters per page; the book's 187,776 characters come to roughly 184 pages at that setting, so the
-estimate's 210 is about 14% high because Readium rounds positions per resource). Positions load
-asynchronously, so the label is rebuilt when they arrive instead of waiting for the next page turn.
+`1 / 2` with no estimate; Part One reflows to `1 / 142` and Part Two to `1 / 356 · 约 559 页` at 176%
+font. The character model's expectation is
+about 557 pages at that setting (187,776 characters over 337 characters measured per page), so the
+estimate is within one percent; the earlier position-based estimate read 636-679 pages (14-22% high).
+At 100% font Part One measures `1 / 47`, which implies about 184 book pages, but that reading was not
+re-measured on device after the switch from positions to characters.
+Text loads asynchronously, so the label is rebuilt when it arrives instead of waiting for the next page turn.
 
 Delivered as `margin-1.3.1-5-debug.apk` (versionCode 5); the delivered APK installed over the previous
 build on the probe emulator, launched, and still showed `1 / 142 · 约 636 页` at 176% font, confirming the
 package carries this behavior.
 
-Verified: 268 unit tests with no failures, errors or skips. Not verified: the estimate against a second
+Verified: 270 unit tests with no failures, errors or skips. Not verified: the estimate against a second
 publication, and page counts after a rotation that changes the viewport (the signature includes viewport
 size, but no device rotation was exercised this round).
