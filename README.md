@@ -81,5 +81,6 @@ Word and sentence audio uses public, key-free services. Only the text you asked 
 - [Domain terminology](CONTEXT.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 - [Apache-2.0 license](LICENSE)
+- [Release process](RELEASE.md)
 
 The offline dictionary is built independently from ECDICT. Its source revision, hashes, licence and rebuild command are recorded in the [notices](THIRD_PARTY_NOTICES.md#ecdict-offline-dictionary).

@@ -81,5 +81,6 @@ debug APK 是通用包。macOS 上，如果未设置 `JAVA_HOME`，Gradle wrappe
 - [领域术语](CONTEXT.md)
 - [第三方声明](THIRD_PARTY_NOTICES.md)
 - [Apache-2.0 许可证](LICENSE)
+- [发布流程](RELEASE.md)
 
 离线词典独立构建自 ECDICT。源版本、哈希、许可证和重建命令记录在[第三方声明](THIRD_PARTY_NOTICES.md#ecdict-offline-dictionary)。

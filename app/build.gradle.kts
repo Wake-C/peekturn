@@ -3,6 +3,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val releaseStoreFile = providers.environmentVariable("PEEKTURN_STORE_FILE").orNull
+val releaseStorePassword = providers.environmentVariable("PEEKTURN_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("PEEKTURN_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("PEEKTURN_KEY_PASSWORD").orNull
+
 android {
     namespace = "app.peekturn.reader"
     compileSdk = 35
@@ -13,6 +19,24 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    signingConfigs {
+        if (releaseStoreFile != null && releaseStorePassword != null && releaseKeyAlias != null && releaseKeyPassword != null) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+    buildTypes {
+        release {
+            isDebuggable = false
+            isMinifyEnabled = false
+            isShrinkResources = false
+            signingConfig = signingConfigs.findByName("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
