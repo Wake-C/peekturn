@@ -29,20 +29,6 @@ The goal is not to memorise a definition and move on. It is to understand a word
 
 A 34-second tour: read, listen, look up a word, and import an article from a URL. The preview above loops automatically. [Download the full MP4](https://github.com/Wake-C/peekturn/raw/refs/heads/main/docs/video/peekturn-intro.mp4).
 
-## The reading surface
-
-<p align="center">
-  <img src="docs/images/reader-tools.png" width="31%" alt="Reader tools">
-  <img src="docs/images/reader-expanded.png" width="31%" alt="Expanded narration controls">
-  <img src="docs/images/reader-compact.png" width="31%" alt="Compact narration controls">
-</p>
-
-## Look up a word without leaving the page
-
-<p align="center"><img src="docs/images/reader-lookup-en.png" width="46%" alt="A word explained in context"></p>
-
-Tap a word to see its core meaning, what it means in this sentence, and an example. Close it and keep reading. If the book was being read aloud, it continues from the same moment instead of starting the sentence again.
-
 ## What it does
 
 - Imports original EPUB books, and articles from a URL or Android sharing. Imported books keep their available titles and authors.

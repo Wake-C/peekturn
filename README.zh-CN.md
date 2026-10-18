@@ -29,20 +29,6 @@
 
 34 秒看完：阅读、朗读、查词，以及从 URL 导入文章。上面的预览会自动循环。完整版：[下载 MP4](https://github.com/Wake-C/peekturn/raw/refs/heads/main/docs/video/peekturn-intro.mp4)。
 
-## 阅读界面
-
-<p align="center">
-  <img src="docs/images/reader-tools.png" width="31%" alt="阅读工具">
-  <img src="docs/images/reader-expanded.png" width="31%" alt="展开朗读控制">
-  <img src="docs/images/reader-compact.png" width="31%" alt="收拢朗读控制">
-</p>
-
-## 不离开这一页，也能看懂一个词
-
-<p align="center"><img src="docs/images/reader-lookup-zh.png" width="46%" alt="语境解释"></p>
-
-点一下单词，就能看到它的核心含义、它在这句话里的意思，以及例句。关掉解释，继续读。如果正文正在朗读，会从刚才的位置接着听，不会把这句重新读一遍。
-
 ## 它做什么
 
 - 导入原始 EPUB 书，也可以从 URL 或 Android 分享导入文章。书名和作者会尽量保留。
