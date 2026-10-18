@@ -543,6 +543,10 @@ Device evidence on the API 35 probe emulator, Chinese interface, Sage theme: the
 estimate's 210 is about 14% high because Readium rounds positions per resource). Positions load
 asynchronously, so the label is rebuilt when they arrive instead of waiting for the next page turn.
 
+Delivered as `margin-1.3.1-5-debug.apk` (versionCode 5); the delivered APK installed over the previous
+build on the probe emulator, launched, and still showed `1 / 142 · 约 636 页` at 176% font, confirming the
+package carries this behavior.
+
 Verified: 268 unit tests with no failures, errors or skips. Not verified: the estimate against a second
 publication, and page counts after a rotation that changes the viewport (the signature includes viewport
 size, but no device rotation was exercised this round).
