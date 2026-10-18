@@ -9,6 +9,7 @@
 - [reference/AGENTS.md](../reference/AGENTS.md): conditional routing to feature owners, product-wide requirements and verification evidence.
 - [reference/SPEC.md](../reference/SPEC.md): product scope, shared visual design, accepted prototype reference and cross-feature acceptance criteria.
 - Feature directories under `reference/`: `SPEC.md` owns behavior; `INTEGRATION.md` owns non-obvious implementation ownership, state lifetimes and native constraints. A local `AGENTS.md` selects these sources and any cross-feature boundary needed for the task.
+- Operational runbooks live under `reference/<operation>/RUNBOOK.md`; executable workflows live in `tools/`.
 - [reference/verification/VERIFICATION.md](../reference/verification/VERIFICATION.md): dated build evidence and explicit unverified boundaries. Old observations and pass counts do not define current requirements or establish a fresh verification result.
 - [Root CONTEXT.md](../../CONTEXT.md): stable vocabulary for Margin's single reading/learning domain, not settings schemas, requirements or task history. Feature directories do not create separate domain glossaries.
 - [Root README.md](../../README.md): user introduction, first use and runnable build/install instructions.
