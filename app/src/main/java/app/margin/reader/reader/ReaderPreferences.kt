@@ -2,6 +2,8 @@
 
 package app.margin.reader.reader
 
+import kotlin.math.roundToInt
+
 import androidx.compose.ui.graphics.toArgb
 import app.margin.reader.model.ReaderPreferences
 import app.margin.reader.ui.marginColorScheme
@@ -39,21 +41,24 @@ internal fun readerTextInsets(preferences: ReaderPreferences) = ReaderTextInsets
     preferences.topPaddingDp.coerceAtLeast(16.0), preferences.bottomPaddingDp.coerceAtLeast(24.0)
 )
 
-/**
- * Whole-book page estimate for the current layout. Readium paginates one resource at a time, so a
- * book-wide page count can only be derived: a chapter's measured pages over its own text length gives
- * the characters-per-page density of this typography, and applying that density to the publication's
- * character total estimates the book. It is an estimate, never presented as a measured count, and it
- * is recomputed when the layout signature changes because the density changes with it.
- */
-/** A sample shorter than this is dominated by chapter-start and chapter-end partial pages. */
-internal const val BOOK_ESTIMATE_MIN_PAGES = 5
+/** A chapter needs at least this many pages before its density represents a full page. */
+internal const val PAGE_DENSITY_MIN_PAGES = 5
 
-internal fun bookPageEstimate(chapterPages: Int, chapterChars: Int, totalChars: Int): Int? {
-    if (chapterPages < BOOK_ESTIMATE_MIN_PAGES || chapterChars < 1) return null
-    if (totalChars < chapterChars) return null
-    val estimate = (chapterPages.toLong() * totalChars + chapterChars.toLong() / 2) / chapterChars
-    return estimate.coerceAtLeast(chapterPages.toLong()).toInt()
+/**
+ * Book-wide page position for the current layout. The reader only ever paginates one resource, so the
+ * position counts the text before this resource at the measured characters-per-page density and adds
+ * the exact page within it; the total applies the same density to the book's text.
+ */
+internal fun bookPageCounter(
+    charsBefore: Int,
+    page: Int,
+    totalChars: Int,
+    charsPerPage: Double
+): Pair<Int, Int>? {
+    if (page < 1 || totalChars < 1 || !charsPerPage.isFinite() || charsPerPage <= 0) return null
+    val position = (charsBefore / charsPerPage).roundToInt() + page
+    val total = (totalChars / charsPerPage).roundToInt().coerceAtLeast(position)
+    return position to total
 }
 
 internal fun chapterPositionLabel(scroll: Boolean, page: Int, total: Int, progression: Double?): String =

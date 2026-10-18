@@ -33,13 +33,17 @@ class ReaderPreferencesTest {
         assertEquals("Chapter", chapterPositionLabel(true, 0, 0, null))
     }
 
-    @Test fun `book page estimate scales chapter density to the whole publication`() {
-        // 20 measured pages over 40 positions, 500 positions in the book.
-        assertEquals(250, bookPageEstimate(chapterPages = 20, chapterChars = 40_000, totalChars = 500_000))
-        // Unusable measurements produce no estimate rather than a fabricated number.
-        assertNull(bookPageEstimate(chapterPages = 0, chapterChars = 40_000, totalChars = 500_000))
-        assertNull(bookPageEstimate(chapterPages = 2, chapterChars = 2_000, totalChars = 500_000))
-        assertNull(bookPageEstimate(chapterPages = 20, chapterChars = 60_000, totalChars = 50_000))
+    @Test fun `book page counter counts the text before the chapter plus the exact page`() {
+        // 1,000 characters per page, 100 pages of book: the first page of the first chapter is 1.
+        assertEquals(1 to 100, bookPageCounter(charsBefore = 0, page = 1, totalChars = 100_000, charsPerPage = 1_000.0))
+        // Text before this chapter is converted at the same density, then the in-chapter page is added.
+        assertEquals(53 to 100, bookPageCounter(charsBefore = 50_000, page = 3, totalChars = 100_000, charsPerPage = 1_000.0))
+        // The total can never fall behind a page the reader is actually on.
+        assertEquals(103 to 103, bookPageCounter(charsBefore = 99_500, page = 3, totalChars = 100_000, charsPerPage = 1_000.0))
+        // Unusable measurements produce no counter rather than a fabricated page.
+        assertNull(bookPageCounter(charsBefore = 0, page = 0, totalChars = 100_000, charsPerPage = 1_000.0))
+        assertNull(bookPageCounter(charsBefore = 0, page = 1, totalChars = 0, charsPerPage = 1_000.0))
+        assertNull(bookPageCounter(charsBefore = 0, page = 1, totalChars = 100_000, charsPerPage = 0.0))
     }
 
     @Test fun `text characters skip markup, scripts and whitespace`() {

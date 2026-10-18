@@ -19,6 +19,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
+private const val MAX_PAGE_DENSITIES = 16
+
 class MarginStore internal constructor(private val context: Context, private val vault: CredentialVault) {
     constructor(context: Context) : this(context, AndroidCredentialVault())
     private val db = Database(context)
@@ -91,6 +93,31 @@ class MarginStore internal constructor(private val context: Context, private val
         }
     }
     fun lastBookId(): Long? = prefs.getLong("last_book", -1L).takeIf { it >= 0 }
+    /**
+     * Display-only cache of characters per page per layout signature. Page counts are derivatives,
+     * never reading positions, and this only lets a book page counter appear before the reader meets
+     * a full chapter in the current layout.
+     */
+    fun cachedPageDensity(): Map<String, Double> = runCatching {
+        prefs.getString("page_density", null)?.let { json ->
+            JsonParser.parseString(json).asJsonObject.entrySet().mapNotNull { (key, value) ->
+                if (value.isJsonPrimitive && value.asJsonPrimitive.isNumber) {
+                    value.asDouble.takeIf { it.isFinite() && it > 0 }?.let { key to it }
+                } else null
+            }.toMap()
+        }
+    }.getOrNull().orEmpty()
+    suspend fun cachePageDensity(signature: String, charsPerPage: Double) = withContext(Dispatchers.IO) {
+        if (!charsPerPage.isFinite() || charsPerPage <= 0) return@withContext
+        writes.withLock {
+            val current = cachedPageDensity().toMutableMap()
+            current[signature] = charsPerPage
+            while (current.size > MAX_PAGE_DENSITIES) current.remove(current.keys.first())
+            check(prefs.edit().putString("page_density", gson.toJson(current)).commit()) {
+                "Could not save page density"
+            }
+        }
+    }
     suspend fun clearLastBook() = withContext(Dispatchers.IO) {
         writes.withLock { check(prefs.edit().remove("last_book").commit()) { "Could not clear last book" } }
     }

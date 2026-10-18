@@ -533,23 +533,20 @@ named section until the next named section begins, the way mainstream readers re
 Part One's title page itself is in the table of contents while its 47-page body file is not, so the body
 now reads "Part One"; Part Two's own entry stops the name and its body reads "Part Two".
 
-**Chapter pages versus the book total.** The bottom-left counter is `current / total` for the loaded
-chapter, straight from Readium's `PaginationListener`; Readium paginates one resource at a time and never
-reports a whole-book page count. A book total is therefore derived from measured pages over the chapter's
-own text characters, applied to the publication's character total. Characters are used instead of Readium
-positions because positions have a floor of one per resource: a position-based estimate ran 14-22% high
-because short title pages counted as full chunks. The estimate is shown as approximate, appears only after
-at least five measured pages, samples only chapters long enough to contain a full page, samples each
-chapter once per layout signature, and is recomputed when that signature changes.
+**One page counter.** The bottom-left showed a chapter counter and, later, a book estimate beside it; two pairs
+in one corner forced the reader to reconcile two meanings. It now shows only the page within the whole
+book and the book's page total for the current layout. The counter is derived because Readium paginates
+one resource at a time: a chapter of at least five pages gives the layout's characters-per-page density,
+the text before the current resource converts to pages before adding the exact page within it, and the
+publication's character total converts to the book total. The density is cached per layout signature in
+display-only preferences, so restarts and short chapters still show a counter.
 
-Device evidence on the API 35 probe emulator, Chinese interface, Sage theme: the Prologue shows
-`1 / 2` with no estimate; Part One reflows to `1 / 142` and Part Two to `1 / 356 · 约 559 页` at 176%
-font. The character model's expectation is
-about 557 pages at that setting (187,776 characters over 337 characters measured per page), so the
-estimate is within one percent; the earlier position-based estimate read 636-679 pages (14-22% high).
-At 100% font Part One measures `1 / 47`, which implies about 184 book pages, but that reading was not
-re-measured on device after the switch from positions to characters.
-Text loads asynchronously, so the label is rebuilt when it arrives instead of waiting for the next page turn.
+Device evidence on the API 35 probe emulator, Chinese interface, Sage theme, 176% font: Part One reads
+`28 / 557`, the two-page Prologue reads `24 / 557` (so a short chapter still shows the counter), the
+second Prologue page reads `25 / 557`, and after a force-stop and cold start into the same Prologue the
+counter is still `24 / 557`, proving the cached density is used. The 557 total matches the character
+model (187,776 characters over about 337 characters per page). At 100% font the same counter is not
+re-measured on device.
 
 Delivered as `margin-1.3.2-6-debug.apk` (versionCode 6); the delivered APK installed over the previous
 build on the probe emulator, launched into Part Two, and read "Part Two" with `1 / 356 · 约 559 页` at

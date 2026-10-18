@@ -53,6 +53,7 @@ import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -87,13 +88,8 @@ class ReaderActivity : AppCompatActivity() {
      */
     private var charsByResource by mutableStateOf<Map<String, Int>>(emptyMap())
     private var totalBookChars by mutableStateOf(0)
-    /**
-     * Measured pages and positions per layout signature. A single short chapter ends in a nearly
-     * blank page, so its density underestimates the layout; only an accumulated sample is trusted.
-     */
-    private var pageSamples by mutableStateOf<Map<String, Pair<Int, Int>>>(emptyMap())
-    /** Chapters already counted, so turning pages does not sample the same chapter again. */
-    private val measuredChapters = mutableSetOf<String>()
+    /** Measured characters per page per layout signature, so the counter survives a restart. */
+    private var densities by mutableStateOf<Map<String, Double>>(emptyMap())
     /** Latest pagination, so a label can be rebuilt once positions finish loading. */
     private var lastPagination: Triple<Int, Int, Locator>? = null
     private var chapterLabel by mutableStateOf("")
@@ -218,6 +214,7 @@ class ReaderActivity : AppCompatActivity() {
                 graph.store.load()
                 val loaded = graph.store.findBook(intent.getLongExtra(EXTRA_BOOK, -1))
                     ?: error("This book is no longer in the library.")
+                densities = graph.store.cachedPageDensity()
                 val opened = graph.engine.open(File(loaded.filePath))
                 publication = opened
                 chapterTitles = ChapterTitles.of(opened.tableOfContents, opened.readingOrder)
@@ -581,31 +578,46 @@ class ReaderActivity : AppCompatActivity() {
      * Chapter pages are exact; the book total is derived once per layout and reused until the
      * typography or the viewport changes, which is the only moment the density can differ.
      */
+    /**
+     * Bottom-left position: one page pair for the whole book. A chapter counter beside it made the
+     * reader reconcile two meanings in the same corner, so only book progress is shown; the chapter
+     * name stays at the top-left and chapter pacing belongs to the contents.
+     */
     private fun pageLabel(page: Int, chapterPages: Int, locator: Locator, reading: ReaderPreferences): String {
-        val progression = locator.locations.progression
-        if (reading.scroll) return chapterPositionLabel(true, page, chapterPages, progression)
-        val chapter = getString(R.string.reader_position_pages, page, chapterPages)
-        if (totalBookChars < 1) return chapter
-        val key = locator.href.toString().substringBefore('#').substringBefore('?')
-        val here = charsByResource[key] ?: charsByResource.entries
-            .firstOrNull { (href, _) -> href.substringAfterLast('/') == key.substringAfterLast('/') }?.value
-            ?: return chapter
-        val signature = listOf(
-            reading.fontFamily, reading.fontSize, reading.lineHeight, reading.paragraphSpacing,
-            reading.pageMargins, reading.topPaddingDp, reading.bottomPaddingDp,
-            navigator?.view?.width ?: 0, navigator?.view?.height ?: 0
-        ).joinToString("|")
-        val sampleKey = "$signature|$key"
-        // Short resources (title pages, separators) are mostly partial pages and would drag the
-        // density down, so only chapters long enough to contain a full page contribute.
-        if (chapterPages >= BOOK_ESTIMATE_MIN_PAGES && measuredChapters.add(sampleKey)) {
-            val (sampledPages, sampledPositions) = pageSamples[signature] ?: (0 to 0)
-            pageSamples = pageSamples + (signature to ((sampledPages + chapterPages) to (sampledPositions + here)))
+        if (reading.scroll) {
+            return chapterPositionLabel(true, page, chapterPages, locator.locations.progression)
         }
-        val sample = pageSamples[signature] ?: (0 to 0)
-        val estimate = bookPageEstimate(sample.first, sample.second, totalBookChars) ?: return chapter
-        return getString(R.string.reader_position_book_pages, page, chapterPages, estimate)
+        if (totalBookChars < 1) return ""
+        val key = resourceKeyFor(locator.href.toString()) ?: return ""
+        val chars = charsByResource[key] ?: return ""
+        val signature = layoutSignature(reading)
+        // A title page or a one-page separator is mostly a partial page, so it cannot teach the
+        // layout's density; a chapter that fills at least one page can.
+        val measured = if (chapterPages >= PAGE_DENSITY_MIN_PAGES) chars.toDouble() / chapterPages else null
+        val stored = densities[signature]
+        val density = measured ?: stored ?: return ""
+        if (measured != null && (stored == null || abs(measured - stored) / stored > 0.02)) {
+            densities = densities + (signature to measured)
+            lifecycleScope.launch { runCatching { graph.store.cachePageDensity(signature, measured) } }
+        }
+        val charsBefore = charsByResource.entries.takeWhile { it.key != key }.sumOf { it.value }
+        val counter = bookPageCounter(charsBefore, page, totalBookChars, density) ?: return ""
+        return getString(R.string.reader_position_pages, counter.first, counter.second)
     }
+
+    /** The reading-order key for a locator, bridging directory prefixes and fragment forms. */
+    private fun resourceKeyFor(href: String): String? {
+        val key = href.substringBefore('#').substringBefore('?')
+        if (key in charsByResource) return key
+        return charsByResource.keys.firstOrNull { it.substringAfterLast('/') == key.substringAfterLast('/') }
+    }
+
+    /** Everything that changes how much text a page holds. */
+    private fun layoutSignature(reading: ReaderPreferences): String = listOf(
+        reading.fontFamily, reading.fontSize, reading.lineHeight, reading.paragraphSpacing,
+        reading.pageMargins, reading.topPaddingDp, reading.bottomPaddingDp,
+        navigator?.view?.width ?: 0, navigator?.view?.height ?: 0
+    ).joinToString("|")
 
     private suspend fun showLookup(dictionary: Boolean, token: Long, captured: Selection? = null) {
         val nav = navigator ?: return
