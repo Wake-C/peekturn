@@ -33,7 +33,7 @@
 
 ## 不离开这一页，也能看懂一个词
 
-<p align="center"><img src="docs/images/reader-lookup.png" width="46%" alt="语境解释"></p>
+<p align="center"><img src="docs/images/reader-lookup-zh.png" width="46%" alt="语境解释"></p>
 
 点一下单词，就能看到它的核心含义、它在这句话里的意思，以及例句。关掉解释，继续读。如果正文正在朗读，会从刚才的位置接着听，不会把这句重新读一遍。
 

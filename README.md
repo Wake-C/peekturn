@@ -33,7 +33,7 @@ The goal is not to memorise a definition and move on. It is to understand a word
 
 ## Look up a word without leaving the page
 
-<p align="center"><img src="docs/images/reader-lookup.png" width="46%" alt="A word explained in context"></p>
+<p align="center"><img src="docs/images/reader-lookup-en.png" width="46%" alt="A word explained in context"></p>
 
 Tap a word to see its core meaning, what it means in this sentence, and an example. Close it and keep reading. If the book was being read aloud, it continues from the same moment instead of starting the sentence again.
 
