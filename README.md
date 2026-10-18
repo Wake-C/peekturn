@@ -1,8 +1,10 @@
 # Peekturn
 
+<p align="center"><img src="docs/images/icon.png" width="96" alt="Peekturn app icon"></p>
+
 An Android reader for finishing real English books.
 
-[简体中文](README.zh-CN.md)
+[简体中文](README.zh-CN.md) · Version 1.0.0 · Android 8.0+
 
 ## Have you ever finished an English book?
 
@@ -20,6 +22,15 @@ So Peekturn does only the core work:
 - give example sentences that make the usage concrete.
 
 The goal is not to memorise a definition and move on. It is to understand a word through its use and its culture, while you keep reading without stopping.
+
+## The reading surface
+
+<p align="center">
+  <img src="docs/images/reader-tools.png" width="31%" alt="Reader tools">
+  <img src="docs/images/reader-expanded.png" width="31%" alt="Expanded narration controls">
+  <img src="docs/images/reader-compact.png" width="31%" alt="Compact narration controls">
+</p>
+<p align="center"><sub>Accepted A interaction prototype, shown in Simplified Chinese. Demo text, not a bundled book.</sub></p>
 
 ## What it does
 
@@ -39,17 +50,17 @@ The goal is not to memorise a definition and move on. It is to understand a word
 - No cloud library, accounts or sync.
 - No sample library and no fabricated reading data.
 
-## Build and run
+## Build
 
 Requirements: JDK 17 and Android SDK platform 35. Set `ANDROID_HOME`, or put `sdk.dir=...` in an untracked `local.properties`.
 
-Run checks and collect a versioned debug APK with its SHA-256 and build receipt:
+To run checks and collect a versioned debug APK with its SHA-256 and build receipt:
 
 ```sh
 ./tools/package-apk.sh
 ```
 
-This needs a POSIX shell, Python 3 and Git. See the [delivery runbook](agent-doc/reference/delivery/RUNBOOK.md) for outputs, installation and failure handling. It does not change source or versions and does not configure release signing.
+This needs a POSIX shell, Python 3 and Git. It runs the debug unit tests, Android lint and APK assembly, and does not change source or versions. It does not configure release signing.
 
 To build only the debug APK:
 
@@ -63,15 +74,12 @@ The debug APK is universal. On macOS the Gradle wrapper selects an installed JDK
 
 Books, progress, preferences and reading statistics stay on the device. Model requests contain only the selected text, bounded nearby snippets and available book or chapter titles. API keys are encrypted with Android Keystore, and app backup is disabled.
 
-Word and sentence audio uses public, key-free services. Only the text you asked to hear leaves the device, never surrounding book text or credentials. The offline dictionary does not contact a provider. See the [product specification](agent-doc/reference/SPEC.md) and [third-party notices](THIRD_PARTY_NOTICES.md) for the exact routes and attribution.
+Word and sentence audio uses public, key-free services. Only the text you asked to hear leaves the device, never surrounding book text or credentials. The offline dictionary does not contact a provider. See the [third-party notices](THIRD_PARTY_NOTICES.md) for the exact routes and attribution.
 
 ## Documentation
 
-- [Product scope, design and acceptance](agent-doc/reference/SPEC.md)
-- [Architecture and shared ownership](agent-doc/essential/ARCHITECTURE.md)
-- [Feature requirements and integration routes](agent-doc/reference/AGENTS.md)
 - [Domain terminology](CONTEXT.md)
-- [Verification evidence and remaining boundaries](agent-doc/reference/verification/VERIFICATION.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
+- [Apache-2.0 license](LICENSE)
 
 The offline dictionary is built independently from ECDICT. Its source revision, hashes, licence and rebuild command are recorded in the [notices](THIRD_PARTY_NOTICES.md#ecdict-offline-dictionary).

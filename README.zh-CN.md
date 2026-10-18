@@ -1,8 +1,10 @@
 # 憩页
 
+<p align="center"><img src="docs/images/icon.png" width="96" alt="憩页应用图标"></p>
+
 一个帮你把英文原版书读完的 Android 阅读器。
 
-[English](README.md)
+[English](README.md) · 版本 1.0.0 · Android 8.0+
 
 ## 你完整读完过一本英文书吗？
 
@@ -20,6 +22,15 @@
 - 给出能说明用法的例句。
 
 目的不是背完一个定义就翻页，而是从一个词的用法和文化里理解它，同时不停下来，继续把书读下去。
+
+## 阅读界面
+
+<p align="center">
+  <img src="docs/images/reader-tools.png" width="31%" alt="阅读工具">
+  <img src="docs/images/reader-expanded.png" width="31%" alt="展开朗读控制">
+  <img src="docs/images/reader-compact.png" width="31%" alt="收拢朗读控制">
+</p>
+<p align="center"><sub>已确认的 A 交互原型，正文为演示文本，不是内置书籍。</sub></p>
 
 ## 它做什么
 
@@ -39,7 +50,7 @@
 - 不做云书库、账号或同步。
 - 不放示例书库，不编造阅读数据。
 
-## 构建与运行
+## 构建
 
 需要 JDK 17 和 Android SDK platform 35。设置 `ANDROID_HOME`，或在未跟踪的 `local.properties` 中写入 `sdk.dir=...`。
 
@@ -49,7 +60,7 @@
 ./tools/package-apk.sh
 ```
 
-这条命令需要 POSIX shell、Python 3 和 Git。输出、安装和失败处理见[交付手册](agent-doc/reference/delivery/RUNBOOK.md)。它不会改动源码或版本号，也不配置发布签名。
+这条命令需要 POSIX shell、Python 3 和 Git。它会运行 debug 单元测试、Android lint 和 APK 组装，不会改动源码或版本号，也不配置发布签名。
 
 只构建 debug APK：
 
@@ -63,15 +74,12 @@ debug APK 是通用包。macOS 上，如果未设置 `JAVA_HOME`，Gradle wrappe
 
 书籍、进度、偏好和阅读统计都留在设备上。模型请求只包含选中的文本、有限的邻近片段和可用的书名或章节名。API Key 使用 Android Keystore 加密，应用备份已关闭。
 
-单词和句子发音使用公开的免密钥服务。离开设备的只有你要求听到的那段文字，不包含周围书籍正文，也不包含凭据。离线词典不联系任何服务商。具体路由和署名见[产品说明](agent-doc/reference/SPEC.md)和[第三方声明](THIRD_PARTY_NOTICES.md)。
+单词和句子发音使用公开的免密钥服务。离开设备的只有你要求听到的那段文字，不包含周围书籍正文，也不包含凭据。离线词典不联系任何服务商。具体路由和署名见[第三方声明](THIRD_PARTY_NOTICES.md)。
 
 ## 文档
 
-- [产品范围、设计与验收](agent-doc/reference/SPEC.md)
-- [架构与共享边界](agent-doc/essential/ARCHITECTURE.md)
-- [功能需求与集成路由](agent-doc/reference/AGENTS.md)
 - [领域术语](CONTEXT.md)
-- [验证证据与剩余边界](agent-doc/reference/verification/VERIFICATION.md)
 - [第三方声明](THIRD_PARTY_NOTICES.md)
+- [Apache-2.0 许可证](LICENSE)
 
 离线词典独立构建自 ECDICT。源版本、哈希、许可证和重建命令记录在[第三方声明](THIRD_PARTY_NOTICES.md#ecdict-offline-dictionary)。
