@@ -38,7 +38,7 @@
     var running = false;
 
     function call(name, value) {
-        try { MarginBridge[name](value); } catch (e) { /* the activity may already be closing */ }
+        try { PeekturnBridge[name](value); } catch (e) { /* the activity may already be closing */ }
     }
 
     function status(code) { call('status', code); }
@@ -90,7 +90,7 @@
     // captured text. A full article is far above the sample limit, so truncation cannot hide it.
     function review(page) {
         try {
-            return MarginBridge.review(articleText(page).slice(0, REVIEW_SAMPLE)) || 'no-article';
+            return PeekturnBridge.review(articleText(page).slice(0, REVIEW_SAMPLE)) || 'no-article';
         } catch (e) {
             return 'no-article';
         }
@@ -427,13 +427,13 @@
             }
             var base64 = btoa(parts.join(''));
             for (var offset = 0, index = 0; offset < base64.length; offset += TRANSFER_SLICE, index++) {
-                MarginBridge.pushChunk(index, base64.slice(offset, offset + TRANSFER_SLICE), window.__marginToken || '');
+                PeekturnBridge.pushChunk(index, base64.slice(offset, offset + TRANSFER_SLICE), window.__marginToken || '');
             }
-            MarginBridge.finish(name, window.__marginToken || '');
+            PeekturnBridge.finish(name, window.__marginToken || '');
         });
     }
 
-    window.MarginImport = {
+    window.PeekturnImport = {
         probe: pageProbe,
         findFullArticle: findFullArticle,
         start: function () {

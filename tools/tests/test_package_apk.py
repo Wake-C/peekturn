@@ -16,7 +16,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / 'package-apk.sh'
 
 class PackageApkTest(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='margin-package-test-')
+        self.temp = tempfile.TemporaryDirectory(prefix='peekturn-package-test-')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / 'checkout with spaces'
         (self.root / 'tools').mkdir(parents=True)
@@ -62,7 +62,7 @@ printf '%s\\n' "$@" > gradle-args.txt
         (directory / 'unrelated-old.apk').write_bytes(b'never-collect-this')
         element = {'versionCode': 9, 'versionName': '2.4.1', 'filters': [], 'outputFile': 'app-debug.apk'}
         element.update(overrides)
-        metadata = {'variantName': 'debug', 'applicationId': 'app.margin.reader', 'elements': [element]}
+        metadata = {'variantName': 'debug', 'applicationId': 'app.peekturn.reader', 'elements': [element]}
         (directory / 'output-metadata.json').write_text(json.dumps(metadata))
 
     def run_package(self, *args):
@@ -76,7 +76,7 @@ printf '%s\\n' "$@" > gradle-args.txt
         result = self.run_package()
         self.assertEqual(result.returncode, 0, result.stderr)
         out, = self.deliveries()
-        apk = out / 'margin-2.4.1-9-debug.apk'
+        apk = out / 'peekturn-2.4.1-9-debug.apk'
         self.assertEqual(apk.read_bytes(), b'fixture-apk-bytes')
         receipt = json.loads((out / 'receipt.json').read_text())
         digest = hashlib.sha256(apk.read_bytes()).hexdigest()

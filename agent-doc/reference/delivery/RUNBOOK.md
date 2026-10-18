@@ -47,7 +47,7 @@ Use `adb` from the configured SDK's `platform-tools` directory. Select the inten
 adb devices -l
 APK=/absolute/path/to/the/collected.apk
 adb -s DEVICE_SERIAL install -r "$APK"
-adb -s DEVICE_SERIAL shell am start -W -n app.margin.reader/.MainActivity
+adb -s DEVICE_SERIAL shell am start -W -n app.peekturn.reader/.MainActivity
 ```
 
 An install/launch check establishes only that this APK installs and starts on that device. The receipt deliberately reports Android runtime verification as `not_run`; packaging alone does not establish feature acceptance. Record any separately executed device checks and their evidence limits in [verification history](../verification/VERIFICATION.md). Use the [product acceptance criteria](../SPEC.md#acceptance) and affected feature owner for behavior changes.

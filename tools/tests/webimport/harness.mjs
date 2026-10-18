@@ -1,6 +1,6 @@
 // Shared browser harness for the webimport tests. Each test loads a synthetic fixture into a real
 // Chromium page, injects the vendored converter scripts in the order the app injects them, and can
-// either read the capture or run MarginImport.start() through the real EPUB builder.
+// either read the capture or run PeekturnImport.start() through the real EPUB builder.
 import { createRequire } from 'node:module';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -98,7 +98,7 @@ export async function buildEpub(tab, marker) {
   return await tab.evaluate(async (markerText) => {
     const chunks = [];
     window.__marginToken = 'test';
-    window.MarginBridge = {
+    window.PeekturnBridge = {
       status: function () { },
       fullArticle: function () { },
       review: function () { return 'import'; },
@@ -114,7 +114,7 @@ export async function buildEpub(tab, marker) {
         resolve(value);
       };
       try {
-        window.MarginImport.start();
+        window.PeekturnImport.start();
       } catch (error) {
         resolve({ error: String(error) });
       }

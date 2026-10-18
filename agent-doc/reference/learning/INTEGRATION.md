@@ -1,6 +1,6 @@
 # Learning integration
 
-Code paths are relative to `app/src/main/java/app/margin/reader/` unless they name a repository-level file.
+Code paths are relative to `app/src/main/java/app/peekturn/reader/` unless they name a repository-level file.
 
 `learning/ExplanationClient.kt` owns provider requests, structured-output compatibility and clipping Readium's selected-text snippets to the [product context window](SPEC.md#selection-context). Requests to `api.openai.com` use strict JSON schema mode; other hosts, including DeepSeek and custom compatible endpoints, use JSON object mode. Both paths require application validation; host selection does not guarantee model support.
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { launchBrowser } from '../webimport/harness.mjs';
 
-const path = process.env.REFLOW_SOURCE || new URL('../../../app/src/main/java/app/margin/reader/reader/ReflowAnchor.kt', import.meta.url);
+const path = process.env.REFLOW_SOURCE || new URL('../../../app/src/main/java/app/peekturn/reader/reader/ReflowAnchor.kt', import.meta.url);
 const source = readFileSync(path, 'utf8');
 const probe = source.match(/internal val visibleReflowAnchorScript = """([\s\S]*?)"""\.trimIndent\(\)/)[1];
 

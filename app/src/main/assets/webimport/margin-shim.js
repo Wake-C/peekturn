@@ -8,7 +8,7 @@
             onMessage: { addListener: function (fn) { listeners.push(fn); } },
             sendMessage: function (message, callback) {
                 // The converter heartbeats while a build runs; forwarding it proves the build is alive.
-                try { if (message && message.type === 'job-heartbeat') MarginBridge.status('heartbeat'); } catch (e) { }
+                try { if (message && message.type === 'job-heartbeat') PeekturnBridge.status('heartbeat'); } catch (e) { }
                 if (typeof callback === 'function') callback({});
             },
             lastError: null,

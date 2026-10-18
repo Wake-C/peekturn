@@ -1,6 +1,6 @@
 # Pronunciation integration
 
-Code paths are relative to `app/src/main/java/app/margin/reader/`.
+Code paths are relative to `app/src/main/java/app/peekturn/reader/`.
 
 Application-scoped `speech/PronunciationPlayer.kt` owns latest-only audio and system-speech playback, cancellation and audio focus; screen lifecycle events stop playback without disposing the shared player. A request that is not a single word — a selected phrase or a generated example — tries the Microsoft sentence-speech client first, then the Baidu fallback, then installed English speech; a word tries word audio, then the same Microsoft client, then Baidu, then installed English speech. A fallback route never changes what is spoken: the requested word, phrase or example is spoken as the reader asked for it, and only the dictionary lookup for the validated single word ever reaches the word-audio service, never a phrase or example. Accent is a preference, not a playback gate; wrong-language voices remain unavailable, and Baidu's single English voice means its answers substitute for the requested accent, which the player announces instead of claiming the preference was met. Every online service states no creator and no licence, so the app credits whichever one played by name and link only; the [notices](../../../THIRD_PARTY_NOTICES.md#online-word-audio) document the word-audio service and the [speech notices](../../../THIRD_PARTY_NOTICES.md#online-sentence-speech) the sentence services, including unofficial status and Peekturn's lack of permission.
 

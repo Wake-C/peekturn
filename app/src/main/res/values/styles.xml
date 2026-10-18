@@ -1,5 +1,5 @@
 <resources>
-    <style name="Theme.Margin" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <style name="Theme.Peekturn" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:statusBarColor">#171E23</item>

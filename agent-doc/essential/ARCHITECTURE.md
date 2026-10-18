@@ -31,7 +31,7 @@ flowchart LR
 
 ## Ownership
 
-Code paths below are relative to `app/src/main/java/app/margin/reader/` unless they name a repository-level file.
+Code paths below are relative to `app/src/main/java/app/peekturn/reader/` unless they name a repository-level file.
 
 - `model/`: stable application data contracts. Readium locator JSON stays opaque outside reader integration.
 - `data/`: SQLite library and time records, settings and encrypted credentials, independently sourced dictionary.
@@ -41,7 +41,7 @@ Code paths below are relative to `app/src/main/java/app/margin/reader/` unless t
 - `speech/`: online word and sentence audio lookup, system speech, playback ownership and cancellation.
 - `narration/`: continuous sentence read-aloud, its foreground MediaSession service, bounded prefetch, Readium TTS engine and persistent sentence-audio cache.
 - `ui/`: Focus app shell, library, statistics, settings and design tokens.
-- `MarginApp.kt`: application-scoped `AppGraph` composition; Activities own screen lifecycles.
+- `PeekturnApp.kt`: application-scoped `AppGraph` composition; Activities own screen lifecycles.
 
 ## Technical decisions
 

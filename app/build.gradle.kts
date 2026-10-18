@@ -4,14 +4,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 android {
-    namespace = "app.margin.reader"
+    namespace = "app.peekturn.reader"
     compileSdk = 35
     defaultConfig {
-        applicationId = "app.margin.reader"
+        applicationId = "app.peekturn.reader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "1.7.0"
+        versionCode = 1
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {

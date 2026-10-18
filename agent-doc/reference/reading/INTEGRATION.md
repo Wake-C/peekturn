@@ -1,6 +1,6 @@
 # Reader integration
 
-Code paths are relative to `app/src/main/java/app/margin/reader/`.
+Code paths are relative to `app/src/main/java/app/peekturn/reader/`.
 
 Last-book reopening is a cold-entry decision. Initial navigator construction uses the stored locator; persisted progress is never replaced by a guessed page index. Screen state and saved publication location are different lifetimes.
 

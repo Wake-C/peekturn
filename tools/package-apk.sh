@@ -102,7 +102,7 @@ if type(version_code) is not int or version_code < 1:
 source = (source_dir / element['outputFile']).resolve()
 if source.parent != source_dir or source.suffix != '.apk' or not source.is_file() or source.stat().st_size == 0:
     raise SystemExit('Expected a nonempty APK inside the debug output directory.')
-apk = out / f'margin-{version_name}-{version_code}-debug.apk'
+apk = out / f'peekturn-{version_name}-{version_code}-debug.apk'
 shutil.copyfile(source, apk)
 hasher = hashlib.sha256()
 with apk.open('rb') as stream:
