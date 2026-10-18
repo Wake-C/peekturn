@@ -23,6 +23,12 @@
 
 目的不是背完一个定义就翻页，而是从一个词的用法和文化里理解它，同时不停下来，继续把书读下去。
 
+## 看它怎么读
+
+<p align="center"><a href="docs/video/peekturn-intro.mp4"><img src="docs/video/peekturn-intro-cover.jpg" width="86%" alt="观看 34 秒憩页介绍视频"></a></p>
+
+34 秒看完：阅读、朗读、查词，以及从 URL 导入文章。[观看视频](docs/video/peekturn-intro.mp4)。
+
 ## 阅读界面
 
 <p align="center">

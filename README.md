@@ -23,6 +23,12 @@ So Peekturn does only the core work:
 
 The goal is not to memorise a definition and move on. It is to understand a word through its use and its culture, while you keep reading without stopping.
 
+## See it in motion
+
+<p align="center"><a href="docs/video/peekturn-intro.mp4"><img src="docs/video/peekturn-intro-cover.jpg" width="86%" alt="Watch the 34-second Peekturn intro"></a></p>
+
+A 34-second tour: read, listen, look up a word, and import an article from a URL. [Watch the video](docs/video/peekturn-intro.mp4).
+
 ## The reading surface
 
 <p align="center">
