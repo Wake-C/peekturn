@@ -4,7 +4,7 @@
 
 An Android reader for finishing real English books.
 
-[简体中文](README.zh-CN.md) · Version 1.0.1 · Android 8.0+
+**[Download the Android APK](https://github.com/Wake-C/peekturn/releases/latest)** · [简体中文](README.zh-CN.md) · Version 1.0.1 · Android 8.0+
 
 ## Have you ever finished an English book?
 
