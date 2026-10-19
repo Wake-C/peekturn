@@ -2,7 +2,7 @@
 // This shim provides only what they call, so the same, unmodified pipeline can run inside the app.
 (function () {
     var listeners = [];
-    window.__marginListeners = listeners;
+    window.__peekturnListeners = listeners;
     window.chrome = {
         runtime: {
             onMessage: { addListener: function (fn) { listeners.push(fn); } },
@@ -24,5 +24,5 @@
     };
     // The converter's utils.js declares its own downloadBlob; the bridge re-installs its capture
     // after every converter script has loaded, so the finished archive reaches Kotlin, not a download.
-    window.__marginEpub = null;
+    window.__peekturnEpub = null;
 })();

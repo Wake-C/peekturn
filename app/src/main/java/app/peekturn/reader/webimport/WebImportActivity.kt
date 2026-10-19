@@ -264,13 +264,13 @@ class WebImportActivity : AppCompatActivity() {
         converterWaiters += onReady
         if (injecting) return
         injecting = true
-        view.evaluateJavascript("window.__marginConverterLoaded === true", { loaded ->
+        view.evaluateJavascript("window.__peekturnConverterLoaded === true", { loaded ->
             if (generation != pageGeneration) return@evaluateJavascript
             if (loaded == "true") {
                 converterReady = true
                 finishInjection()
             } else {
-                view.evaluateJavascript("window.__marginConverterLoaded = true", null)
+                view.evaluateJavascript("window.__peekturnConverterLoaded = true", null)
                 injectScript(view, 0, generation)
             }
         })
@@ -382,7 +382,7 @@ class WebImportActivity : AppCompatActivity() {
         val token = UUID.randomUUID().toString()
         bridge?.beginSession(token)
         ui = ui.copy(working = true, status = R.string.web_import_extracting, canImport = false)
-        webView?.evaluateJavascript("window.__marginToken = '$token'", null)
+        webView?.evaluateJavascript("window.__peekturnToken = '$token'", null)
         webView?.evaluateJavascript("window.PeekturnImport && window.PeekturnImport.start()", null)
     }
 
@@ -507,7 +507,7 @@ class WebImportActivity : AppCompatActivity() {
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) " +
                 "Chrome/126.0.0.0 Mobile Safari/537.36"
         private val CONVERTER_SCRIPTS = listOf(
-            "margin-shim.js",
+            "peekturn-shim.js",
             "jszip.js",
             "readability.js",
             "utils.js",
@@ -515,7 +515,7 @@ class WebImportActivity : AppCompatActivity() {
             "sanitizeHtml.js",
             "extractHtml.js",
             "saveEbook.js",
-            "margin-import.js"
+            "peekturn-import.js"
         )
 
         fun intent(context: Context, url: String, direct: Boolean = false): Intent =

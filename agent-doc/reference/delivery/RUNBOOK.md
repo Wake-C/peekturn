@@ -28,7 +28,7 @@ SDK lookup uses `sdk.dir` in ignored `local.properties`, then `ANDROID_HOME`, th
 
 Each successful invocation creates a separate directory under ignored `app/build/outputs/delivery/package.*` containing:
 
-- `margin-<versionName>-<versionCode>-debug.apk`
+- `peekturn-<versionName>-<versionCode>-debug.apk`
 - The matching `.apk.sha256` checksum file
 - `receipt.json`
 

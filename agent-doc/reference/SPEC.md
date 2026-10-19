@@ -22,9 +22,7 @@ Appearance is one persistent theme choice: Focus Dark, Classic White, Warm Paper
 
 Reader chrome follows the accepted A overlay layout: Contents, Layout, Features and Listen. Contents owns the binoculars entry to whole-book search. Typography and behavior have separate sheets; Quick Explain, immersive mode, scrolling and auto-pronounce live under Features. Narration expands above the menu and collapses into three centred footer controls, with one page counter at the left. Controls do not change the publication viewport. Global Settings uses full-width disclosure rows and theme previews, not a 3+2 grid; profile actions share an overflow menu. Surfaces use the app's semantic colors and readable natural wrapping. English and Simplified Chinese are supported across shell, reader and external import; book text, chapter titles, dictionary data and IPA are not translated. Existing explanation prompts and output formatting are unchanged.
 
-Design provenance: the accepted Focus direction is preserved on the local Git branch `prototype/focus-reference`, under `prototype/phone.html` (`variant=C`). That branch is a throwaway interactive design reference; its demo content and browser implementation are not part of the production app.
-
-The A reader interaction decision is captured on local branch `prototype/reader-overlay-a` at `3002e148f3bacb4cdb7954e7451644c37e674198`, in `app/src/main/java/app/margin/reader/reader/reader-toolbar.prototype.html`. It preserves all three throwaway variants as a primary source; A was selected, then its compact controls were centred. The prototype is absent from the production source tree and APK.
+Design provenance: the throwaway interactive prototypes that led to the accepted Focus direction and the accepted A reader layout were design references only. Their demo content and browser implementation are not part of the production app, and they are not part of this repository.
 
 ## Acceptance
 

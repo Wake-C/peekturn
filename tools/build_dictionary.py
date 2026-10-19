@@ -32,7 +32,7 @@ def main():
     parser.add_argument("--source", type=Path)
     args = parser.parse_args()
     ASSETS.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="margin-dictionary-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="peekturn-dictionary-") as temporary:
         work = Path(temporary)
         source = args.source or work / "ecdict.csv"
         if not args.source:

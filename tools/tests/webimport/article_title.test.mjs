@@ -15,7 +15,7 @@ import {
   withFixture
 } from './harness.mjs';
 
-const builderScripts = [...vendorScripts, 'saveEbook.js', 'margin-import.js'];
+const builderScripts = [...vendorScripts, 'saveEbook.js', 'peekturn-import.js'];
 
 const structuredMarker = 'ARTICLE_TITLE_STRUCTURED_END';
 const headingMarker = 'ARTICLE_TITLE_HEADING_END';

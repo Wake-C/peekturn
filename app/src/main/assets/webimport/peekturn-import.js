@@ -7,7 +7,7 @@
     // rendered. The vendored visibility helper (utils.js) measures boxes, so every such wrapper is
     // marked hidden and the text inside it disappears from the capture. Tailwind's `contents`
     // utility is common on article bodies, which is how a full page turns into a preview card.
-    // This override must run after utils.js; margin-import.js is the last converter script injected.
+    // This override must run after utils.js; peekturn-import.js is the last converter script injected.
     var nativeIsElementVisible =
         typeof window.isElementVisible === 'function' ? window.isElementVisible : null;
     if (nativeIsElementVisible) {
@@ -28,7 +28,7 @@
     // utils.js defines a downloadBlob of its own, so the capture has to be installed last: this
     // script is the final one the host injects, and the converter resolves the name at call time.
     window.downloadBlob = function (blob, name) {
-        if (window.__marginEpub) window.__marginEpub({ blob: blob, name: String(name || 'article.epub') });
+        if (window.__peekturnEpub) window.__peekturnEpub({ blob: blob, name: String(name || 'article.epub') });
     };
 
     var TIMEOUT_EXTRACT = 90000;
@@ -45,7 +45,7 @@
 
     function failure(code) {
         var error = new Error(code);
-        error.marginCode = code;
+        error.peekturnCode = code;
         return error;
     }
 
@@ -60,7 +60,7 @@
     // The content script registers one message listener; the first response is the page record.
     function extractPage() {
         return new Promise(function (resolve, reject) {
-            var listeners = window.__marginListeners || [];
+            var listeners = window.__peekturnListeners || [];
             if (listeners.length === 0) { reject(failure('no-article')); return; }
             var settled = false;
             function respond(page) {
@@ -404,14 +404,14 @@
             if (!page.metadata || typeof page.metadata !== 'object') page.metadata = {};
             page.metadata.authors = capturedAuthors(page);
             var timer = setTimeout(function () { reject(failure('failed')); }, TIMEOUT_BUILD);
-            window.__marginEpub = function (result) {
+            window.__peekturnEpub = function (result) {
                 clearTimeout(timer);
                 resolve(result);
             };
             try {
                 buildEbook([page], { title: page.title }, null);
             } catch (e) {
-                window.__marginEpub = null;
+                window.__peekturnEpub = null;
                 clearTimeout(timer);
                 reject(e);
             }
@@ -427,9 +427,9 @@
             }
             var base64 = btoa(parts.join(''));
             for (var offset = 0, index = 0; offset < base64.length; offset += TRANSFER_SLICE, index++) {
-                PeekturnBridge.pushChunk(index, base64.slice(offset, offset + TRANSFER_SLICE), window.__marginToken || '');
+                PeekturnBridge.pushChunk(index, base64.slice(offset, offset + TRANSFER_SLICE), window.__peekturnToken || '');
             }
-            PeekturnBridge.finish(name, window.__marginToken || '');
+            PeekturnBridge.finish(name, window.__peekturnToken || '');
         });
     }
 
@@ -457,7 +457,7 @@
                     return pushArchive(result.blob, result.name);
                 })
                 .catch(function (error) {
-                    call('fail', (error && error.marginCode) || 'failed');
+                    call('fail', (error && error.peekturnCode) || 'failed');
                 })
                 .then(function () { running = false; });
         }

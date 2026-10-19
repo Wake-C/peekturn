@@ -15,7 +15,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const assets = join(here, '..', '..', '..', 'app', 'src', 'main', 'assets', 'webimport');
 
 export const vendorScripts = [
-  'margin-shim.js',
+  'peekturn-shim.js',
   'jszip.js',
   'readability.js',
   'utils.js',
@@ -67,7 +67,7 @@ export async function withFixture(browser, html, scripts, action) {
 
 export async function extractCapturedText(tab, marker) {
   return await tab.evaluate((markerText) => new Promise((resolve) => {
-    const listeners = window.__marginListeners || [];
+    const listeners = window.__peekturnListeners || [];
     if (listeners.length === 0) {
       resolve({ text: '', error: 'extractor did not register' });
       return;
@@ -97,18 +97,18 @@ export async function extractCapturedText(tab, marker) {
 export async function buildEpub(tab, marker) {
   return await tab.evaluate(async (markerText) => {
     const chunks = [];
-    window.__marginToken = 'test';
+    window.__peekturnToken = 'test';
     window.PeekturnBridge = {
       status: function () { },
       fullArticle: function () { },
       review: function () { return 'import'; },
       pushChunk: function (index, chunk) { chunks[index] = chunk; },
-      finish: function (name) { window.__marginFinish({ name: name }); },
-      fail: function (code) { window.__marginFinish({ error: code }); }
+      finish: function (name) { window.__peekturnFinish({ name: name }); },
+      fail: function (code) { window.__peekturnFinish({ error: code }); }
     };
     const result = await new Promise((resolve) => {
       let done = false;
-      window.__marginFinish = function (value) {
+      window.__peekturnFinish = function (value) {
         if (done) return;
         done = true;
         resolve(value);

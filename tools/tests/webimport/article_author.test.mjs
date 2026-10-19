@@ -15,7 +15,7 @@ import {
   withFixture
 } from './harness.mjs';
 
-const builderScripts = [...vendorScripts, 'saveEbook.js', 'margin-import.js'];
+const builderScripts = [...vendorScripts, 'saveEbook.js', 'peekturn-import.js'];
 
 const xMarker = 'ARTICLE_AUTHOR_X_END';
 const cardMarker = 'ARTICLE_AUTHOR_CARD_END';

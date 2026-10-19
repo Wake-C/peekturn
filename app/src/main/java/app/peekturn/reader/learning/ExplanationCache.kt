@@ -341,7 +341,7 @@ private fun explanationCacheKey(request: ExplanationRequest): String {
     fun field(value: String) {
         material.append(value.length).append(':').append(value).append('\n')
     }
-    field("margin-explanation")
+    field("peekturn-explanation")
     field(EXPLANATION_CACHE_FORMAT)
     field(EXPLANATION_PROMPT_GENERATION)
     field(context.bookId.toString())

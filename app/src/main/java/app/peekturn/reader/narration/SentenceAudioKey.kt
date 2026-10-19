@@ -35,7 +35,7 @@ internal fun narrationVoice(accent: String): NarrationVoiceSpec? = when (accent)
 internal fun sentenceAudioKey(sentence: String, voice: NarrationVoiceSpec): String {
     val canonical = canonicalSentence(sentence)
     val material = buildString {
-        append("margin-sentence-audio\u0000")
+        append("peekturn-sentence-audio\u0000")
         append(voice.engine).append('\u0000')
         append(voice.voice).append('\u0000')
         append(voice.prosody).append('\u0000')
