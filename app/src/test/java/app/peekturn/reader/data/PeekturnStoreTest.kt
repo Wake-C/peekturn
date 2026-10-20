@@ -10,6 +10,7 @@ import app.peekturn.reader.model.LlmProfile
 import app.peekturn.reader.model.ReaderPreferences
 import app.peekturn.reader.model.ReadingDay
 import app.peekturn.reader.model.ReadingStats
+import app.peekturn.reader.model.SentenceSpeechProvider
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -112,6 +113,7 @@ class PeekturnStoreTest {
     @Test fun preferencesAndModelConfigurationSurviveWithoutAnApiKey() = runBlocking {
         val settings = AppSettings(
             quickExplain = true, autoPronounce = true, accent = "UK",
+            sentenceSpeechProvider = SentenceSpeechProvider.BAIDU,
             profiles = listOf(LlmProfile("default", ModelConfig(name = "Local provider", endpoint = "http://127.0.0.1:8080/v1", model = "reader-model", apiKey = "", temperature = 1.2))),
             reading = ReaderPreferences(fontSize = 130.0, fontFamily = "sans-serif", lineHeight = 1.8, pageMargins = 1.2, paragraphSpacing = 0.9, scroll = true, topPaddingDp = 42.0, bottomPaddingDp = 66.0),
             appTheme = "warm"
@@ -174,6 +176,42 @@ class PeekturnStoreTest {
         assertEquals(0.3, restored.settings.value.model.temperature, 0.0)
         assertEquals(ReaderPreferences(fontSize = 140.0), restored.settings.value.reading)
         assertNotNull(restored.error.value)
+    }
+
+    @Test fun missingSentenceSpeechProviderRestoresMicrosoftWithoutDiscardingOtherChoices() {
+        context.getSharedPreferences("peekturn", Context.MODE_PRIVATE).edit()
+            .putString("settings", """{"quickExplain":true,"accent":"UK"}""")
+            .commit()
+
+        val restored = PeekturnStore(context)
+        assertEquals(SentenceSpeechProvider.MICROSOFT, restored.settings.value.sentenceSpeechProvider)
+        assertTrue(restored.settings.value.quickExplain)
+        assertEquals("UK", restored.settings.value.accent)
+    }
+
+    @Test fun unknownSentenceSpeechProviderIsRepairedToMicrosoft() {
+        context.getSharedPreferences("peekturn", Context.MODE_PRIVATE).edit()
+            .putString("settings", """{"sentenceSpeechProvider":"GOOGLE","quickExplain":true}""")
+            .commit()
+
+        val restored = PeekturnStore(context)
+        assertEquals(SentenceSpeechProvider.MICROSOFT, restored.settings.value.sentenceSpeechProvider)
+        assertTrue("The valid choice beside it survives", restored.settings.value.quickExplain)
+        assertNotNull(restored.error.value)
+        assertEquals(SentenceSpeechProvider.MICROSOFT, PeekturnStore(context).settings.value.sentenceSpeechProvider)
+    }
+
+    @Test fun incorrectlyTypedSentenceSpeechProviderIsRepairedToMicrosoft() {
+        context.getSharedPreferences("peekturn", Context.MODE_PRIVATE).edit()
+            .putString("settings", """{"sentenceSpeechProvider":7,"profiles":[{"id":"default","config":{"name":"Mine"}}]}""")
+            .commit()
+
+        val restored = PeekturnStore(context)
+        assertEquals(SentenceSpeechProvider.MICROSOFT, restored.settings.value.sentenceSpeechProvider)
+        assertNotNull(restored.error.value)
+        val repaired = context.getSharedPreferences("peekturn", Context.MODE_PRIVATE)
+            .getString("settings", "").orEmpty()
+        assertTrue("The repaired choice is persisted", repaired.contains("\"sentenceSpeechProvider\":\"MICROSOFT\""))
     }
 
     @Test fun obsoleteAndUnusableStoredProfileValuesAreRepairedWithoutLosingTheCredential() {

@@ -24,6 +24,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.withLock
@@ -39,8 +41,10 @@ import org.readium.r2.shared.publication.Publication
  * ReaderActivity. The visible reader only binds while foregrounded to follow locators and highlight
  * the current sentence; background progress is persisted here.
  *
- * There is no alternate paginator and no second speech provider: playback is the same official
- * Readium TTS unit as the in-app controls, with Microsoft Read Aloud as the only online source.
+ * There is no alternate paginator: playback is the same official Readium TTS unit as the in-app
+ * controls. The Settings provider choice owns the whole session — Microsoft Read Aloud, Baidu
+ * Translate, or the installed Android English voice — and a source change stops this session so a
+ * new one cannot inherit old-provider audio.
  */
 @OptIn(ExperimentalReadiumApi::class)
 class NarrationService : MediaSessionService() {
@@ -114,6 +118,20 @@ class NarrationService : MediaSessionService() {
         }
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        // A provider change while narration is alive must not leave the previous source speaking.
+        // The next session reads the setting again; stopping here also releases its cache/synthesis.
+        scope.launch {
+            graph.store.settings
+                .map { it.sentenceSpeechProvider }
+                .distinctUntilChanged()
+                .collect { selected ->
+                    playback?.takeIf { it.provider != selected }?.let { stopNarration() }
+                }
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         // Playback is opened only through the app-private binder. An external explicit start must
@@ -159,9 +177,12 @@ class NarrationService : MediaSessionService() {
     private fun begin(requestedBook: Long, locatorJson: String?, speed: Float, startSentence: String?) {
         if (requestedBook < 0L) return
         val locator = locatorJson?.let(::locator)
+        val settings = graph.store.settings.value
+        val requestedProvider = settings.sentenceSpeechProvider
+        val requestedAccent = settings.accent
 
         val current = playback
-        if (current != null && bookId == requestedBook) {
+        if (current != null && bookId == requestedBook && current.provider == requestedProvider) {
             if (locator != null) current.go(locator, startSentence)
             else current.play()
             return
@@ -181,13 +202,20 @@ class NarrationService : MediaSessionService() {
                     bookId = requestedBook,
                     publication = opened,
                     cache = graph.sentenceAudio,
-                    accent = graph.store.settings.value.accent,
+                    accent = requestedAccent,
+                    provider = requestedProvider,
                     initialSpeed = speed,
                     providerGate = graph.narrationProviderGate,
                     onEnded = { scope.launch { stopNarration() } },
-                    onLocator = { position -> persist(requestedBook, position) }
+                    onLocator = { position -> persist(requestedBook, position) },
+                    onDiagnostic = graph.developerLog::recordSystemSpeech
                 )
                 playback = created
+                if (graph.store.settings.value.sentenceSpeechProvider != requestedProvider) {
+                    // Settings changed while the publication was opening; never start the wrong source.
+                    stopNarration()
+                    return@launch
+                }
                 binder.attach(created)
                 if (!created.start(locator, startSentence)) return@launch
                 val player = created.asMedia3Player() ?: return@launch

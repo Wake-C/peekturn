@@ -18,7 +18,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.sp
 import app.peekturn.reader.speech.AudioCredit
 
-/** Shared inline credit for the audio actually playing: its provider and nothing else. */
+/** Settings' disclosure for the audio actually playing: its provider and nothing else. */
 @Composable
 internal fun AudioAttribution(credit: AudioCredit) {
     val context = LocalContext.current

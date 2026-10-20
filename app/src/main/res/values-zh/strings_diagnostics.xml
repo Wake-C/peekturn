@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings owned by the Developer logs section in SettingsScreen.kt. -->
+<resources>
+    <string name="developer_logs_title">开发者日志</string>
+    <string name="developer_logs_summary">用于排查问题 · 仅保存在本机</string>
+    <string name="developer_logs_loading">正在准备日志…</string>
+    <string name="developer_logs_error">无法读取日志，请重试。</string>
+    <string name="developer_logs_copy_error">无法复制日志，请重试。</string>
+    <string name="developer_logs_retry">重试</string>
+    <string name="developer_logs_copy">复制</string>
+    <string name="developer_logs_copied">已复制到剪贴板</string>
+    <string name="developer_logs_clip_label">Peekturn 开发者日志</string>
+</resources>

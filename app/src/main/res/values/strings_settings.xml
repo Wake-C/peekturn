@@ -28,6 +28,13 @@
     <string name="settings_uk_english">UK English</string>
     <string name="settings_word">Word</string>
     <string name="settings_sentence">Sentence</string>
+    <string name="settings_sentence_source">Sentence audio and narration</string>
+    <string name="settings_source_microsoft">Microsoft</string>
+    <string name="settings_source_microsoft_detail">Read-aloud voice for the chosen US or UK accent.</string>
+    <string name="settings_source_baidu">Baidu English</string>
+    <string name="settings_source_baidu_detail">One English voice; the US or UK choice cannot be honoured.</string>
+    <string name="settings_source_android">Android system speech</string>
+    <string name="settings_source_android_detail">Uses the device\'s speech engine; its voice may use the network.</string>
     <string name="settings_stop">Stop</string>
     <string name="settings_hide_audio_details">Hide audio details</string>
     <string name="settings_audio_details">Audio details</string>

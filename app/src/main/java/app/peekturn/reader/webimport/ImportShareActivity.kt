@@ -79,6 +79,7 @@ class ImportShareActivity : AppCompatActivity() {
                 throw e
             } catch (e: Exception) {
                 Log.w("PeekturnImport", "Shared EPUB failed: ${e.javaClass.simpleName}")
+                graph.developerLog.recordFailure("web-import", "share", e)
                 Toast.makeText(this@ImportShareActivity, R.string.import_share_failed, Toast.LENGTH_LONG).show()
                 finish()
             }
@@ -109,6 +110,7 @@ class ImportShareActivity : AppCompatActivity() {
         }
     } catch (e: RuntimeException) {
         Log.w("PeekturnImport", "Unreadable incoming attachment: ${e.javaClass.simpleName}")
+        graph.developerLog.recordFailure("web-import", "share", e)
         null
     }
 

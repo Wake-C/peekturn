@@ -4,6 +4,7 @@ import app.peekturn.reader.model.Explanation
 import app.peekturn.reader.model.ExplanationExample
 import app.peekturn.reader.model.LookupContext
 import app.peekturn.reader.model.ModelConfig
+import com.google.gson.JsonParser
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.Dispatchers
@@ -135,6 +136,43 @@ class ExplanationCacheTest {
         )
         assertEquals(variants.size, variants.map { it.cacheKey }.toSet().size)
         assertTrue("identity must not include the API key", variants.all { "sk-secret" !in it.cacheKey })
+    }
+
+    @Test fun priorPromptGenerationCannotBeReusedAfterTheExplanationPolicyChanges() = runTest {
+        val cache = cache()
+        val request = request()
+        assertNotNull(cache.put(request, answer, cache.epoch()))
+        val file = directory.listFiles()!!.single { it.name.endsWith(".json") }
+        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply {
+            addProperty("prompt", "explanation-prompt-v1")
+        }
+        file.writeText(legacy.toString())
+
+        assertNull("An answer from the former prompt must not mask the new explanation policy", cache.get(request, cache.epoch()))
+        assertFalse(file.exists())
+
+        val fresh = answer.copy(meaning = "Land beside a river.")
+        assertNotNull(cache.put(request, fresh, cache.epoch()))
+        assertEquals(fresh, cache().get(request, cache.epoch())?.answer)
+    }
+
+    @Test fun unchangedChinesePromptKeepsItsLegacyGenerationReusable() = runTest {
+        val cache = cache()
+        val request = request(language = ExplanationLanguage.Chinese)
+        val chinese = answer.copy(
+            meaning = "河岸",
+            context = "这里指河边的陆地。",
+            examples = listOf(ExplanationExample("The bank was muddy.", "河岸很泥泞。"))
+        )
+        assertNotNull(cache.put(request, chinese, cache.epoch()))
+        val file = directory.listFiles()!!.single { it.name.endsWith(".json") }
+        val legacy = JsonParser.parseString(file.readText()).asJsonObject.apply {
+            addProperty("prompt", "explanation-prompt-v1")
+        }
+        file.writeText(legacy.toString())
+
+        assertEquals("Unchanged Chinese instructions must not discard the old Chinese answer", chinese, cache.get(request, cache.epoch())?.answer)
+        assertTrue(file.exists())
     }
 
     @Test fun corruptOversizedAndWrongLanguageEntriesMissAndAreDeleted() = runTest {

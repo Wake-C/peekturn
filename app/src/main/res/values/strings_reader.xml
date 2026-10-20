@@ -10,7 +10,6 @@
     <string name="reader_lookup_loading_explanation">Explaining…</string>
     <string name="reader_lookup_empty_dictionary">No offline entry for this selection.</string>
     <string name="reader_lookup_retry">Retry</string>
-    <string name="reader_lookup_speech_settings">Speech settings</string>
     <string name="reader_lookup_dismiss_failure">Dismiss</string>
     <string name="reader_lookup_adjust">Adjust</string>
     <string name="reader_lookup_close">Close</string>
@@ -47,6 +46,7 @@
 
     <!-- Speech notices and failures. The diagnostic report below them stays in English. -->
     <string name="speech_notice_accent_not_guaranteed">Using system English; requested accent is not guaranteed.</string>
+    <string name="speech_notice_language_unconfirmed">The speech engine accepted English, but the language or accent of its voice cannot be confirmed.</string>
     <string name="speech_notice_device_default_voice">Using this device\'s own voice instead of an installed English one; the requested accent is not guaranteed.</string>
     <string name="speech_notice_baidu_accent">Baidu Translate has a single English voice, so the requested accent is not guaranteed.</string>
     <string name="speech_notice_no_online_audio">No online audio is available for this text; using system speech.</string>
@@ -56,6 +56,8 @@
     <string name="speech_failure_both_online_routes">Both online audio routes failed</string>
     <string name="speech_failure_all_online_routes">All %1$d online audio routes failed</string>
     <string name="speech_failure_online_playback">Online audio was found but could not play</string>
+    <string name="speech_failure_microsoft_unavailable">Microsoft Read Aloud did not return audio.</string>
+    <string name="speech_failure_baidu_unavailable">Baidu Translate did not return audio.</string>
     <string name="speech_failure_online_and_device">%1$s, and %2$s</string>
     <string name="speech_failure_engine_not_started">The device\'s speech engine did not start. Open system speech settings to check it.</string>
     <string name="speech_failure_missing_english_data">Your speech engine reports its English voice data is missing. Open system speech settings to download it, then try again.</string>
@@ -68,7 +70,7 @@
     <string name="speech_failure_choose_accent">Choose US or UK pronunciation.</string>
     <string name="speech_failure_no_text">There is no text to pronounce.</string>
     <string name="speech_failure_audio_unavailable">Audio is currently unavailable. Try pronunciation again.</string>
-    <string name="speech_source_notice">The text you ask to hear is sent to a public speech service: recorded word audio comes from Youdao Dictionary when it has one, Microsoft Read Aloud voices sentences, phrases and words it has no recording for, and Baidu Translate answers when Microsoft\'s service does not. All are free and key-free, unofficial and unlicensed, and none is guaranteed to stay available. Only the text you ask to hear is sent, never the book\'s context, and system speech is the fallback.</string>
+    <string name="speech_source_notice">The text you ask to hear is sent only to the source you choose for phrases, examples, previews and read-aloud narration. Microsoft Read Aloud and Baidu Translate are free and key-free, unofficial and unlicensed, and neither is guaranteed to stay available; Baidu has one English voice, so it cannot honour the US or UK choice. Android system speech uses the device\'s speech engine, not the Microsoft or Baidu services; that engine may use a network voice. Only the text you ask to hear is sent, never the book\'s context. A single word still tries Youdao Dictionary\'s recording first, then the two speech services, with installed system speech last.</string>
     <string name="speech_report_copy_details">Copy details</string>
     <string name="speech_report_copied">Copied</string>
     <string name="speech_report_clip_label">Speech details</string>

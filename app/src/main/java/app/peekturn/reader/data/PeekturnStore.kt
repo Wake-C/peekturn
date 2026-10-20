@@ -208,6 +208,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
     private fun readSettings(): AppSettings {
         var invalid = false
         var rewriteProfiles = false
+        var rewriteProvider = false
         fun restoreFields(target: JsonObject, source: JsonObject) {
             for ((name, fallback) in target.entrySet()) {
                 val value = source.get(name) ?: continue
@@ -247,6 +248,19 @@ class PeekturnStore internal constructor(private val context: Context, private v
             val hideStatus = legacyBarHidden("hideStatusBar")
             val hideNavigation = legacyBarHidden("hideNavigationBar")
             restored.getAsJsonObject("reading").addProperty("immersive", hideStatus && hideNavigation)
+        }
+        // An enum name Gson cannot resolve would fail the whole restore, so an unrecognised or
+        // wrongly typed stored provider is repaired to the documented default before conversion.
+        // The check reads the stored value, not the restored tree: restoreFields already discards a
+        // wrongly typed field, which would otherwise leave the default looking valid.
+        val storedProvider = source?.get("sentenceSpeechProvider")
+        val validProvider = storedProvider == null || (storedProvider.isJsonPrimitive &&
+            storedProvider.asJsonPrimitive.isString &&
+            SentenceSpeechProvider.entries.any { it.name == storedProvider.asString })
+        if (storedProvider != null && !validProvider) {
+            restored.addProperty("sentenceSpeechProvider", SentenceSpeechProvider.DEFAULT.name)
+            invalid = true
+            rewriteProvider = true
         }
         var saved = gson.fromJson(restored, AppSettings::class.java)
         val profiles = mutableListOf<LlmProfile>()
@@ -300,7 +314,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
             profile.copy(config = profile.config.copy(apiKey = key))
         })
         if (invalid) _error.value = "Some preferences could not be restored. Please check Settings."
-        if (migrating || rewriteProfiles || source?.has("model") == true ||
+        if (migrating || rewriteProfiles || rewriteProvider || source?.has("model") == true ||
             profileValues?.takeIf { it.isJsonArray }?.asJsonArray?.any {
                 it.isJsonObject && it.asJsonObject.get("config")?.takeIf { config -> config.isJsonObject }
                     ?.asJsonObject?.has("apiKey") == true

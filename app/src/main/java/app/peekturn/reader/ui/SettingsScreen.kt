@@ -1,9 +1,13 @@
 package app.peekturn.reader.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.Stop
@@ -18,7 +22,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -32,6 +39,7 @@ import app.peekturn.reader.R
 import app.peekturn.reader.model.AppSettings
 import app.peekturn.reader.model.LlmProfile
 import app.peekturn.reader.model.ModelConfig
+import app.peekturn.reader.model.SentenceSpeechProvider
 import app.peekturn.reader.speech.AUDIO_SOURCE_NOTICE
 import app.peekturn.reader.speech.PronunciationPlayer
 import app.peekturn.reader.speech.SpeechReport
@@ -49,7 +57,8 @@ fun SettingsScreen(
     onExplanationCacheBytes: suspend () -> Long,
     onClearExplanationCache: suspend () -> Unit,
     onNarrationCacheBytes: suspend () -> Long,
-    onClearNarrationCache: suspend () -> Unit
+    onClearNarrationCache: suspend () -> Unit,
+    onDeveloperLogExport: suspend () -> String
 ) {
     var editingProfile by remember { mutableStateOf<LlmProfile?>(null) }
     var addingProfile by remember { mutableStateOf(false) }
@@ -57,6 +66,7 @@ fun SettingsScreen(
     var pronunciationOpen by rememberSaveable { mutableStateOf(false) }
     var explanationCacheOpen by rememberSaveable { mutableStateOf(false) }
     var narrationCacheOpen by rememberSaveable { mutableStateOf(false) }
+    var developerLogsOpen by rememberSaveable { mutableStateOf(false) }
     val unnamedProfile = stringResource(R.string.settings_unnamed_profile)
     val playback by speech.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -119,6 +129,11 @@ fun SettingsScreen(
             stringResource(R.string.settings_narration_cache),
             stringResource(R.string.settings_narration_cache_summary)
         ) { narrationCacheOpen = true }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsDisclosure(
+            stringResource(R.string.developer_logs_title),
+            stringResource(R.string.developer_logs_summary)
+        ) { developerLogsOpen = true }
         Text(stringResource(R.string.settings_reading_location), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -147,6 +162,12 @@ fun SettingsScreen(
             onLoadBytes = onNarrationCacheBytes,
             onClear = onClearNarrationCache,
             onDismiss = { narrationCacheOpen = false }
+        )
+    }
+    if (developerLogsOpen) {
+        DeveloperLogDialog(
+            onExport = onDeveloperLogExport,
+            onDismiss = { developerLogsOpen = false }
         )
     }
     editingProfile?.let { profile ->
@@ -304,13 +325,134 @@ private fun NarrationCacheDialog(
     }
 }
 
+/**
+ * The copied report is exactly what [onExport] returned for this opening: refreshed on demand,
+ * never a stale placeholder. The text scrolls and stays selectable while Copy and Close remain
+ * pinned below it, so a narrow screen or large font cannot hide the action.
+ */
+@Composable
+private fun DeveloperLogDialog(
+    onExport: suspend () -> String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val clipLabel = stringResource(R.string.developer_logs_clip_label)
+    var report by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var failed by remember { mutableStateOf(false) }
+    var copied by remember { mutableStateOf(false) }
+    var copyFailed by remember { mutableStateOf(false) }
+    var attempt by remember { mutableStateOf(0) }
+    LaunchedEffect(attempt) {
+        loading = true
+        failed = false
+        copied = false
+        copyFailed = false
+        try {
+            val exported = onExport()
+            report = exported
+            failed = exported.isBlank()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            report = null
+            failed = true
+        } finally {
+            loading = false
+        }
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.widthIn(max = 640.dp).fillMaxWidth(0.94f).fillMaxHeight(0.86f),
+            shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(R.string.developer_logs_title), style = MaterialTheme.typography.titleLarge)
+                Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    when {
+                        loading -> Column(Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                            Text(stringResource(R.string.developer_logs_loading),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        failed -> Text(stringResource(R.string.developer_logs_error),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error)
+                        else -> SelectionContainer {
+                            Text(report.orEmpty(), style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                if (copied) {
+                    Text(stringResource(R.string.developer_logs_copied),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary)
+                }
+                if (copyFailed) {
+                    Text(stringResource(R.string.developer_logs_copy_error),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    if (failed) {
+                        TextButton(onClick = { attempt++ }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.developer_logs_retry))
+                        }
+                    }
+                    TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.shell_close))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = {
+                        scope.launch {
+                            loading = true
+                            copied = false
+                            copyFailed = false
+                            try {
+                                val exported = onExport()
+                                check(exported.isNotBlank())
+                                val clipboard = checkNotNull(context.getSystemService(ClipboardManager::class.java))
+                                clipboard.setPrimaryClip(ClipData.newPlainText(clipLabel, exported))
+                                report = exported
+                                copied = true
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                copyFailed = true
+                            } finally {
+                                loading = false
+                            }
+                        }
+                    }, enabled = !loading && !failed && !report.isNullOrBlank(),
+                        modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.developer_logs_copy))
+                    }
+                }
+            }
+        }
+    }
+}
+
 private const val PREVIEW_WORD = "hello"
 private const val PREVIEW_SENTENCE = "A little further, one page at a time."
+
+/** The one shared source for phrases, examples, previews and narration; a word keeps its own route. */
+private val sentenceProviderChoices = listOf(
+    Triple(SentenceSpeechProvider.MICROSOFT, R.string.settings_source_microsoft, R.string.settings_source_microsoft_detail),
+    Triple(SentenceSpeechProvider.BAIDU, R.string.settings_source_baidu, R.string.settings_source_baidu_detail),
+    Triple(SentenceSpeechProvider.ANDROID, R.string.settings_source_android, R.string.settings_source_android_detail)
+)
 
 /**
  * Concise controls first (toggle, accent, word/sentence previews); the source explanation and the
  * system speech entry point stay one tap away. Failures are never hidden inside the expansion.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PronunciationSection(
     settings: AppSettings,
@@ -321,6 +463,7 @@ private fun PronunciationSection(
     var details by rememberSaveable { mutableStateOf(false) }
     val wordPreview = playback.playing && playback.text == PREVIEW_WORD
     val sentencePreview = playback.playing && playback.text == PREVIEW_SENTENCE
+    val previewMinWidth = 120.dp * LocalDensity.current.fontScale
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(stringResource(R.string.settings_pronunciation), style = MaterialTheme.typography.titleLarge)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -332,12 +475,27 @@ private fun PronunciationSection(
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp))
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PreviewAction(stringResource(R.string.settings_word), wordPreview, Modifier.weight(1f)) {
+        Text(stringResource(R.string.settings_sentence_source), style = MaterialTheme.typography.titleSmall)
+        Column(Modifier.fillMaxWidth().selectableGroup()) {
+            sentenceProviderChoices.forEach { (provider, label, detail) ->
+                SentenceProviderChoice(
+                    label = stringResource(label),
+                    detail = stringResource(detail),
+                    selected = settings.sentenceSpeechProvider == provider
+                ) {
+                    speech.stop()
+                    onSave { latest -> latest.copy(sentenceSpeechProvider = provider) }
+                }
+            }
+        }
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            PreviewAction(stringResource(R.string.settings_word), wordPreview, Modifier.widthIn(min = previewMinWidth).weight(1f)) {
                 if (wordPreview) speech.stop() else speech.speakWord(PREVIEW_WORD, settings.accent)
             }
-            PreviewAction(stringResource(R.string.settings_sentence), sentencePreview, Modifier.weight(1f)) {
-                if (sentencePreview) speech.stop() else speech.speakExample(PREVIEW_SENTENCE, settings.accent)
+            PreviewAction(stringResource(R.string.settings_sentence), sentencePreview, Modifier.widthIn(min = previewMinWidth).weight(1f)) {
+                if (sentencePreview) speech.stop()
+                else speech.speakExample(PREVIEW_SENTENCE, settings.accent, settings.sentenceSpeechProvider)
             }
         }
         playback.error?.let { message -> Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -356,6 +514,25 @@ private fun PronunciationSection(
                     Text(stringResource(if (playback.error != null) R.string.settings_install_voice else R.string.settings_system_speech_settings))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SentenceProviderChoice(
+    label: String,
+    detail: String,
+    selected: Boolean,
+    onSelect: () -> Unit
+) {
+    Row(Modifier.fillMaxWidth().selectable(selected, role = Role.RadioButton, onClick = onSelect)
+        .heightIn(min = 52.dp).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        RadioButton(selected, onClick = null)
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(detail, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

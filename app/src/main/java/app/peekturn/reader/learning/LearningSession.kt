@@ -22,7 +22,12 @@ class LearningSession internal constructor(
     dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
     private val capacity: Int = 32,
     private val cache: ExplanationCache? = null,
-    private val now: () -> Long = System::currentTimeMillis
+    private val now: () -> Long = System::currentTimeMillis,
+    /**
+     * App-owned failure code plus the caught exception, when one exists. The learning layer stays
+     * free of app singletons; the reader wires this to the developer log. Never receives book text.
+     */
+    private val onFailure: (category: String, cause: Throwable?) -> Unit = { _, _ -> }
 ) {
     data class State(
         val answer: Explanation = Explanation(),
@@ -121,6 +126,7 @@ class LearningSession internal constructor(
         }
         mutableState.value = State(loading = true)
         request = scope.launch {
+            var terminalReported = false
             if (cache != null && reusable) {
                 if (bypassCache) {
                     cacheOrNull { cache.remove(key) }
@@ -169,23 +175,48 @@ class LearningSession internal constructor(
                             mutableState.value = State(answer = answer, complete = true)
                         }
                         is ExplanationEvent.Failure -> {
+                            if (!terminalReported) {
+                                terminalReported = true
+                                reportFailure(failureCode(event.category), null)
+                            }
                             completed.remove(key)
                             mutableState.value = mutableState.value.copy(loading = false, complete = false, failure = event.category)
                         }
                     }
                 }
                 if (generation == token && mutableState.value.loading) {
+                    if (!terminalReported) {
+                        terminalReported = true
+                        reportFailure(failureCode(ExplanationFailureCategory.IncompleteResponse), null)
+                    }
                     mutableState.value = mutableState.value.copy(loading = false, failure = ExplanationFailureCategory.IncompleteResponse)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 if (generation == token && !closed) {
+                    if (!terminalReported) {
+                        terminalReported = true
+                        reportFailure(failureCode(ExplanationFailureCategory.Unknown), e)
+                    }
                     completed.remove(key)
                     mutableState.value = mutableState.value.copy(loading = false, complete = false,
                         failure = ExplanationFailureCategory.Unknown)
                 }
             }
+        }
+    }
+
+    /** Fixed app-owned code for a lookup failure kind; the developer log never receives text. */
+    private fun failureCode(category: ExplanationFailureCategory): String =
+        "explain-" + category.name.lowercase()
+
+    /** Logging is best-effort: an optional sink must never alter or replace the lookup's result. */
+    private fun reportFailure(category: String, cause: Throwable?) {
+        try {
+            onFailure(category, cause)
+        } catch (_: Throwable) {
+            // Diagnostics must not become a second failure.
         }
     }
 
@@ -198,7 +229,8 @@ class LearningSession internal constructor(
         block()
     } catch (cancelled: CancellationException) {
         throw cancelled
-    } catch (_: Exception) {
+    } catch (failure: Exception) {
+        reportFailure("cache", failure)
         null
     }
 }

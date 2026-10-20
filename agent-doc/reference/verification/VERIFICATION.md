@@ -2,6 +2,8 @@
 
 Historical observations for specific builds, not a current test result or a product contract. Current behavior belongs to the [feature owners](../AGENTS.md), and cross-feature acceptance criteria belong to the [product specification](../SPEC.md#acceptance); later entries describe later builds without rewriting the earlier evidence.
 
+Entries dated before 2026-10-18 describe the pre-1.0.0 identity: they name package `app.margin.reader` and `margin-<version>-<code>-*.apk` artifacts as delivered then. The current package is `app.peekturn.reader`; read those names as history, not as current commands or paths.
+
 The initial native implementation was verified on 2026-10-15. The observations below concern the Android application, not the browser prototype.
 
 ## Environment and commands
@@ -1091,3 +1093,167 @@ tree; its illustrative content and simulated audio are not shipped. Existing nar
 quotas/providers and explanation prompts/formats were intentionally unchanged. Physical-device,
 commercial-model and unrelated feature coverage are not implied by this focused verification.
 
+## Popup audio credit hidden (2026-10-19)
+
+Debug APK `app/build/outputs/apk/debug/app-debug.apk`, version 1.0.1 (2), SHA-256
+`8613d3c72ae2a91bd65a6593f61ee7b359bba89a801fd998d9c703524dfe6daf`. Built with
+`:app:assembleDebug` and installed over the existing `app.peekturn.reader.debug` data on API 35
+`emulator-5554`. No unit, lint or full-suite run.
+
+The lookup popup no longer renders the playback credit; the Settings → Pronunciation disclosure
+still does. No narration, provider, routing, credit-data or error path changed.
+
+### Android observations
+
+- Selected a real word in the installed *The Prophet*: Dictionary returned its bundled entry and
+  Explain showed the expected model-configuration failure because no provider credentials were
+  configured. Both tabs kept the term speaker, configuration/error copy and Close/Adjust controls.
+- Tapping the term speaker changed the header control to `Stop pronunciation` in both tabs. The
+  UI hierarchy contained no `Audio:` node, provider name or provider link while playing or after
+  completion, and the popup closed up without an empty credit slot.
+- The network counters for the debug UID rose by 17,621 received bytes during the Dictionary
+  playback, confirming an online audio answer rather than an empty response. The same word route
+  in Settings → Pronunciation then showed `Audio: Youdao Dictionary`, confirming the credit was
+  loaded and that the Settings disclosure remains in place.
+- Evidence remains ignored under `verification-local/popup-credit-*-2026-10-19.*` and
+  `verification-local/settings-audio-credit-2026-10-19.*`. No real credentials or private book
+  text were used. The library's original 3% reading position was restored and temporary
+  recording/dump files were removed from the device.
+
+Limits: Explain was exercised in its configuration-error state, not with a live model answer, so
+its example speakers were not available. Provider success is proven by the speaker/network
+evidence above and the Settings credit, not by audible-quality review. No physical phone was used.
+
+## Settings-owned speech providers and Quick Explain menu (2026-10-20)
+
+Implemented the shared Microsoft (default), Android system TTS and Baidu English choice in
+Settings only. Phrases, examples, sentence preview and narration use the selected provider without
+automatic provider fallback. Single-word routing remains Youdao first with its existing fallbacks.
+Quick Explain supplies an empty native action menu without clearing the native selection.
+
+### Checks
+
+- Targeted debug unit checks: 246 tests across 23 classes, zero failures, errors or skips. Scope:
+  speech, narration, `PeekturnStoreTest`, `SelectionSessionTest`, `NativeSelectionReadTest`,
+  `ReaderControlsTest` and `MainViewModelTest`. This was not a full-suite run.
+- The initial targeted run found a wrongly typed provider was restored but not persisted, and a
+  stop test fixture completed its strict-provider request before stopping it. Both were corrected.
+- A focused review found a save-time cancellation race. `AppGraph` now stops popup speech when
+  the saved provider changes, in addition to the immediate Settings click stop. A behavioral
+  graph test covers cancellation at that authoritative change and preserves unrelated updates.
+- Release lint passed with 68 warnings and three hints, no errors. Signed release assembly passed.
+  The later preview-layout-only adjustment was rebuilt and linted and verified on Android.
+
+### Android observations
+
+API 35 `margin-probe` emulator, existing app data retained:
+
+- All three providers completed real sentence previews and entered continuous narration.
+  Microsoft and Baidu preview credits identified the selected service. Baidu narration displayed
+  its accent limitation as a reminder, without a provider selector on the reading surface.
+- Android narration paused and resumed. Its cache usage stayed at 500 KiB across the Android
+  playback scenario; provider-specific cache separation also has targeted unit coverage.
+- Changing provider in Settings during narration removed the Peekturn media session. The next
+  narration used the new provider. Android selection persisted across a process restart.
+- Airplane mode made the Microsoft preview report that Microsoft returned no audio, with its
+  route diagnostic and no Baidu or system-speech substitution. Connectivity was restored.
+- With Quick Explain on, the held selection had no popup or floating action menu; release opened
+  the explanation's configuration-error state without the floating menu. Adjust retained the
+  highlighted native range. With it off, the native Explain / Dictionary / Copy menu and handles
+  were visible. Physical handle-drag behavior after Adjust was not fully verified.
+- The signed production APK installed over the existing production app, launched, defaulted to
+  Microsoft and played its sentence preview. Provider choices and reminders rendered normally.
+- At a 320 dp by 480 dp viewport with 1.5x font scale, preview actions stacked without splitting
+  their labels and the dialog could scroll to Close. Normal-size previews remained side by side.
+  Viewport and font scale were restored after verification.
+
+Local signed production candidate:
+`app/build/outputs/delivery/local-public.CrXHrW/peekturn-1.0.1-2-release.apk`,
+SHA-256 `2ed531094b79d2a7deb9ec231b9acc82bb14acc512b58d3a0d484ba6f4879070`.
+Signature verification passed with the existing production upload certificate. Version remains
+1.0.1 (2); no version bump, commit, tag, upload or publication was performed. The local receipt
+explicitly records uncommitted inputs. Screenshots stay ignored under
+`verification-local/speech-provider-*.png` and `verification-local/quick-explain-*.png`.
+
+Limits: no OPPO/Xiaomi hardware or audible-quality review. No live model credentials were used,
+so generated-example buttons were covered by targeted routing tests, not a live explanation
+scenario. English Settings was visually verified; Chinese resources compiled but were not
+visually exercised.
+
+## System-English compatibility, developer logs and English-only elementary explanations (2026-10-20)
+
+Version 1.1.0 (3), local signed production candidate:
+`app/build/outputs/delivery/local-public.AwxhBJ/peekturn-1.1.0-3-release.apk`.
+SHA-256: `b7449b63819a27de7dcec93025b70c3dae8e352c6535b7289b42e75f7aa55d35`.
+Signature verification and checksum verification passed. The APK installed over the existing
+production package without clearing data and launched successfully. The current-version developer
+log viewer and Copy action were also exercised on this final signed APK.
+
+### Targeted checks and regression proof
+
+- Final targeted debug run: 312 tests across 34 classes, zero failures, errors or skips.
+  Filters: speech, narration, diagnostics, learning, `MainViewModelTest` and web import.
+  This was not a full-suite run.
+- `SystemSpeechCompatibilityTest`: the same five cases produced three assertion failures in an
+  isolated pre-upgrade snapshot, then passed after the shared policy upgrade. Positive English
+  language answers with absent/inconsistent voice metadata now permit a real attempt with a
+  warning; unsupported/missing-data/not-installed responses still fail.
+- The retired-English-prompt cache regression failed against the prior v1 snapshot and passed
+  after the English v2 gate. A separate Chinese-compatibility regression failed against the
+  interim shared-v2 gate and passed after language-specific generations restored Chinese v1.
+- Release lint and signed assembly passed: zero lint errors, 68 warnings and four hints.
+
+### Android observations
+
+API 35 arm64 emulator with Google system speech, not an OPPO or Xiaomi phone:
+
+- Real system preview and native Readium-engine narration produced preparation and utterance
+  callbacks. Logs identify the resolved engine/version, locale fields, language API answers,
+  speak return and start/done/error events without the spoken text.
+- Native narration paused, returned through background/foreground, resumed and produced further
+  start/done callbacks. The reading card retained concise controls rather than a full log dump.
+- A missing-model explanation, invalid shared EPUB and offline Microsoft-only preview produced
+  persistent feature/route failures. The invalid URI, selected word, model answer, temporary
+  provider name and dummy credential were absent from the developer log. Connectivity was restored.
+- A shell-induced crash of the isolated debug app wrote a sanitized crash record before the
+  original handler terminated the process; the record survived restart. Android's own recent
+  exit summary also reported the crash, without its description or trace stream.
+- Copy exported an actual 5,914-character report to the system clipboard, verified by a temporary
+  foreground reader app rather than by the success label alone. The reader APK and its source
+  were removed after verification.
+- English and Chinese log viewers were exercised. At 320 dp by 480 dp with 1.5x font scale,
+  Copy/Close stayed pinned and reachable while the technical text scrolled.
+
+### Actual configured DeepSeek verification
+
+The configured `smol` role resolved to `ai-one/deepseek-flash`. Model calls were made directly
+through that configured role; no model credential was copied into the repository or app.
+The comparison corpus used invented/generic short passages for `reluctant`, `would at least have
+died`, river `bank` and `a heavy heart`. Multiple candidates were actually tested before application:
+one candidate invented a rescue/survival result, and the phrase-only English change still produced
+grammar terminology. The accepted English-only version adds common-word, short-sentence and
+no-grammar-label guidance. Elementary English remains a goal, not a certified readability score.
+
+The final scope preserves the original Chinese prompt unchanged. English uses prompt generation
+v2; Chinese retains v1 and its existing cache compatibility. A temporary loopback relay additionally
+forwarded actual Android system/user payloads for the public-domain *The Prophet* selection
+`Copyright` to configured DeepSeek, then streamed those actual answers back to the app:
+
+- The final Android English prompt exactly matched the English-only prompt tested beforehand.
+- The final Android Chinese prompt was byte-for-byte identical to the original Chinese prompt.
+- The English answer rendered in English; the unchanged Chinese answer rendered meaning/context
+  in Chinese with English examples and Chinese translations.
+- Model answers and temporary verification configuration were absent from developer logs.
+
+There were 44 recorded comparison/live model requests, including superseded candidates and two
+final Android requests. Detailed local evidence remains ignored at
+`verification-local/deepseek-elementary-prompt-evaluation.json`; screenshots use
+`developer-log-*`, `system-tts-*` and `deepseek-final-*` names under the same ignored directory.
+The temporary model profile was removed, the original profile/language/reading preference restored,
+the relay stopped and ADB reverse removed. Display size and font scale were restored.
+
+Limits: no physical OPPO/Xiaomi or audible-quality verification. An accepted English request does
+not prove an OEM has usable English assets or that its pronunciation is correct. Developer logs
+contain observed API/callback evidence, sanitized Java stacks and own-app exit summaries, not
+raw Logcat or complete native tombstones. No commit, tag, upload or publication was performed;
+the local receipt explicitly records uncommitted inputs.

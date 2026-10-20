@@ -39,6 +39,7 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
                 } catch (e: CancellationException) { throw e
                 } catch (e: Exception) {
                     Log.w("PeekturnStartup", "Included book import failed: ${e.javaClass.simpleName}")
+                    graph.developerLog.recordFailure("library", "seed", e)
                 }
                 _state.update { it.copy(ready = true) }
                 if (reopen) {
@@ -52,10 +53,14 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
                         }
                     }
                 }
-                graph.store.error.value?.let(::message)
+                graph.store.error.value?.let {
+                    graph.developerLog.recordFailure("settings", "restore")
+                    message(it)
+                }
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) {
                 Log.w("PeekturnStartup", "Library load failed: ${e.javaClass.simpleName}")
+                graph.developerLog.recordFailure("library", "startup", e)
                 _state.update { it.copy(ready = true, message = "Could not open the local library. Restart the app to retry.") }
             }
         }
@@ -80,6 +85,7 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) {
                 Log.w("PeekturnImport", "EPUB import failed: ${e.javaClass.simpleName}")
+                graph.developerLog.recordFailure("import", "epub", e)
                 _state.update { it.copy(busy = false, message = "Could not import this EPUB. Check that it is a readable, unprotected EPUB file.") }
             }
         }
@@ -93,14 +99,22 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
         viewModelScope.launch {
             try { graph.store.deleteBook(book.id) }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { Log.w("PeekturnLibrary", "Delete failed: ${e.javaClass.simpleName}"); message("Could not remove this book. Please try again.") }
+            catch (e: Exception) {
+                Log.w("PeekturnLibrary", "Delete failed: ${e.javaClass.simpleName}")
+                graph.developerLog.recordFailure("library", "book-delete", e)
+                message("Could not remove this book. Please try again.")
+            }
         }
     }
     fun save(transform: (AppSettings) -> AppSettings) {
         viewModelScope.launch {
             try { graph.store.updateSettings(transform) }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { Log.w("PeekturnSettings", "Save failed: ${e.javaClass.simpleName}"); message("Could not save settings. Please try again.") }
+            catch (e: Exception) {
+                Log.w("PeekturnSettings", "Save failed: ${e.javaClass.simpleName}")
+                graph.developerLog.recordFailure("settings", "save", e)
+                message("Could not save settings. Please try again.")
+            }
         }
     }
     class Factory(private val graph: AppGraph) : ViewModelProvider.Factory {

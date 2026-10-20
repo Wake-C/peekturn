@@ -1,9 +1,13 @@
 package app.peekturn.reader.narration
 
 import android.app.Application
+import android.speech.tts.TextToSpeech
 import androidx.media3.common.Player
 import app.peekturn.reader.R
+import app.peekturn.reader.model.SentenceSpeechProvider
+import app.peekturn.reader.speech.BaiduSpeechClient
 import app.peekturn.reader.speech.BingSpeechClient
+import app.peekturn.reader.speech.SentenceAudioSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,8 +20,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import org.readium.navigator.media.common.DefaultMediaMetadataProvider
+import org.readium.navigator.media.tts.TtsEngineProvider
 import org.readium.navigator.media.tts.TtsNavigator
 import org.readium.navigator.media.tts.TtsNavigatorFactory
+import org.readium.r2.navigator.preferences.PreferencesEditor
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
@@ -28,14 +34,17 @@ data class NarrationState(
     val playing: Boolean = false,
     val cached: Boolean = false,
     val speed: Float = 1f,
-    val error: String? = null
+    val error: String? = null,
+    /** An honest limitation of the active provider, shown without blocking the transport. */
+    val notice: String? = null
 )
 
 /**
- * Owns one continuous narration session: a Readium TtsNavigator, a persistent sentence cache, one
- * synthesizer with bounded lookahead, and the locator the visible reader follows while foregrounded.
- * The service keeps this object alive independently of ReaderActivity; the visual navigator never
- * owns audio or the publication used for background reading.
+ * Owns one continuous narration session: a Readium TtsNavigator, the selected provider, and the
+ * locator the visible reader follows while foregrounded. Microsoft and Baidu synthesize complete
+ * sentences into the persistent cache with bounded lookahead; Android speaks through the installed
+ * system voice and never caches. The service keeps this object alive independently of ReaderActivity;
+ * the visual navigator never owns audio or the publication used for background reading.
  *
  * Audio focus, becoming-noisy and notification play/pause are owned by Readium's TtsSessionAdapter
  * exposed through [asMedia3Player]. That adapter requests speech focus, pauses on focus loss or
@@ -49,27 +58,42 @@ internal class NarrationPlayback(
     val publication: Publication,
     private val cache: SentenceAudioCache,
     private val accent: String,
+    val provider: SentenceSpeechProvider,
     initialSpeed: Float,
     providerGate: Mutex,
     private val onEnded: () -> Unit,
-    private val onLocator: (Locator) -> Unit
+    private val onLocator: (Locator) -> Unit,
+    private val onDiagnostic: (String) -> Unit = {}
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val stateMutable = MutableStateFlow(
-        NarrationState(active = true, speed = initialSpeed.coerceIn(0.5f, 2f))
+        NarrationState(
+            active = true,
+            speed = initialSpeed.coerceIn(0.5f, 2f),
+            notice = if (provider == SentenceSpeechProvider.BAIDU) {
+                application.getString(R.string.speech_notice_baidu_accent)
+            } else {
+                null
+            }
+        )
     )
     val state: StateFlow<NarrationState> = stateMutable.asStateFlow()
 
     private val locationMutable = MutableStateFlow<Locator?>(null)
     val location: StateFlow<Locator?> = locationMutable.asStateFlow()
 
-    private val voice = narrationVoice(accent)
-    private val bing = BingSpeechClient()
+    private val voice = narrationVoice(provider, accent)
+    private val onlineSource: SentenceAudioSource? = when (provider) {
+        SentenceSpeechProvider.MICROSOFT -> BingSpeechClient()
+        SentenceSpeechProvider.BAIDU -> BaiduSpeechClient()
+        SentenceSpeechProvider.ANDROID -> null
+    }
     private val synthesizer = voice?.let { spec ->
+        val source = onlineSource ?: return@let null
         NarrationSynthesizer(
             cache = cache,
             source = NarrationChunkSource { text, spokenAccent ->
-                bing.lookup(text, spokenAccent)?.audio
+                source.lookup(text, spokenAccent)?.audio
             },
             scope = scope,
             accent = accent,
@@ -94,22 +118,47 @@ internal class NarrationPlayback(
     /** Starts at [initialLocator], then at [startSentence] when the visible offset identifies one. */
     suspend fun start(initialLocator: Locator?, startSentence: String? = null): Boolean {
         val synth = synthesizer
-        if (voice == null || synth == null) {
-            stateMutable.update { it.copy(active = true, error = application.getString(R.string.reader_narration_error_voice)) }
-            return false
+        val ttsProvider: TtsEngineProvider<
+            NarrationSettings,
+            NarrationPreferences,
+            PreferencesEditor<NarrationPreferences>,
+            NarrationError,
+            NarrationVoice
+            > = when {
+            provider == SentenceSpeechProvider.ANDROID ->
+                AndroidNarrationEngineProvider(
+                    context = application,
+                    accent = accent,
+                    onDiagnostic = onDiagnostic,
+                    onNotice = { notice ->
+                        stateMutable.update {
+                            it.copy(notice = notice?.let { id -> application.getString(id) })
+                        }
+                    },
+                    onFailureReport = { report ->
+                        if (report != null) runCatching { onDiagnostic(report) }
+                    }
+                )
+            voice == null || synth == null -> {
+                stateMutable.update {
+                    it.copy(active = true, error = application.getString(R.string.reader_narration_error_voice))
+                }
+                return false
+            }
+            else -> NarrationEngineProvider(
+                application = application,
+                accent = accent,
+                synthesizer = synth,
+                onStarted = ::onUtteranceStarted,
+                resumePolicy = resumePolicy,
+                provider = provider
+            )
         }
-        val provider = NarrationEngineProvider(
-            application = application,
-            accent = accent,
-            synthesizer = synth,
-            onStarted = ::onUtteranceStarted,
-            resumePolicy = resumePolicy
-        )
         startSkipper = startSentence?.takeIf { it.isNotBlank() }?.let(::SentenceStartSkipper)
         val factory = TtsNavigatorFactory(
             application = application,
             publication = publication,
-            ttsEngineProvider = provider,
+            ttsEngineProvider = ttsProvider,
             tokenizerFactory = { language -> SentenceTextTokenizer(language, startSkipper) },
             metadataProvider = DefaultMediaMetadataProvider()
         )
@@ -279,6 +328,13 @@ internal class NarrationPlayback(
      */
     private fun onUtteranceStarted(text: String, fromCache: Boolean) {
         stateMutable.update { it.copy(cached = fromCache, playing = true) }
+        val synth = synthesizer
+        if (synth == null) {
+            // Android speech is not cached and has no online lookahead.
+            prefetchJob?.cancel()
+            prefetchJob = null
+            return
+        }
         prefetchJob?.cancel()
         prefetchJob = scope.launch {
             val locator = locationMutable.value ?: return@launch
@@ -296,7 +352,7 @@ internal class NarrationPlayback(
             }
             for (sentence in following) {
                 try {
-                    synthesizer?.prefetch(sentence)
+                    synth.prefetch(sentence)
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
@@ -307,10 +363,16 @@ internal class NarrationPlayback(
     }
 
     private fun message(error: TtsNavigator.Error): String = when (error) {
-        is TtsNavigator.Error.EngineError<*> -> when (error.cause) {
+        is TtsNavigator.Error.EngineError<*> -> when (val cause = error.cause) {
             is NarrationError.TooLong -> application.getString(R.string.reader_narration_error_too_long)
             is NarrationError.Storage, is NarrationError.TooLarge ->
                 application.getString(R.string.reader_narration_error_storage)
+            is NarrationError.Device ->
+                if ((cause.cause as? AndroidSpeechFailure)?.code == TextToSpeech.ERROR_NOT_INSTALLED_YET) {
+                    application.getString(R.string.speech_failure_missing_english_data)
+                } else {
+                    application.getString(R.string.reader_narration_error_playback)
+                }
             is NarrationError.Playback, is NarrationError.InvalidAudio ->
                 application.getString(R.string.reader_narration_error_playback)
             else -> application.getString(R.string.reader_narration_error_unavailable)

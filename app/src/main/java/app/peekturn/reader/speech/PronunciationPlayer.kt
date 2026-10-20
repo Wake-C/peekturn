@@ -13,9 +13,9 @@ import android.os.Looper
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import android.speech.tts.Voice
-import androidx.annotation.StringRes
 import app.peekturn.reader.R
+import app.peekturn.reader.diagnostics.diagnosticMetadata
+import app.peekturn.reader.model.SentenceSpeechProvider
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -48,10 +48,8 @@ data class SpeechState(
 )
 
 /**
- * The online sentence routes in the order they are tried, each one a whole request in its own right:
- * the read-aloud service first, then the simple key-free GET when that service refuses, stalls or has
- * nothing, and installed device speech after both. A word uses the same two routes after its own
- * dictionary recording, so a word no dictionary voices still gets online audio before speech.
+ * The two key-free sentence routes in their legacy order: read-aloud first, then Baidu. A chosen
+ * provider selects only its own source; the word route still tries both before device speech.
  */
 internal val defaultSentenceSources: List<SentenceAudioSource> = listOf(BingSpeechClient(), BaiduSpeechClient())
 
@@ -71,17 +69,31 @@ private val TOO_LONG_NOTICE = R.string.speech_notice_too_long_online
 private const val LOOKUP_TIMEOUT_MS = 4_000L
 private const val PREPARE_TIMEOUT_MS = 8_000L
 private const val INITIALIZE_TIMEOUT_MS = 8_000L
+/** The stable route names the two sentence clients report, and the only names a chosen provider matches. */
+private const val MICROSOFT_ROUTE = "bing"
+private const val BAIDU_ROUTE = "baidu"
+/** The failure log keeps one bounded line per attempted route, not an unbounded route history. */
+private const val FAILURE_ROUTE_LIMIT = 5
+private const val FAILURE_ROUTE_NAME_LIMIT = 32
+private const val FAILURE_OUTCOME_LIMIT = 96
 
 /**
- * Main-thread serialized, latest-only pronunciation. A word prefers its free dictionary recording, then
- * the key-free speech services, which also voice every phrase and example; installed device speech
- * always remains the fallback, and nothing about a superseded request may still reach the speaker.
- * Call shutdown when its owner is destroyed.
+ * Main-thread serialized, latest-only pronunciation. A selected word keeps its free dictionary
+ * recording first, then the key-free speech services and installed device speech. A phrase, example
+ * or preview follows exactly the provider chosen in Settings, with no cross-route fallback: Microsoft
+ * and Baidu either answer or fail, and Android means installed English system speech only. Nothing
+ * about a superseded request may still reach the speaker. Call shutdown when its owner is destroyed.
  */
 class PronunciationPlayer(
     context: Context,
     private val wordAudio: WordAudioSource = YoudaoWordAudioClient(),
     private val sentenceAudio: List<SentenceAudioSource> = defaultSentenceSources,
+    /**
+     * Device-speech evidence for the reader's own diagnostics log, not for the screen: preparation
+     * outcomes, the engine's answers and terminal or playback failures. It never receives the text
+     * being spoken, an endpoint or a credential, and a missing owner simply has no log to write.
+     */
+    private val onDiagnostic: (String) -> Unit = {},
     private val engines: (Context) -> List<String> = ::installedSpeechEngines
 ) {
     private val app = context.applicationContext
@@ -106,6 +118,12 @@ class PronunciationPlayer(
     private var candidates: List<String?> = emptyList()
     private var candidateIndex = 0
     private var currentCandidate: String? = null
+    /**
+     * The engine the player currently holds and may reuse after a stop. Evidence is cleared per
+     * request, so a ready engine has to be identified to the new request's evidence explicitly.
+     */
+    private var currentEngineName: String = "system default engine"
+    private var currentEngineVersion: String? = null
     private var substitutionPass = false
     private val substitutable = LinkedHashSet<String?>()
     private var engineStarted = false
@@ -137,16 +155,34 @@ class PronunciationPlayer(
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
 
-    private data class Request(val text: String, val locale: Locale, val id: Long)
+    private data class Request(
+        val text: String,
+        val locale: Locale,
+        val id: Long,
+        /** Set for a phrase-like request: exactly this source, never another route. */
+        val provider: SentenceSpeechProvider? = null
+    )
 
     /** Where the current request is playing: online provider bytes through the decoder, or device speech. */
     private enum class Path { Speech, Audio }
 
-    /** A single word: its dictionary recording, then the speech service, then installed device speech. */
-    fun speakWord(text: String, accent: String) = onMain { begin(text, accent, word = true) }
+    /** A single word: its dictionary recording, then the speech services, then installed device speech. */
+    fun speakWord(text: String, accent: String) = onMain { begin(text, accent, word = true, provider = null) }
 
-    /** A phrase, sentence or example: the speech service, then installed device speech. */
-    fun speakExample(text: String, accent: String) = onMain { begin(text, accent, word = false) }
+    /**
+     * A phrase, sentence or example: exactly the chosen provider. Microsoft and Baidu never hand the
+     * text to the other service or to system speech, and Android never contacts an online service.
+     */
+    fun speakExample(text: String, accent: String, provider: SentenceSpeechProvider) =
+        onMain { begin(text, accent, word = false, provider = provider) }
+
+    /**
+     * A selection pronounced as a selection: one plain word keeps the dictionary-first route, while
+     * anything longer is phrase-like and follows the chosen provider.
+     */
+    fun speakSelection(text: String, accent: String, provider: SentenceSpeechProvider) = onMain {
+        begin(text, accent, word = wordLookupTerm(text) != null, provider = provider)
+    }
 
     fun stop() = onMain { stopInternal() }
 
@@ -188,7 +224,7 @@ class PronunciationPlayer(
         fail(app.getString(R.string.speech_failure_settings_unavailable))
     }
 
-    private fun begin(text: String, accent: String, word: Boolean) {
+    private fun begin(text: String, accent: String, word: Boolean, provider: SentenceSpeechProvider?) {
         if (closed) return
         stopInternal()
         val locale = speechLocale(accent)
@@ -200,23 +236,30 @@ class PronunciationPlayer(
             fail(app.getString(R.string.speech_failure_no_text))
             return
         }
-        val request = Request(text, locale, generation)
+        // A word keeps its dictionary-first chain; only non-word speech is bound to the chosen source.
+        val strictProvider = provider.takeUnless { word }
+        val request = Request(text, locale, generation, strictProvider)
         pending = request
         path = Path.Speech
         utteranceAccepted = false
         mutableState.value = SpeechState(text, playing = true)
+        if (strictProvider == SentenceSpeechProvider.ANDROID) {
+            // The explicitly chosen device route never makes an online request.
+            requestSpeech(request, null)
+            return
+        }
         // Only the text asked to be heard may leave the device, and only a single plain word may try
         // the dictionary's own recording before the speech service.
         lookupOnline(request, accent, if (word) wordLookupTerm(text) else null)
     }
 
     /**
-     * The online routes for this request, in order: the dictionary's recording of a single word first
-     * where the endpoint accepts one, then each speech service in turn, which voices arbitrary text.
-     * A text no service will voice is declined before any request is made, because a route that was
-     * never attempted must not be reported as one that failed. The first route with audio plays it;
-     * a route that has nothing or fails only moves on, and installed device speech speaks when none
-     * of them can.
+     * The online routes for this request. A selected word tries the dictionary's recording first, then
+     * each speech service in turn. A phrase-like request asks only the chosen provider. A text no
+     * service will voice is declined before any request is made, because a route that was never
+     * attempted must not be reported as one that failed. With no provider chosen, installed device
+     * speech speaks when every online route has nothing; a chosen provider fails instead of silently
+     * handing the text to another voice.
      */
     private fun lookupOnline(request: Request, accent: String, term: String?) {
         path = Path.Audio
@@ -224,16 +267,24 @@ class PronunciationPlayer(
         // declined here, before any route is recorded as having failed.
         if (speechLookupText(request.text) == null) {
             onlineUnavailable = R.string.speech_failure_too_long_online
-            requestSpeech(request, app.getString(TOO_LONG_NOTICE, app.getString(onlineUnavailable!!)))
+            if (request.provider != null) {
+                fail(app.getString(onlineUnavailable!!), leadWithRoutes = false)
+            } else {
+                requestSpeech(request, app.getString(TOO_LONG_NOTICE, app.getString(onlineUnavailable!!)))
+            }
             return
         }
         lookup = scope.launch {
             val clip = (term?.let { word ->
                 onlineClip(DICTIONARY_ROUTE, LOOKUP_TIMEOUT_MS) { wordAudio.lookup(word, accent) }
-            }) ?: sentenceClip(request.text, accent)
+            }) ?: sentenceClip(request.text, accent, request.provider)
             if (!isCurrent(request)) return@launch
             if (clip == null) {
-                requestSpeech(request, app.getString(NO_ONLINE_AUDIO))
+                if (request.provider != null) {
+                    fail(providerFailureMessage(request.provider), leadWithRoutes = false)
+                } else {
+                    requestSpeech(request, app.getString(NO_ONLINE_AUDIO))
+                }
             } else {
                 clipObtained = true
                 playClip(clip, request)
@@ -244,16 +295,40 @@ class PronunciationPlayer(
     /**
      * Each online sentence route is tried in turn with its own bounded attempt, so one service being
      * unavailable costs the reader the time to find out and nothing else; the clip that plays is the one
-     * the service that answered supplied, with its own credit and its own caveat. What a route answered
-     * when it had no clip is kept for the failure report, never shown on success.
+     * the service that answered supplied, with its own credit and its own caveat. A chosen provider
+     * narrows this to that one service. What a route answered when it had no clip is kept for the
+     * failure report, never shown on success.
      */
-    private suspend fun sentenceClip(text: String, accent: String): AudioClip? {
+    private suspend fun sentenceClip(
+        text: String,
+        accent: String,
+        provider: SentenceSpeechProvider?
+    ): AudioClip? {
+        if (provider != null) {
+            val source = sentenceSource(provider) ?: return null
+            return sentenceAttempt(source, text, accent)
+        }
         for (source in sentenceAudio) {
             val clip = sentenceAttempt(source, text, accent)
             if (clip != null) return clip
         }
         return null
     }
+
+    /** The one source a chosen provider means, matched by the stable route name each client reports. */
+    private fun sentenceSource(provider: SentenceSpeechProvider): SentenceAudioSource? = when (provider) {
+        SentenceSpeechProvider.MICROSOFT -> sentenceAudio.firstOrNull { it.route == MICROSOFT_ROUTE }
+        SentenceSpeechProvider.BAIDU -> sentenceAudio.firstOrNull { it.route == BAIDU_ROUTE }
+        SentenceSpeechProvider.ANDROID -> null
+    }
+
+    private fun providerFailureMessage(provider: SentenceSpeechProvider): String = app.getString(
+        when (provider) {
+            SentenceSpeechProvider.MICROSOFT -> R.string.speech_failure_microsoft_unavailable
+            SentenceSpeechProvider.BAIDU -> R.string.speech_failure_baidu_unavailable
+            SentenceSpeechProvider.ANDROID -> R.string.speech_failure_audio_unavailable
+        }
+    )
 
     /** One bounded sentence route. Cancellation belongs to a newer request and is never reported. */
     private suspend fun sentenceAttempt(
@@ -367,10 +442,18 @@ class PronunciationPlayer(
         }, PREPARE_TIMEOUT_MS)
     }
 
-    /** Online audio that no route could supply is never an error while device speech can speak instead. */
+    /**
+     * Online audio that no route could supply is never an error while device speech can speak instead.
+     * A chosen provider has no such fallback: a clip that was found but cannot play is reported rather
+     * than voiced by a different source.
+     */
     private fun fallbackToSpeech(request: Request) {
         releaseMedia()
-        requestSpeech(request, app.getString(NO_ONLINE_AUDIO))
+        if (request.provider != null) {
+            fail(app.getString(R.string.speech_failure_online_playback), leadWithRoutes = false)
+        } else {
+            requestSpeech(request, app.getString(NO_ONLINE_AUDIO))
+        }
     }
 
     /**
@@ -387,17 +470,26 @@ class PronunciationPlayer(
         if (!isCurrent(request)) return
         path = Path.Speech
         speechNotice = notice
-        if (ready) playLatest() else if (engine == null) initialize()
+        if (ready) {
+            // stopInternal keeps a ready engine but clears the evidence, so the retained engine has to
+            // be identified again before this request's answers can be attributed to it.
+            evidence.addEngine(currentEngineName, currentEngineVersion)
+            playLatest()
+        } else if (engine == null) {
+            initialize()
+        }
     }
 
     /**
      * Tries the engines in order: the user's default first, then every other engine that declares the
      * TTS service. Each one is asked for a real English voice, and only a failure of the engine being
      * tried moves on to the next candidate, so a broken or English-less default cannot hide an engine
-     * that can speak. Once every engine has declined, the engines that actually started get one final
-     * pass, in the same order, where the engine's own voice is asked to speak the text unchanged: the
-     * reader's own engine choice may be the only English-capable voice on the device, but a real English
-     * voice found on any engine was still worth more than a substituted one.
+     * that can speak. Once every engine has declined, a word request gives the engines that actually
+     * started one final pass, in the same order, where the engine's own voice is asked to speak the
+     * text unchanged: the reader's own engine choice may be the only English-capable voice on the
+     * device, but a real English voice found on any engine was still worth more than a substituted
+     * one. An explicitly chosen Android request never takes that pass; it reports what the engines
+     * answered instead of using a voice the app cannot name.
      */
     private fun initialize() {
         if (closed || engine != null) return
@@ -406,7 +498,11 @@ class PronunciationPlayer(
             candidateIndex = 0
         }
         if (candidateIndex >= candidates.size) {
-            if (!substitutionPass && substitutable.isNotEmpty()) {
+            // The explicitly chosen Android route means installed English speech; it must not fall
+            // back to an unverified engine voice. A word request keeps its existing final pass.
+            if (!substitutionPass && substitutable.isNotEmpty() &&
+                pending?.provider != SentenceSpeechProvider.ANDROID
+            ) {
                 substitutionPass = true
                 candidates = substitutable.toList()
                 candidateIndex = 0
@@ -417,9 +513,12 @@ class PronunciationPlayer(
         }
         val candidate = candidates[candidateIndex++]
         currentCandidate = candidate
-        // The engine the reader chose is the one whose answers a report keeps, and a package name the
-        // reader can send back is worth more than "the default engine".
-        evidence.addEngine(candidate ?: defaultSpeechEngine(app) ?: "system default engine")
+        // The engine the reader chose is the one whose answers a report keeps, and a package name and
+        // version the reader can send back are worth more than "the default engine".
+        val engineName = candidate ?: defaultSpeechEngine(app)
+        currentEngineName = engineName ?: "system default engine"
+        currentEngineVersion = engineName?.let { speechEngineVersion(app, it) }
+        evidence.addEngine(currentEngineName, currentEngineVersion)
         val initialization = ++engineGeneration
         val onInit = TextToSpeech.OnInitListener { status ->
             // Always post: construction must have assigned engine before handling init.
@@ -447,6 +546,7 @@ class PronunciationPlayer(
     private fun onEngineTimeout(initialization: Long) {
         initTimeout = null
         if (closed || initialization != engineGeneration || engine == null) return
+        evidence.recordUtterance("init timeout")
         releaseEngine()
         if (path == Path.Speech && pending != null) initialize() else forgetEngines()
     }
@@ -459,6 +559,7 @@ class PronunciationPlayer(
     private fun onEngineInitialized(initialization: Long, status: Int) {
         if (closed || initialization != engineGeneration) return
         cancelInitTimeout()
+        evidence.observe(SpeechObservation.InitAnswered(status))
         if (status != TextToSpeech.SUCCESS) {
             releaseEngine()
             // A superseded sentence's engine must not fail the newer request, which may not need
@@ -471,6 +572,15 @@ class PronunciationPlayer(
         engineStarted = true
         ready = true
         val speaking = engine ?: return
+        if (currentCandidate == null) {
+            val resolved = runCatching { speaking.defaultEngine }.getOrNull()
+            if (!resolved.isNullOrBlank()) {
+                currentEngineName = resolved
+                currentEngineVersion = speechEngineVersion(app, resolved)
+                evidence.addEngine(currentEngineName, currentEngineVersion)
+                evidence.observe(SpeechObservation.InitAnswered(status))
+            }
+        }
         speaking.setAudioAttributes(attributes)
         speaking.setOnUtteranceProgressListener(listenerFor(speaking))
         playLatest()
@@ -499,6 +609,7 @@ class PronunciationPlayer(
                 // The final device attempt, and the only one that does not change the voice: no voice and
                 // no language is selected, so the reader's own engine choice may be the only
                 // English-capable voice on the device. Only text that is itself English reaches this pass.
+                emitDiagnostic("prepared with the device's own voice")
                 speak(request, tts, app.getString(DEVICE_DEFAULT_VOICE_NOTICE), substituting = true)
                 return
             }
@@ -506,8 +617,14 @@ class PronunciationPlayer(
                 request.locale, { tts.voices }, { tts.setVoice(it) },
                 { tts.setLanguage(it) }, { tts.voice }, evidence::observe
             )) {
-                is SpeechAvailability.Available ->
+                is SpeechAvailability.Available -> {
+                    // Success is logged too: a working engine whose own voice metadata disagrees with
+                    // the accepted language is exactly the device fact a later bug report needs.
+                    emitDiagnostic(
+                        if (availability.noticeRes == null) "prepared" else "prepared with caveat"
+                    )
                     speak(request, tts, availability.noticeRes?.let(app::getString), substituting = false)
+                }
                 SpeechAvailability.MissingData, SpeechAvailability.Unsupported -> {
                     if (availability == SpeechAvailability.MissingData) missingEnglishData = true
                     // What the engine answered was about the voice that was asked for, not about the voice
@@ -522,6 +639,8 @@ class PronunciationPlayer(
                 }
             }
         } catch (_: RuntimeException) {
+            // The throwable's own message is never logged; it may echo engine internals or text.
+            evidence.recordUtterance("preparation threw")
             releaseEngine()
             // An engine that throws instead of answering is the same fact as one that answers with a
             // failure: the substituted voice gives way, and a promised one is reported.
@@ -543,8 +662,9 @@ class PronunciationPlayer(
         this.substituting = substituting
         if (!requestFocus(request)) return
         val notices = listOfNotNull(speechNotice, notice)
-        val accepted = tts.speak(request.text, TextToSpeech.QUEUE_FLUSH, null, request.id.toString()) ==
-            TextToSpeech.SUCCESS
+        val returned = tts.speak(request.text, TextToSpeech.QUEUE_FLUSH, null, request.id.toString())
+        evidence.observe(SpeechObservation.SpeakAnswered(returned))
+        val accepted = returned == TextToSpeech.SUCCESS
         // An engine that accepted the text has answered about its ability to speak it, whether the app
         // chose the voice or the engine offered its own; a later failure is playback either way.
         if (accepted) utteranceAccepted = true
@@ -588,20 +708,37 @@ class PronunciationPlayer(
      */
     private fun listenerFor(source: TextToSpeech) = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) = callback(utteranceId) {
-            if (source === engine) mutableState.value = mutableState.value.copy(playing = true, error = null)
+            if (source === engine) {
+                evidence.recordUtterance("onStart")
+                mutableState.value = mutableState.value.copy(playing = true, error = null)
+            }
         }
         override fun onDone(utteranceId: String?) = callback(utteranceId) {
-            if (source === engine) finish()
+            if (source === engine) {
+                evidence.recordUtterance("onDone")
+                emitDiagnostic("completed")
+                finish()
+            }
         }
         @Deprecated("Required by the Android listener contract")
         override fun onError(utteranceId: String?) = callback(utteranceId) {
-            if (source === engine) utteranceFailed(null)
+            if (source === engine) {
+                evidence.recordUtterance("onError")
+                utteranceFailed(null)
+            }
         }
         override fun onError(utteranceId: String?, errorCode: Int) = callback(utteranceId) {
-            if (source === engine) utteranceFailed(errorCode)
+            if (source === engine) {
+                evidence.recordUtterance("onError", errorCode)
+                utteranceFailed(errorCode)
+            }
         }
         override fun onStop(utteranceId: String?, interrupted: Boolean) = callback(utteranceId) {
-            if (source === engine) finish()
+            if (source === engine) {
+                evidence.recordUtterance(if (interrupted) "onStop interrupted" else "onStop finished")
+                emitDiagnostic("stopped")
+                finish()
+            }
         }
     }
 
@@ -630,6 +767,58 @@ class PronunciationPlayer(
         }
     }
 
+    /**
+     * Hands the bounded, text-free device facts to the owner's diagnostics log. Preparation, success
+     * and failure are all emitted, so a working engine whose voice metadata conflicts with its own
+     * accepted language is visible as system capability, not only as an app failure. The spoken text,
+     * endpoint URLs and credentials are never part of the evidence.
+     */
+    private fun emitDiagnostic(stage: String) {
+        if (!evidence.hasFacts()) return
+        emitToLog("system speech $stage; " + evidence.facts())
+    }
+
+    /**
+     * A failure the app itself observed, independent of device evidence: device facts need an engine
+     * to have answered, while a strict Microsoft or Baidu failure has none. The log therefore always
+     * gets an app-owned category and the routes that ran, with each engine-supplied field sanitized
+     * by the shared diagnostics rule. No spoken text, URL, provider body or credential is included.
+     */
+    private fun emitFailureDiagnostic() {
+        val category = when {
+            clipObtained -> "online-playback"
+            onlineUnavailable != null -> "text-too-long"
+            onlineOutcomes.isNotEmpty() -> "online"
+            pending?.provider != null && pending?.provider != SentenceSpeechProvider.ANDROID ->
+                "online-provider"
+            evidence.hasFacts() -> "device-speech"
+            else -> "request"
+        }
+        emitToLog(
+            buildString {
+                append("pronunciation failed [").append(category).append(']')
+                if (onlineOutcomes.isNotEmpty()) {
+                    append("; online: ")
+                    append(
+                        onlineOutcomes.take(FAILURE_ROUTE_LIMIT).joinToString("; ") { outcome ->
+                            diagnosticMetadata(outcome.route, FAILURE_ROUTE_NAME_LIMIT) +
+                                "=" + diagnosticMetadata(outcome.outcome(), FAILURE_OUTCOME_LIMIT) +
+                                " " + outcome.elapsedMs + "ms"
+                        }
+                    )
+                }
+            }
+        )
+    }
+
+    private fun emitToLog(line: String) {
+        try {
+            onDiagnostic(line)
+        } catch (_: RuntimeException) {
+            // Diagnostics are an accessory: a broken log must never change what the reader hears.
+        }
+    }
+
     private fun finish() {
         pending = null
         substituting = false
@@ -647,8 +836,10 @@ class PronunciationPlayer(
      * failed when it supplied the clip. The copyable report carries one line per online route that
      * failed, the device clock and version, and the device-speech evidence.
      */
-    private fun fail(message: String, diagnostic: String? = null) {
-        val shown = noSpeakerMessage(message)
+    private fun fail(message: String, diagnostic: String? = null, leadWithRoutes: Boolean = true) {
+        emitFailureDiagnostic()
+        emitDiagnostic("failed")
+        val shown = if (leadWithRoutes) noSpeakerMessage(message) else message
         val report = diagnosticReport(diagnostic)
         generation++
         pending = null
@@ -769,7 +960,7 @@ class PronunciationPlayer(
             .build()
         focus = focusRequest
         if (audio.requestAudioFocus(focusRequest) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            fail(app.getString(R.string.speech_failure_audio_unavailable))
+            fail(app.getString(R.string.speech_failure_audio_unavailable), leadWithRoutes = request.provider == null)
             return false
         }
         return true
@@ -803,12 +994,6 @@ class PronunciationPlayer(
     private fun onMain(action: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) action() else main.post { action() }
     }
-}
-
-internal fun speechLocale(accent: String): Locale? = when (accent) {
-    "US" -> Locale.US
-    "UK" -> Locale.UK
-    else -> null
 }
 
 /**
@@ -850,103 +1035,16 @@ internal fun defaultSpeechEngine(context: Context): String? = try {
 }
 
 /**
- * Engines may report ISO 639-2/T languages ("eng") and ISO 3166-1 alpha-3 countries ("USA", "GBR"),
- * which name the same voice as the ISO 639-1 / alpha-2 identifiers this app requests. Normalizing
- * before every comparison keeps English and the requested accent recognizable instead of unsupported.
+ * The installed engine's version name, when the package manager will say. A report that names the
+ * engine's version can be matched to the build that produced the answer; a package manager that
+ * refuses is not a speech failure and simply leaves the version out.
  */
-internal fun normalizeLanguage(language: String): String = when (language.lowercase()) {
-    "eng" -> "en"
-    else -> language.lowercase()
+@Suppress("DEPRECATION")
+internal fun speechEngineVersion(context: Context, packageName: String): String? = try {
+    context.packageManager.getPackageInfo(packageName, 0).versionName
+} catch (_: Exception) {
+    null
 }
-
-internal fun normalizeCountry(country: String): String = when (country.uppercase()) {
-    "USA" -> "US"
-    "GBR", "UK" -> "GB"
-    else -> country.uppercase()
-}
-
-/**
- * Installed English voices, best first: offline before network-only, then the requested accent, then
- * quality, latency and a stable name. A country difference is a preference, never a blocker.
- */
-internal fun englishVoices(voices: Set<Voice>, locale: Locale): List<Voice> =
-    voices.filter {
-        normalizeLanguage(it.locale.language) == normalizeLanguage(locale.language) &&
-            it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true
-    }.sortedWith(
-        compareBy<Voice>(
-            { it.isNetworkConnectionRequired },
-            { normalizeCountry(it.locale.country) != normalizeCountry(locale.country) },
-            { -it.quality }, { it.latency }, { it.name }
-        )
-    )
-
-internal sealed interface SpeechAvailability {
-    data class Available(@StringRes val noticeRes: Int? = null) : SpeechAvailability
-    data object MissingData : SpeechAvailability
-    data object Unsupported : SpeechAvailability
-}
-
-/**
- * Prepares installed English speech for [locale]. Enumeration is a preference, not proof: when the
- * engine lists nothing or rejects a voice, the language API is asked for the requested accent, the
- * other English country and generic English before giving up. A non-English voice is never accepted.
- * Every answer is handed to [observed], because what an engine said is the only honest thing a later
- * failure can report about it.
- */
-internal inline fun configureSpeech(
-    locale: Locale,
-    voices: () -> Set<Voice>?,
-    setVoice: (Voice) -> Int,
-    setLanguage: (Locale) -> Int,
-    currentVoice: () -> Voice?,
-    observed: (SpeechObservation) -> Unit = {}
-): SpeechAvailability {
-    val language = normalizeLanguage(locale.language)
-    val country = normalizeCountry(locale.country)
-    val enumerated = try { voices() } catch (_: RuntimeException) { null }
-    observed(SpeechObservation.VoicesListed(enumerated?.size))
-    for (candidate in englishVoices(enumerated.orEmpty(), locale)) {
-        val selected = try { setVoice(candidate) == TextToSpeech.SUCCESS } catch (_: RuntimeException) { false }
-        if (!selected) continue
-        val actual = try { currentVoice() } catch (_: RuntimeException) { null }
-        if (actual != null && normalizeLanguage(actual.locale.language) != language) continue
-        if (actual?.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true) {
-            return SpeechAvailability.MissingData
-        }
-        // A reported voice is authoritative, including an empty country: only an unreported one may
-        // fall back to what the accepted voice promised.
-        val spokenCountry = actual?.locale?.country?.let(::normalizeCountry)
-            ?: normalizeCountry(candidate.locale.country)
-        return SpeechAvailability.Available(
-            if (spokenCountry == country) null else R.string.speech_notice_accent_not_guaranteed
-        )
-    }
-    var missingData = false
-    for (probe in listOf(locale, otherEnglishCountry(locale), Locale.ENGLISH)) {
-        val support = try { setLanguage(probe) } catch (_: RuntimeException) { TextToSpeech.LANG_NOT_SUPPORTED }
-        observed(SpeechObservation.LanguageProbed(probe, support))
-        if (support == TextToSpeech.LANG_MISSING_DATA) {
-            missingData = true
-            continue
-        }
-        if (support !in TextToSpeech.LANG_AVAILABLE..TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE) continue
-        val actual = try { currentVoice() } catch (_: RuntimeException) { null }
-        if (actual != null && normalizeLanguage(actual.locale.language) != language) continue
-        if (actual?.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true) {
-            return SpeechAvailability.MissingData
-        }
-        val spokenCountry = actual?.locale?.country?.let(::normalizeCountry)
-            ?: probe.country.takeIf { support >= TextToSpeech.LANG_COUNTRY_AVAILABLE }?.let(::normalizeCountry)
-        return SpeechAvailability.Available(
-            if (spokenCountry == country) null else R.string.speech_notice_accent_not_guaranteed
-        )
-    }
-    return if (missingData) SpeechAvailability.MissingData else SpeechAvailability.Unsupported
-}
-
-internal fun otherEnglishCountry(locale: Locale): Locale =
-    if (normalizeCountry(locale.country) == "GB") Locale.US else Locale.UK
 
 /** Bounded in-memory audio for MediaPlayer: no temporary file can leak, and nothing is written to disk. */
 private class ClipDataSource(private val audio: ByteArray) : MediaDataSource() {

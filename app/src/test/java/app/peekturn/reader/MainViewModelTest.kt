@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
+import app.peekturn.reader.model.SentenceSpeechProvider
 import app.peekturn.reader.reader.BuiltinBook
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +24,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLooper
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -123,6 +125,23 @@ class MainViewModelTest {
             seeded.scope.cancel()
             seeded.speech.shutdown()
         }
+    }
+
+    @Test fun savedProviderChangeCancelsSpeechStartedBeforeTheSaveCompleted() = runBlocking {
+        graph.store.updateSettings { it.copy(sentenceSpeechProvider = SentenceSpeechProvider.ANDROID) }
+        ShadowLooper.idleMainLooper()
+        graph.speech.speakExample("The next page is waiting.", "US", SentenceSpeechProvider.ANDROID)
+        ShadowLooper.idleMainLooper()
+        assertTrue(graph.speech.state.value.playing)
+
+        graph.store.updateSettings { it.copy(accent = "UK") }
+        ShadowLooper.idleMainLooper()
+        assertTrue("Unrelated saved settings do not cancel the request", graph.speech.state.value.playing)
+
+        graph.store.updateSettings { it.copy(sentenceSpeechProvider = SentenceSpeechProvider.MICROSOFT) }
+        ShadowLooper.idleMainLooper()
+        assertFalse("The authoritative provider change cancels the old request", graph.speech.state.value.playing)
+        assertEquals("The next page is waiting.", graph.speech.state.value.text)
     }
 
     private fun viewModel(key: String) = MainViewModel(graph).also { viewModels.put(key, it) }

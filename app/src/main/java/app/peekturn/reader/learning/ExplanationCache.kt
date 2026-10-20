@@ -263,7 +263,7 @@ internal class ExplanationCache(
         }
         return JsonObject().apply {
             addProperty("format", EXPLANATION_CACHE_FORMAT)
-            addProperty("prompt", EXPLANATION_PROMPT_GENERATION)
+            addProperty("prompt", explanationPromptGeneration(language))
             addProperty("completedAt", completedAt)
             addProperty("language", language.name)
             add("answer", value)
@@ -276,7 +276,7 @@ internal class ExplanationCache(
             ?: return null
         if (root.keySet() != recordKeys) return null
         if (root.string("format") != EXPLANATION_CACHE_FORMAT) return null
-        if (root.string("prompt") != EXPLANATION_PROMPT_GENERATION) return null
+        if (root.string("prompt") != explanationPromptGeneration(request.language)) return null
         val completedAt = root.long("completedAt") ?: return null
         val current = now()
         // A future completion cannot be trusted: it would otherwise stay valid after a clock rollback.
@@ -343,7 +343,7 @@ private fun explanationCacheKey(request: ExplanationRequest): String {
     }
     field("peekturn-explanation")
     field(EXPLANATION_CACHE_FORMAT)
-    field(EXPLANATION_PROMPT_GENERATION)
+    field(explanationPromptGeneration(request.language))
     field(context.bookId.toString())
     field(context.chapterKey)
     field(context.selection)

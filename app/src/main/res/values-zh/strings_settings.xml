@@ -27,6 +27,13 @@
     <string name="settings_uk_english">英式英语</string>
     <string name="settings_word">单词</string>
     <string name="settings_sentence">句子</string>
+    <string name="settings_sentence_source">句子音频与朗读</string>
+    <string name="settings_source_microsoft">Microsoft</string>
+    <string name="settings_source_microsoft_detail">使用所选美式或英式口音的朗读语音。</string>
+    <string name="settings_source_baidu">百度英语</string>
+    <string name="settings_source_baidu_detail">只有一个英语语音，无法满足美式或英式选择。</string>
+    <string name="settings_source_android">Android 系统语音</string>
+    <string name="settings_source_android_detail">使用设备的语音引擎；其语音可能通过网络合成。</string>
     <string name="settings_stop">停止</string>
     <string name="settings_hide_audio_details">收起音频详情</string>
     <string name="settings_audio_details">音频详情</string>

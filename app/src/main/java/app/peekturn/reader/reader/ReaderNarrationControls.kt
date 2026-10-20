@@ -99,6 +99,14 @@ internal fun ReaderNarrationCard(
                     )
                 }
             }
+            if (state.notice != null && state.error == null) {
+                Text(
+                    state.notice,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+            }
             if (state.error != null) {
                 Row(
                     Modifier.fillMaxWidth().padding(top = 2.dp),

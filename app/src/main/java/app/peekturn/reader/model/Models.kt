@@ -50,10 +50,29 @@ data class ReaderPreferences(
 
 data class LlmProfile(val id: String, val config: ModelConfig)
 
+/**
+ * Where non-word pronunciation comes from: selected phrases, generated examples, Settings previews
+ * and read-aloud narration all follow the one stored choice. A selected single word keeps its own
+ * dictionary-first route regardless. [ANDROID] uses the installed device speech engine instead of
+ * the Microsoft or Baidu services; that engine may itself use a network voice. [MICROSOFT] and
+ * [BAIDU] are separate choices with no automatic cross-route fallback.
+ */
+enum class SentenceSpeechProvider {
+    MICROSOFT,
+    ANDROID,
+    BAIDU;
+
+    companion object {
+        /** Missing or unrecognised stored values are repaired to this choice. */
+        val DEFAULT = MICROSOFT
+    }
+}
+
 data class AppSettings(
     val quickExplain: Boolean = false,
     val autoPronounce: Boolean = false,
     val accent: String = "US",
+    val sentenceSpeechProvider: SentenceSpeechProvider = SentenceSpeechProvider.DEFAULT,
     val profiles: List<LlmProfile> = listOf(LlmProfile("default", ModelConfig())),
     val activeProfileId: String = "default",
     val reading: ReaderPreferences = ReaderPreferences(),

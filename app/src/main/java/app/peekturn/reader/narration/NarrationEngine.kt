@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
+import app.peekturn.reader.model.SentenceSpeechProvider
 import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,6 +66,8 @@ internal sealed class NarrationError(
     class Storage : NarrationError("The sentence audio could not be stored.")
     class Playback : NarrationError("The cached sentence audio could not be played.")
     class Content : NarrationError("The publication content could not be read.")
+    class Device(cause: Error? = null) :
+        NarrationError("The device speech engine could not read this sentence.", cause)
 }
 
 /**
@@ -78,7 +81,8 @@ internal class CachedNarrationEngine(
     private val accent: String,
     private val synthesizer: NarrationSynthesizer,
     private val onStarted: (text: String, fromCache: Boolean) -> Unit,
-    private val resumePolicy: NarrationResumePolicy = NarrationResumePolicy()
+    private val resumePolicy: NarrationResumePolicy = NarrationResumePolicy(),
+    private val provider: SentenceSpeechProvider = SentenceSpeechProvider.MICROSOFT
 ) : TtsEngine<NarrationSettings, NarrationPreferences, NarrationError, NarrationVoice> {
 
     private val main = Handler(Looper.getMainLooper())
@@ -88,10 +92,14 @@ internal class CachedNarrationEngine(
     )
     override val settings: StateFlow<NarrationSettings> = mutableSettings.asStateFlow()
 
-    private val voice = narrationVoice(accent)
-    override val voices: Set<NarrationVoice> = buildSet {
-        narrationVoice("US")?.let { add(NarrationVoice(Language(Locale.US))) }
-        narrationVoice("UK")?.let { add(NarrationVoice(Language(Locale.UK))) }
+    private val voice = narrationVoice(provider, accent)
+    override val voices: Set<NarrationVoice> = when (provider) {
+        SentenceSpeechProvider.MICROSOFT -> buildSet {
+            narrationVoice("US")?.let { add(NarrationVoice(Language(Locale.US))) }
+            narrationVoice("UK")?.let { add(NarrationVoice(Language(Locale.UK))) }
+        }
+        SentenceSpeechProvider.BAIDU -> setOf(NarrationVoice(Language(Locale.ENGLISH)))
+        SentenceSpeechProvider.ANDROID -> emptySet()
     }
 
     private val attributes = AudioAttributes.Builder()
@@ -358,8 +366,9 @@ internal fun NarrationFailure.toNarrationError(): NarrationError = when (this) {
 }
 
 /**
- * The Readium TTS provider. It uses the official sentence tokenizer, maps speed to Media3 playback
- * parameters, and keeps the voice fixed to the reader's US or UK narration voice.
+ * The Readium TTS provider for cached online narration. It uses the official sentence tokenizer,
+ * maps speed to Media3 playback parameters, and keeps the session fixed to the selected provider's
+ * voice: the reader's US or UK Microsoft voice, or Baidu's single English voice.
  */
 @ExperimentalReadiumApi
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -368,7 +377,8 @@ internal class NarrationEngineProvider(
     private val accent: String,
     private val synthesizer: NarrationSynthesizer,
     private val onStarted: (text: String, fromCache: Boolean) -> Unit,
-    private val resumePolicy: NarrationResumePolicy
+    private val resumePolicy: NarrationResumePolicy,
+    private val provider: SentenceSpeechProvider = SentenceSpeechProvider.MICROSOFT
 ) : TtsEngineProvider<
     NarrationSettings,
     NarrationPreferences,
@@ -381,8 +391,15 @@ internal class NarrationEngineProvider(
         publication: Publication,
         initialPreferences: NarrationPreferences
     ): Try<TtsEngine<NarrationSettings, NarrationPreferences, NarrationError, NarrationVoice>, Error> {
-        if (narrationVoice(accent) == null) return Try.failure(NarrationError.Unavailable())
-        val engine = CachedNarrationEngine(application, accent, synthesizer, onStarted, resumePolicy)
+        if (narrationVoice(provider, accent) == null) return Try.failure(NarrationError.Unavailable())
+        val engine = CachedNarrationEngine(
+            application = application,
+            accent = accent,
+            synthesizer = synthesizer,
+            onStarted = onStarted,
+            resumePolicy = resumePolicy,
+            provider = provider
+        )
         engine.submitPreferences(initialPreferences)
         return Try.success(engine)
     }

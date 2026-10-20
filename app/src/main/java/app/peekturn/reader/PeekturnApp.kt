@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import app.peekturn.reader.data.PeekturnStore
 import app.peekturn.reader.data.OfflineDictionary
+import app.peekturn.reader.diagnostics.DeveloperLog
+import app.peekturn.reader.diagnostics.developerLogSnapshot
 import app.peekturn.reader.learning.ExplanationCache
 import app.peekturn.reader.learning.ExplanationClient
 import app.peekturn.reader.reader.EpubEngine
@@ -13,16 +15,37 @@ import app.peekturn.reader.speech.PronunciationPlayer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 
 class PeekturnApp : Application() {
-    val graph: AppGraph by lazy { AppGraph(this) }
+    /**
+     * Created lazily but independently of AppGraph, so the crash handler exists before the rest of
+     * the graph can throw. AppGraph reuses this exact instance instead of opening a second writer.
+     */
+    private val developerLog by lazy {
+        DeveloperLog(
+            DeveloperLog.directory(noBackupFilesDir),
+            snapshot = { developerLogSnapshot(applicationContext) }
+        )
+    }
+    val graph: AppGraph by lazy { AppGraph(this, developerLog = developerLog) }
     override fun onCreate() {
         super.onCreate()
+        developerLog.installCrashHandler()
+        developerLog.recordEvent("app", "start")
         AppLanguage.apply(this, graph.store.settings.value.uiLanguage)
     }
 }
-class AppGraph(context: Context, val seedBuiltinBook: Boolean = true) {
+class AppGraph(
+    context: Context,
+    val seedBuiltinBook: Boolean = true,
+    /** Support diagnostics exist before any feature that can fail, including the speech player. */
+    val developerLog: DeveloperLog = DeveloperLog(
+        DeveloperLog.directory(context.applicationContext.noBackupFilesDir),
+        snapshot = { developerLogSnapshot(context.applicationContext) }
+    )
+) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val store = PeekturnStore(context.applicationContext)
     val engine = EpubEngine(context.applicationContext)
@@ -33,7 +56,10 @@ class AppGraph(context: Context, val seedBuiltinBook: Boolean = true) {
         ExplanationCache.directory(context.applicationContext.noBackupFilesDir)
     )
     val dictionary = OfflineDictionary(context.applicationContext)
-    val speech = PronunciationPlayer(context.applicationContext)
+    val speech = PronunciationPlayer(
+        context.applicationContext,
+        onDiagnostic = developerLog::recordSystemSpeech
+    )
 
     /**
      * Persistent sentence audio for continuous narration and the app-wide gate that permits only one
@@ -42,4 +68,16 @@ class AppGraph(context: Context, val seedBuiltinBook: Boolean = true) {
      */
     internal val sentenceAudio = SentenceAudioCache(SentenceAudioCache.directory(context.applicationContext.noBackupFilesDir))
     internal val narrationProviderGate = Mutex()
+
+    init {
+        var provider = store.settings.value.sentenceSpeechProvider
+        scope.launch {
+            store.settings.collect { settings ->
+                if (settings.sentenceSpeechProvider != provider) {
+                    provider = settings.sentenceSpeechProvider
+                    speech.stop()
+                }
+            }
+        }
+    }
 }

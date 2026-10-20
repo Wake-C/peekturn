@@ -19,13 +19,14 @@ internal enum class ReaderToolbarEntry(@StringRes val labelRes: Int) {
 internal val readerToolbarEntries: List<ReaderToolbarEntry> = ReaderToolbarEntry.entries.toList()
 
 /**
- * The native selection menu. Quick Explain already owns automatic explanation of a release, so
- * the explicit actions stay the same in both modes; narration is started from the reader menu.
+ * Quick Explain keeps the native range and handles without offering a redundant action toolbar.
+ * Narration is started from the reader menu.
  */
 internal enum class ReaderSelectionAction { EXPLAIN, DICTIONARY, COPY }
 
-internal fun readerSelectionActions(): List<ReaderSelectionAction> =
-    listOf(ReaderSelectionAction.EXPLAIN, ReaderSelectionAction.DICTIONARY, ReaderSelectionAction.COPY)
+internal fun readerSelectionActions(quickExplain: Boolean): List<ReaderSelectionAction> =
+    if (quickExplain) emptyList()
+    else listOf(ReaderSelectionAction.EXPLAIN, ReaderSelectionAction.DICTIONARY, ReaderSelectionAction.COPY)
 
 /** Reading behaviour owned by the options sheet, never by the typography draft. */
 internal data class ReaderOptions(

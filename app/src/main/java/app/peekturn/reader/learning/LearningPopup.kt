@@ -45,7 +45,6 @@ import app.peekturn.reader.data.OfflineDictionary
 import app.peekturn.reader.model.*
 import app.peekturn.reader.speech.PronunciationPlayer
 import app.peekturn.reader.speech.SpeechReport
-import app.peekturn.reader.ui.AudioAttribution
 import kotlinx.coroutines.CancellationException
 import kotlin.math.roundToInt
 
@@ -64,7 +63,9 @@ fun LearningPopup(
     language: ExplanationLanguage = ExplanationLanguage.forLocale(LocalConfiguration.current.locales[0]),
     onClose: () -> Unit,
     onCancel: () -> Unit,
-    onAdjust: () -> Unit
+    onAdjust: () -> Unit,
+    /** The thrown failure behind the visible dictionary error; the caller records it safely. */
+    onDictionaryFailure: (Throwable) -> Unit = {}
 ) {
     var dictionaryTab by remember(context) { mutableStateOf(initialDictionary) }
     var dictionaryRetry by remember(context) { mutableIntStateOf(0) }
@@ -93,7 +94,9 @@ fun LearningPopup(
         onDispose { lifecycle.removeObserver(observer); speech.stop() }
     }
     LaunchedEffect(context) {
-        if (latestSettings.autoPronounce) speech.speakWord(context.selection, latestSettings.accent)
+        if (latestSettings.autoPronounce) {
+            speech.speakSelection(context.selection, latestSettings.accent, latestSettings.sentenceSpeechProvider)
+        }
     }
     LaunchedEffect(context, explanationRequested, settings.activeProfileId, settings.model, language) {
         if (explanationRequested) session.open(context, settings.activeProfileId, settings.model, language)
@@ -112,8 +115,15 @@ fun LearningPopup(
         try {
             entry = dictionary.lookup(context.selection)
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { dictionaryError = dictionaryErrorMessage }
-        finally { dictionaryLoading = false }
+        catch (e: Exception) {
+            dictionaryError = dictionaryErrorMessage
+            // Best-effort diagnostics: a failing sink must not replace the visible error.
+            try {
+                onDictionaryFailure(e)
+            } catch (_: Throwable) {
+                // Diagnostics must not become a second failure.
+            }
+        } finally { dictionaryLoading = false }
     }
     val density = LocalDensity.current
     val inset = with(density) { 12.dp.roundToPx() }
@@ -153,6 +163,7 @@ fun LearningPopup(
         }, shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), tonalElevation = 0.dp) {
             val accent = latestSettings.accent
+            val sentenceProvider = latestSettings.sentenceSpeechProvider
             val phonetic = if (dictionaryTab) entry?.phonetic.orEmpty() else if (accent == "UK") answer.ukIpa else answer.usIpa
             val partOfSpeech = if (dictionaryTab) entry?.partOfSpeech.orEmpty() else answer.partOfSpeech
             val loading = if (dictionaryTab) dictionaryLoading else explanation.loading
@@ -164,7 +175,7 @@ fun LearningPopup(
                         .verticalScroll(rememberScrollState()), fontSize = 20.sp, lineHeight = 25.sp,
                         fontFamily = FontFamily.Serif)
                     SpeakButton(context.selection, speech, playback.text, playback.playing) {
-                        speech.speakWord(context.selection, accent)
+                        speech.speakSelection(context.selection, accent, sentenceProvider)
                     }
                     IconButton(onClick = { close() }, modifier = Modifier.size(48.dp)) {
                         Icon(popupClose, contentDescription = stringResource(R.string.reader_lookup_close_description), modifier = Modifier.size(20.dp))
@@ -210,7 +221,7 @@ fun LearningPopup(
                                         }
                                         // Speech always reads the English sentence, never its translation.
                                         SpeakButton(example.spokenText, speech, playback.text, playback.playing, firstLine = true) {
-                                            speech.speakExample(example.spokenText, accent)
+                                            speech.speakExample(example.spokenText, accent, sentenceProvider)
                                         }
                                     }
                                 }
@@ -235,14 +246,10 @@ fun LearningPopup(
                         playback.notice?.let {
                             Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 17.sp)
                         }
-                        playback.credit?.let { AudioAttribution(it) }
                         playback.error?.let {
                             Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
                             playback.diagnostic?.let { report -> SpeechReport(report) }
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                TextButton(onClick = speech::openSystemSettings) { Text(stringResource(R.string.reader_lookup_speech_settings)) }
-                                TextButton(onClick = speech::dismissFailure) { Text(stringResource(R.string.reader_lookup_dismiss_failure)) }
-                            }
+                            TextButton(onClick = speech::dismissFailure) { Text(stringResource(R.string.reader_lookup_dismiss_failure)) }
                         }
                     }
                 }

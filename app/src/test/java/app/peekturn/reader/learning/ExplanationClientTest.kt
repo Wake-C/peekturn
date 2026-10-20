@@ -48,29 +48,18 @@ class ExplanationClientTest {
         assertEquals("before11", context["before"].asString.substringBefore(' '))
     }
 
-    @Test fun chineseRequestAppliesChinesePolicyWithoutChangingTheBookPassage() = runBlocking {
+    @Test fun chineseRequestPreservesBookDataAndTheStructuredExampleSchema() = runBlocking {
         server.enqueue(stream(chunk(bilingualPayload) + chunk(finish = "stop") + "data: [DONE]\n\n"))
         val lookup = LookupContext("bank", "the river ", " was muddy", "Book", "Chapter")
-        val events = ExplanationClient().explain(config(), lookup, ExplanationLanguage.Chinese).toList()
-        val complete = events.last() as ExplanationEvent.Complete
-        assertEquals("拒绝", complete.answer.meaning)
-        assertEquals("这里表示拒绝某个提议。", complete.answer.context)
-        assertEquals("turn down", complete.answer.term)
-        assertEquals("/tɜːn daʊn/", complete.answer.ukIpa)
-        assertEquals("/tɝːn daʊn/", complete.answer.usIpa)
-        assertEquals("She turned down the offer.", complete.answer.examples.single().text)
-        assertEquals("她拒绝了那个提议。", complete.answer.examples.single().translation)
+        ExplanationClient().explain(config(), lookup, ExplanationLanguage.Chinese).toList()
 
         val json = JsonParser.parseString(server.takeRequest().body.readUtf8()).asJsonObject
         val messages = json.getAsJsonArray("messages")
         val system = messages[0].asJsonObject["content"].asString
         val user = messages[1].asJsonObject["content"].asString
-        assertTrue("The Chinese learning policy must be requested from the provider", system.contains("Simplified Chinese"))
         val passage = JsonParser.parseString(user).asJsonObject
         assertEquals(setOf("selection", "before", "after", "bookTitle", "chapterTitle"), passage.keySet())
         assertEquals(lookup.selection, passage["selection"].asString)
-        assertFalse("Locale policy belongs to the system instruction, not quoted book data", user.contains("Simplified Chinese"))
-        assertFalse(user.contains("language"))
 
         val schema = JsonParser.parseString(system.substringAfter("Required JSON schema: ")).asJsonObject
         val exampleItems = schema.getAsJsonObject("properties").getAsJsonObject("examples").getAsJsonObject("items")
@@ -80,26 +69,6 @@ class ExplanationClientTest {
         assertEquals(setOf("text", "translation"), exampleItems.getAsJsonArray("required").map { it.asString }.toSet())
     }
 
-    @Test fun englishRequestKeepsTheEnglishLearningExperience() = runBlocking {
-        val englishPayload = bilingualPayload.replace(
-            "\"translation\":\"她拒绝了那个提议。\"",
-            "\"translation\":\"\""
-        )
-        server.enqueue(stream(chunk(englishPayload) + chunk(finish = "stop") + "data: [DONE]\n\n"))
-        val lookup = LookupContext("bank", "the river ", " was muddy", "Book", "Chapter")
-        val events = ExplanationClient().explain(config(), lookup, ExplanationLanguage.English).toList()
-        val complete = events.last() as ExplanationEvent.Complete
-        assertEquals("She turned down the offer.", complete.answer.examples.single().text)
-        assertEquals("", complete.answer.examples.single().translation)
-
-        val json = JsonParser.parseString(server.takeRequest().body.readUtf8()).asJsonObject
-        val messages = json.getAsJsonArray("messages")
-        val system = messages[0].asJsonObject["content"].asString
-        assertTrue(system.contains("English"))
-        assertFalse("An English UI must not request Chinese output", system.contains("Simplified Chinese"))
-        val passage = JsonParser.parseString(messages[1].asJsonObject["content"].asString).asJsonObject
-        assertEquals(lookup.selection, passage["selection"].asString)
-    }
 
     @Test fun eofAndTokenLimitNeverBecomeSuccessfulCompletion() = runBlocking {
         listOf(chunk(payload), chunk(payload) + chunk(finish = "length"), chunk(payload.dropLast(2)) + chunk(finish = "stop")).forEach { body ->

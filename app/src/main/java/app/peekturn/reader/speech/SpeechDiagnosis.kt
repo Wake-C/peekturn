@@ -1,8 +1,10 @@
 package app.peekturn.reader.speech
 
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import androidx.annotation.StringRes
 import app.peekturn.reader.R
+import app.peekturn.reader.diagnostics.diagnosticMetadata
 import java.util.Locale
 
 /**
@@ -15,83 +17,279 @@ import java.util.Locale
 @StringRes
 internal val DEVICE_DEFAULT_VOICE_NOTICE: Int = R.string.speech_notice_device_default_voice
 
+/** Bounds for engine-supplied detail: an engine cannot flood the log with names or callbacks. */
+private const val PROBE_LIMIT = 3
+private const val ATTEMPT_LIMIT = 8
+private const val UTTERANCE_LIMIT = 8
+private const val MAX_ENGINES = 8
+/** Voices snapshotted per engine; the full count is kept separately, so "more" is never lost. */
+private const val MAX_VOICE_FACTS = 12
+private const val VOICE_NAME_LIMIT = 64
+private const val ENGINE_NAME_LIMIT = 96
+private const val TEXT_LIMIT = 32
+
+/** Cap on feature values rendered per voice; each one is separately field-sanitized. */
+private const val MAX_FEATURES = 6
+private const val FEATURE_LIMIT = 48
+
 /**
- * One engine's answer while device speech was prepared. Whether an engine listed voices and what each
- * language probe answered are different facts, and a report that cannot tell them apart would be a
- * guess dressed up as a diagnosis.
+ * One voice as the engine reported it, reduced to what a support report needs: the name it was given,
+ * its raw language and country, its BCP-47 tag, its features, and how it is delivered. Names and
+ * feature lists are engine-supplied and may be long, so the rendered [summary] is bounded and stripped
+ * of line breaks.
+ */
+internal data class SpeechVoiceFact(
+    val name: String,
+    val locale: Locale,
+    val features: Set<String> = emptySet(),
+    val network: Boolean = false,
+    val quality: Int = Voice.QUALITY_NORMAL,
+    val latency: Int = Voice.LATENCY_NORMAL
+) {
+    /** The engine's own language fields, sanitized, so a report never relies on a tag alone. */
+    val languageLabel: String
+        get() = "language=" + diagnosticMetadata(locale.language, TEXT_LIMIT) +
+            "; country=" + diagnosticMetadata(locale.country, TEXT_LIMIT)
+
+    val summary: String
+        get() = buildString {
+            append(diagnosticMetadata(name, VOICE_NAME_LIMIT))
+            append(" [")
+            append(languageLabel)
+            append("; tag=")
+            append(diagnosticMetadata(locale.toLanguageTag(), TEXT_LIMIT))
+            append("; features: ")
+            val shown = features.sorted().take(MAX_FEATURES)
+            append(shown.joinToString(",") { diagnosticMetadata(it, FEATURE_LIMIT) }.ifEmpty { "none" })
+            val hidden = features.size - shown.size
+            if (hidden > 0) append(",+").append(hidden).append(" more")
+            append("; network: ")
+            append(if (network) "yes" else "no")
+            append("; quality: ")
+            append(quality)
+            append("; latency: ")
+            append(latency)
+            append(']')
+        }
+}
+
+/** The framework voice as evidence. Nothing here is inferred; it is what the engine already said. */
+internal fun speechVoiceFact(voice: Voice): SpeechVoiceFact = SpeechVoiceFact(
+    name = voice.name,
+    locale = voice.locale,
+    features = voice.features.orEmpty(),
+    network = voice.isNetworkConnectionRequired,
+    quality = voice.quality,
+    latency = voice.latency
+)
+
+/**
+ * The bounded snapshot an engine's enumeration becomes. Taking before mapping means an engine that
+ * lists hundreds of voices costs no facts for the ones the report would discard; [VoicesListed.count]
+ * still carries the full number, so the report can say how many were left out.
+ */
+internal fun speechVoiceFacts(voices: Collection<Voice>): List<SpeechVoiceFact> =
+    voices.take(MAX_VOICE_FACTS).map(::speechVoiceFact)
+
+/**
+ * One engine's answer while device speech was prepared. Whether an engine listed voices, what it said
+ * when asked to select one, what each language probe answered, and what its current voice looked like
+ * are different facts, and a report that could not tell them apart would be a guess dressed up as a
+ * diagnosis. Voice names, features and locale tags come from the engine; passage text never does.
  */
 internal sealed interface SpeechObservation {
-    /** Voices the engine listed, or null when it refused to answer, failed, or could not be asked. */
-    data class VoicesListed(val count: Int?) : SpeechObservation
+    /**
+     * Voices the engine listed, or null when it refused to answer, failed, or could not be asked.
+     * [count] is the full number the engine reported; [voices] is the bounded snapshot taken when the
+     * answer arrived, so a later report can say how many details were left out.
+     */
+    data class VoicesListed(
+        val count: Int?,
+        val voices: List<SpeechVoiceFact> = emptyList()
+    ) : SpeechObservation
 
-    /** The engine's answer for one language probe, exactly as returned. */
-    data class LanguageProbed(val locale: Locale, val support: Int) : SpeechObservation
+    /** One explicit voice the app asked the engine to select, its return value and actual result. */
+    data class VoiceTried(
+        val voice: SpeechVoiceFact,
+        val returned: Int,
+        val actual: SpeechVoiceFact?,
+        val rejection: String? = null
+    ) : SpeechObservation
+
+    /** The engine's answer for one language probe, exactly as returned, and the voice it then held. */
+    data class LanguageProbed(
+        val locale: Locale,
+        val support: Int,
+        val voice: SpeechVoiceFact? = null
+    ) : SpeechObservation
+
+    /** The engine's initialization callback, exactly as delivered. */
+    data class InitAnswered(val status: Int) : SpeechObservation
+
+    /** What speak() returned for the current request. */
+    data class SpeakAnswered(val returned: Int) : SpeechObservation
 }
 
 /**
  * What the device actually answered while one request tried to reach a speaker, so a failure reports
- * the evidence instead of inventing a cause. The player records answers as they arrive; only a request
- * that ends without a speaker reads it back. The first engine asked is the one the reader chose in
- * system settings, so its language answers are the ones a report keeps, and the highest voice count
- * seen names whether any engine enumerated anything at all.
+ * the evidence instead of inventing a cause. The player records answers as they arrive, tagged with
+ * the engine that gave them; only a request that ends without a speaker reads them back as a report,
+ * while a successful preparation reads the same facts back to the diagnostic log. The highest voice
+ * count seen names whether any engine enumerated anything at all. Everything is bounded: an engine
+ * cannot flood the log with voice names, features or callbacks.
  */
 internal class SpeechEvidence {
-    private val engines = LinkedHashSet<String>()
-    private val probes = mutableListOf<SpeechObservation.LanguageProbed>()
-    private var listed: Int? = null
-    private var enumerationRefused = false
+    private class EngineRecord(val name: String) {
+        var version: String? = null
+        var listed: Int? = null
+        var latestCount: Int? = null
+        var enumerationRefused = false
+        val voices = mutableListOf<SpeechVoiceFact>()
+        val attempts = mutableListOf<SpeechObservation.VoiceTried>()
+        val probes = mutableListOf<SpeechObservation.LanguageProbed>()
+        var initStatus: Int? = null
+        var speakReturned: Int? = null
+        val utterances = mutableListOf<String>()
 
-    fun addEngine(name: String) {
-        engines += name
+        fun label(): String = buildString {
+            append(diagnosticMetadata(name, ENGINE_NAME_LIMIT))
+            version?.let { append(" (version ").append(diagnosticMetadata(it, TEXT_LIMIT)).append(')') }
+        }
+
+        fun isEmpty(): Boolean = voices.isEmpty() && attempts.isEmpty() && probes.isEmpty() &&
+            listed == null && !enumerationRefused && initStatus == null && speakReturned == null &&
+            utterances.isEmpty()
+
+        fun details(): String = buildString {
+            append("voices listed: ")
+            append(
+                when {
+                    latestCount != null -> latestCount.toString()
+                    enumerationRefused -> "unavailable"
+                    else -> "not asked"
+                }
+            )
+            if (voices.isNotEmpty()) {
+                append(" [")
+                append(voices.joinToString("; ") { it.summary })
+                val extra = (latestCount ?: voices.size) - voices.size
+                if (extra > 0) append("; +").append(extra).append(" more")
+                append(']')
+            }
+            for (attempt in attempts) {
+                append("; setVoice \"")
+                append(diagnosticMetadata(attempt.voice.name, VOICE_NAME_LIMIT))
+                append("\" returned ")
+                append(attempt.returned)
+                append(" -> ")
+                append(attempt.actual?.summary ?: "no voice reported")
+                attempt.rejection?.let {
+                    append("; rejected: ").append(diagnosticMetadata(it, 200))
+                }
+            }
+            for (probe in probes) {
+                append("; ")
+                append(probeName(probe.locale))
+                append(": ")
+                append(languageAnswer(probe.support))
+                probe.voice?.let { append(" (voice ").append(it.summary).append(')') }
+            }
+            initStatus?.let { append("; init returned ").append(it) }
+            speakReturned?.let { append("; speak returned ").append(it) }
+            if (utterances.isNotEmpty()) append("; utterance: ").append(utterances.joinToString(", "))
+        }
+    }
+
+    private val records = mutableListOf<EngineRecord>()
+    private var current: EngineRecord? = null
+
+    /**
+     * The engine about to be asked. A package name and the version the platform reports make the
+     * report identifiable; the engine the reader chose is the one whose facts matter most.
+     */
+    fun addEngine(name: String, version: String? = null) {
+        val record = records.firstOrNull { it.name == name }
+            ?: EngineRecord(name).also { records += it }
+        if (version != null) record.version = version
+        current = record
     }
 
     fun observe(answer: SpeechObservation) {
         when (answer) {
             is SpeechObservation.VoicesListed -> {
+                val record = current ?: return
                 val count = answer.count
-                if (count == null) enumerationRefused = true else if (listed == null || count > listed!!) listed = count
+                if (count == null) {
+                    record.enumerationRefused = true
+                } else if (record.listed == null || count > record.listed!!) {
+                    record.listed = count
+                }
+                record.latestCount = count
+                record.voices.clear()
+                record.voices += answer.voices.take(MAX_VOICE_FACTS)
             }
-            is SpeechObservation.LanguageProbed -> if (probes.size < PROBE_LIMIT) probes += answer
+            is SpeechObservation.VoiceTried -> {
+                val record = current ?: return
+                if (record.attempts.size < ATTEMPT_LIMIT) record.attempts += answer
+            }
+            is SpeechObservation.LanguageProbed -> {
+                val record = current ?: return
+                if (record.probes.size < PROBE_LIMIT) record.probes += answer
+            }
+            is SpeechObservation.InitAnswered -> current?.initStatus = answer.status
+            is SpeechObservation.SpeakAnswered -> current?.speakReturned = answer.returned
         }
-    }
-
-    fun clear() {
-        engines.clear()
-        probes.clear()
-        listed = null
-        enumerationRefused = false
     }
 
     /**
-     * The line the reader can read and send back: which engines were asked, whether any of them
-     * enumerated voices, what each English probe answered, and why the attempt ended.
+     * A lifecycle callback for the engine being asked. The event names are fixed by the player; only
+     * an engine's numeric error code is added, never the text that was spoken.
      */
-    fun report(failure: DeviceSpeechFailure): String = buildString {
-        val listedCount = listed
-        append("Device speech report: engines tried: ")
-        append(engines.joinToString(", ").ifEmpty { "none found" })
-        append("; voices listed: ")
-        append(
-            when {
-                listedCount != null -> listedCount.toString()
-                enumerationRefused -> "unavailable"
-                else -> "not asked"
-            }
-        )
-        for (probe in probes) {
-            append("; ")
-            append(probeName(probe.locale))
-            append(": ")
-            append(languageAnswer(probe.support))
-        }
-        append("; result: ")
-        append(failure.verdict)
-        append('.')
+    fun recordUtterance(event: String, errorCode: Int? = null) {
+        val record = current ?: return
+        if (record.utterances.size >= UTTERANCE_LIMIT) return
+        record.utterances += if (errorCode == null) event else "$event (code $errorCode)"
     }
 
-    private companion object {
-        /** One report per engine's three probes would bury the answer the reader chose in the rest. */
-        const val PROBE_LIMIT = 3
+    fun clear() {
+        records.clear()
+        current = null
+    }
+
+    /** Whether any engine said anything worth logging; an online-only request has no such facts. */
+    fun hasFacts(): Boolean = records.isNotEmpty()
+
+    /**
+     * What the devices answered, without a failure verdict: the engines asked, the voices each one
+     * listed, every selection attempt and language answer, and the initialization and utterance
+     * callbacks. Deliberately technical and not localized, so it can be matched with the code path.
+     */
+    fun facts(): String = buildString {
+        append("Device speech report: engines tried: ")
+        append(records.take(MAX_ENGINES).joinToString(", ") { it.label() }.ifEmpty { "none found" })
+        if (records.size > MAX_ENGINES) append(" (+").append(records.size - MAX_ENGINES).append(" more)")
+        append("; voices listed: ")
+        append(listedLabel())
+        for (record in records.take(MAX_ENGINES)) {
+            if (record.isEmpty()) continue
+            append('\n')
+            append(diagnosticMetadata(record.name, ENGINE_NAME_LIMIT))
+            append(": ")
+            append(record.details())
+        }
+    }
+
+    /** The copyable report: the observed facts, then the one cause they support. */
+    fun report(failure: DeviceSpeechFailure): String =
+        facts() + "\nresult: " + failure.verdict + '.'
+
+    private fun listedLabel(): String {
+        val count = records.mapNotNull { it.listed }.maxOrNull()
+        return when {
+            count != null -> count.toString()
+            records.any { it.enumerationRefused } -> "unavailable"
+            else -> "not asked"
+        }
     }
 }
 

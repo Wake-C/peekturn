@@ -134,7 +134,8 @@ private fun PeekturnHome(
                     settings, vm::save, vm.graph.explanations::testConnection, vm.graph.speech,
                     vm.graph.explanationCache::sizeBytes, vm.graph.explanationCache::clear,
                     vm.graph.sentenceAudio::sizeBytes,
-                    { NarrationService.clearCache(context) }
+                    { NarrationService.clearCache(context) },
+                    vm.graph.developerLog::export
                 )
             }
             if (state.busy) Surface(color = MaterialTheme.colorScheme.background.copy(alpha = .96f), modifier = Modifier.fillMaxSize()) {

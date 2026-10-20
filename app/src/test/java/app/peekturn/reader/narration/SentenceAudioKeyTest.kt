@@ -1,7 +1,9 @@
 package app.peekturn.reader.narration
 
+import app.peekturn.reader.model.SentenceSpeechProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /** A cache key names the exact audio unit, not the cursor, and never contains the sentence itself. */
@@ -34,6 +36,26 @@ class SentenceAudioKeyTest {
             sentenceAudioKey("Today is a perfect day.", us),
             sentenceAudioKey("Today is a perfect day!", us)
         )
+    }
+
+    @Test fun eachOnlineProviderOwnsADistinctCacheConfiguration() {
+        val microsoft = checkNotNull(narrationVoice(SentenceSpeechProvider.MICROSOFT, "US"))
+        val baidu = checkNotNull(narrationVoice(SentenceSpeechProvider.BAIDU, "US"))
+
+        assertNotEquals(microsoft, baidu)
+        assertEquals(
+            "Baidu has one English voice, so the accent cannot change its cache entry",
+            baidu,
+            narrationVoice(SentenceSpeechProvider.BAIDU, "UK")
+        )
+        assertNotEquals(
+            sentenceAudioKey("Today is a perfect day.", microsoft),
+            sentenceAudioKey("Today is a perfect day.", baidu)
+        )
+        assertNull("Android system speech has no cached synthesis configuration", narrationVoice(
+            SentenceSpeechProvider.ANDROID,
+            "US"
+        ))
     }
 
     @Test fun theKeyIsOpaque() {

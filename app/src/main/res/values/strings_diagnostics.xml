@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Strings owned by the Developer logs section in SettingsScreen.kt. -->
+<resources>
+    <string name="developer_logs_title">Developer logs</string>
+    <string name="developer_logs_summary">Diagnostics for support · Private to this device</string>
+    <string name="developer_logs_loading">Preparing the log…</string>
+    <string name="developer_logs_error">The log could not be read. Try again.</string>
+    <string name="developer_logs_copy_error">Could not copy the log. Try again.</string>
+    <string name="developer_logs_retry">Retry</string>
+    <string name="developer_logs_copy">Copy</string>
+    <string name="developer_logs_copied">Copied to clipboard</string>
+    <string name="developer_logs_clip_label">Peekturn developer log</string>
+</resources>

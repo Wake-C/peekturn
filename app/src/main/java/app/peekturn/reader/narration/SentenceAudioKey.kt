@@ -1,5 +1,6 @@
 package app.peekturn.reader.narration
 
+import app.peekturn.reader.model.SentenceSpeechProvider
 import java.security.MessageDigest
 
 /** The synthesis configuration a cached clip belongs to; none of this is the reading cursor. */
@@ -10,7 +11,7 @@ internal data class NarrationVoiceSpec(
     val format: String
 )
 
-/** The US and UK voices this app narrates with, plus the fixed synthesis format and prosody. */
+/** The US and UK voices the Microsoft route narrates with, plus its fixed format and prosody. */
 internal fun narrationVoice(accent: String): NarrationVoiceSpec? = when (accent) {
     "US" -> NarrationVoiceSpec(
         engine = "microsoft-read-aloud",
@@ -25,6 +26,26 @@ internal fun narrationVoice(accent: String): NarrationVoiceSpec? = when (accent)
         format = "mp3-24khz-48kbps-v1"
     )
     else -> null
+}
+
+/**
+ * The synthesis configuration for a selected online narration provider. Baidu has one English voice,
+ * so the accent does not reach it and does not enter its cache key; its engine, voice, prosody and
+ * format still differ from Microsoft's, so neither route can ever read the other's cached clip.
+ * Android speech is rendered by the installed system engine and has no cache configuration.
+ */
+internal fun narrationVoice(
+    provider: SentenceSpeechProvider,
+    accent: String
+): NarrationVoiceSpec? = when (provider) {
+    SentenceSpeechProvider.MICROSOFT -> narrationVoice(accent)
+    SentenceSpeechProvider.BAIDU -> NarrationVoiceSpec(
+        engine = "baidu-translate",
+        voice = "en",
+        prosody = "spd=3",
+        format = "mp3-translate-v1"
+    )
+    SentenceSpeechProvider.ANDROID -> null
 }
 
 /**

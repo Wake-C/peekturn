@@ -167,11 +167,12 @@ class VoiceSelectionTest {
         ))
     }
 
-    @Test fun countryVariantAvailabilityWorksWithoutEnumerationOrActualVoice() {
-        assertEquals(SpeechAvailability.Available(), configureSpeech(
+    @Test fun countryVariantAvailabilityWithoutAVoiceStillCarriesTheUnconfirmedCaveat() {
+        val result = configureSpeech(
             Locale.US, { emptySet() }, { TextToSpeech.ERROR },
             { TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE }, { null }
-        ))
+        )
+        assertSubstitutedEnglish(result)
     }
 
     @Test fun unknownActualAccentWithOnlyLanguageSupportNeedsNotice() {
@@ -189,18 +190,22 @@ class VoiceSelectionTest {
         }
         assertEquals(SpeechAvailability.MissingData, select())
         availability = TextToSpeech.LANG_COUNTRY_AVAILABLE
-        assertEquals(SpeechAvailability.Available(), select())
+        val accepted = select()
+        assertTrue("A later positive language answer is a compatibility attempt, not a refusal",
+            accepted is SpeechAvailability.Available)
+        assertNotNull("Accepted English without voice metadata is disclosed",
+            (accepted as SpeechAvailability.Available).noticeRes)
         installed = setOf(voice("newly-installed"))
         availability = TextToSpeech.LANG_NOT_SUPPORTED
         assertEquals(SpeechAvailability.Available(), select())
     }
 
     @Test fun unavailableEnumerationStillTriesTheStandardLanguageApi() {
-        assertEquals(SpeechAvailability.Available(), configureSpeech(
+        assertSubstitutedEnglish(configureSpeech(
             Locale.US, { throw IllegalStateException("Enumeration unavailable") }, { TextToSpeech.ERROR },
             { TextToSpeech.LANG_COUNTRY_AVAILABLE }, { null }
         ))
-        assertEquals(SpeechAvailability.Available(), configureSpeech(
+        assertSubstitutedEnglish(configureSpeech(
             Locale.US, { null }, { TextToSpeech.ERROR },
             { TextToSpeech.LANG_COUNTRY_AVAILABLE }, { null }
         ))
@@ -240,17 +245,18 @@ class VoiceSelectionTest {
         assertEquals(Locale.US, otherEnglishCountry(Locale("en", "GBR")))
     }
 
-    /** Normalizing identifiers must never turn a non-English voice into an English one. */
-    @Test fun iso3IdentifiersOfOtherLanguagesStayUnavailable() {
+    /** Normalizing identifiers never turns a non-English voice into an English one, but an engine's accepted English still plays. */
+    @Test fun iso3IdentifiersOfOtherLanguagesAreNeverSelectedButAnAcceptedLanguageStillPlays() {
         assertTrue(englishVoices(setOf(voice("french", locale = Locale("fra", "FRA"))), Locale.US).isEmpty())
-        assertEquals(SpeechAvailability.Unsupported, configureSpeech(
-            Locale.US, { emptySet() }, { TextToSpeech.ERROR },
+        val result = configureSpeech(
+            Locale.US, { emptySet() }, { error("No non-English voice may be selected") },
             { TextToSpeech.LANG_AVAILABLE }, { voice("french", locale = Locale("fra", "FRA")) }
-        ))
+        )
+        assertSubstitutedEnglish(result)
     }
 
-    @Test fun actualOtherLanguageAndUnavailableDataNeverPlay() {
-        assertEquals(SpeechAvailability.Unsupported, configureSpeech(
+    @Test fun actualOtherLanguageMetadataIsDisclosedWhileMissingDataStillBlocks() {
+        assertSubstitutedEnglish(configureSpeech(
             Locale.US, { emptySet() }, { TextToSpeech.ERROR },
             { TextToSpeech.LANG_AVAILABLE }, { voice("other", locale = Locale.FRENCH) }
         ))
@@ -379,10 +385,44 @@ class VoiceSelectionTest {
         assertTrue(report.contains(DeviceSpeechFailure.MissingData.verdict))
     }
 
+    /** An engine name, voice name or feature is data, not a licence to add lines or leak URLs. */
+    @Test fun engineSuppliedVoiceFieldsAreRedactedWithoutLosingLanguageOrAccent() {
+        val evidence = SpeechEvidence()
+        evidence.addEngine("com.example.engine")
+        evidence.observe(
+            SpeechObservation.VoicesListed(
+                count = 1,
+                voices = listOf(
+                    SpeechVoiceFact(
+                        name = "voice\nforged: https://evil.example/voice?token=S3CRETVALUE",
+                        locale = Locale.US,
+                        features = setOf("embeddedTts", "/Users/alice/private", "token=S3CRETVALUE")
+                    )
+                )
+            )
+        )
+
+        val facts = evidence.facts()
+
+        assertTrue("The engine's language stays readable", facts.contains("language=en"))
+        assertTrue("The engine's country stays readable", facts.contains("country=US"))
+        assertTrue("The BCP-47 tag stays readable", facts.contains("tag=en-US"))
+        assertFalse("A URL from a voice name is redacted", facts.contains("evil.example"))
+        assertFalse("A path from a feature is redacted", facts.contains("/Users/alice"))
+        assertFalse("A credential value is redacted", facts.contains("S3CRETVALUE"))
+        assertEquals("An engine string cannot forge another report record", 2, facts.lines().size)
+    }
+
     /** An engine that would not list voices must not read like one that listed none. */
     @Test fun aRefusedEnumerationDoesNotReadLikeAnEmptyOne() {
-        val refused = SpeechEvidence().apply { observe(SpeechObservation.VoicesListed(null)) }
-        val empty = SpeechEvidence().apply { observe(SpeechObservation.VoicesListed(0)) }
+        val refused = SpeechEvidence().apply {
+            addEngine("test.engine")
+            observe(SpeechObservation.VoicesListed(null))
+        }
+        val empty = SpeechEvidence().apply {
+            addEngine("test.engine")
+            observe(SpeechObservation.VoicesListed(0))
+        }
         assertNotEquals(
             empty.report(DeviceSpeechFailure.NoEnglishVoice),
             refused.report(DeviceSpeechFailure.NoEnglishVoice)

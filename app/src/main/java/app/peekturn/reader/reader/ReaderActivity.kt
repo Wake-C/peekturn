@@ -119,7 +119,11 @@ class ReaderActivity : AppCompatActivity() {
     private var mode: ActionMode? = null
     private var selectionFocus: android.view.View? = null
     private var openedMarked = false
-    private val learningSession by lazy { LearningSession(cache = graph.explanationCache) }
+    private val learningSession by lazy {
+        LearningSession(cache = graph.explanationCache) { category, cause ->
+            graph.developerLog.recordFailure("learning", category, cause)
+        }
+    }
     private var locatorJob: Job? = null
     private var renderedPreferences: Pair<ReaderPreferences, String>? = null
     private val readerViewport = ReaderViewport { readerTextInsets(graph.store.settings.value.reading) }
@@ -306,7 +310,10 @@ class ReaderActivity : AppCompatActivity() {
                                 initialDictionary = request.dictionary,
                                 onClose = { dismissLookup(true, "popup close") },
                                 onCancel = { dismissLookup(true, "popup outside dismissal") },
-                                onAdjust = { dismissLookup(false, "popup adjust") }
+                                onAdjust = { dismissLookup(false, "popup adjust") },
+                                onDictionaryFailure = { cause ->
+                                    graph.developerLog.recordFailure("dictionary", "lookup", cause)
+                                }
                             )
                         }
                     }
@@ -359,7 +366,8 @@ class ReaderActivity : AppCompatActivity() {
                         try {
                             graph.store.savePosition(loaded.id, locator.toJSON().toString(), locator.locations.totalProgression ?: loaded.progression)
                         } catch (e: CancellationException) { throw e }
-                        catch (_: Exception) {
+                        catch (e: Exception) {
+                            graph.developerLog.recordFailure("reader", "position", e)
                             runOnUiThread { Toast.makeText(this@ReaderActivity, getString(R.string.reader_toast_position_not_saved), Toast.LENGTH_LONG).show() }
                         }
                     }
@@ -369,7 +377,8 @@ class ReaderActivity : AppCompatActivity() {
                 // its playback now that this Activity knows which book it is showing.
                 narrationBinder?.let(::observeNarration)
             } catch (e: CancellationException) { throw e }
-            catch (_: Exception) {
+            catch (e: Exception) {
+                graph.developerLog.recordFailure("reader", "open", e)
                 graph.store.clearLastBook()
                 Toast.makeText(this@ReaderActivity, getString(R.string.reader_toast_book_cannot_open), Toast.LENGTH_LONG).show()
                 finish()
@@ -399,6 +408,7 @@ class ReaderActivity : AppCompatActivity() {
                 }
                 override fun onResourceLoadFailed(href: org.readium.r2.shared.util.Url, error: org.readium.r2.shared.util.data.ReadError) {
                     if (!shouldExitForResourceFailure(href.removeQuery().removeFragment().toString(), spineHtmlHrefs)) return
+                    graph.developerLog.recordFailure("reader", "chapter")
                     lifecycleScope.launch {
                         graph.store.clearLastBook()
                         Toast.makeText(this@ReaderActivity, getString(R.string.reader_toast_chapter_load_failed), Toast.LENGTH_LONG).show()
@@ -784,7 +794,7 @@ class ReaderActivity : AppCompatActivity() {
             selectionSession.beginNativeMode()
             selectionTrace("native selection toolbar created held=${selectionSession.pointerHeld}")
             menu.clear()
-            readerSelectionActions().forEachIndexed { index, action ->
+            readerSelectionActions(graph.store.settings.value.quickExplain).forEachIndexed { index, action ->
                 when (action) {
                     ReaderSelectionAction.EXPLAIN ->
                         menu.add(0, EXPLAIN, index, getString(R.string.reader_lookup_tab_explain))
@@ -841,6 +851,7 @@ class ReaderActivity : AppCompatActivity() {
     /** A native read that cannot answer leaves the selection intact and says so, instead of guessing. */
     private fun reportSelectionUnreadable(message: String) {
         selectionTrace("explicit action without a readable native selection")
+        graph.developerLog.recordFailure("reader", "selection")
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
@@ -1100,7 +1111,10 @@ class ReaderActivity : AppCompatActivity() {
                 searchIterator = publication?.search(query.trim()) ?: error("Search unavailable")
                 readSearchPage()
             } catch (e: CancellationException) { throw e }
-            catch (_: Exception) { searchStatus = BookSearchStatus.Failed }
+            catch (e: Exception) {
+                graph.developerLog.recordFailure("reader", "search", e)
+                searchStatus = BookSearchStatus.Failed
+            }
             finally { searchBusy = false }
         }
     }
@@ -1111,7 +1125,10 @@ class ReaderActivity : AppCompatActivity() {
         searchJob = lifecycleScope.launch {
             try { readSearchPage() }
             catch (e: CancellationException) { throw e }
-            catch (_: Exception) { searchStatus = BookSearchStatus.Failed }
+            catch (e: Exception) {
+                graph.developerLog.recordFailure("reader", "search", e)
+                searchStatus = BookSearchStatus.Failed
+            }
             finally { searchBusy = false }
         }
     }

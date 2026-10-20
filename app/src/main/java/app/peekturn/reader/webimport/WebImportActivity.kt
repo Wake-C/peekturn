@@ -9,6 +9,9 @@ import android.os.SystemClock
 import android.util.Log
 import android.webkit.JsResult
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
@@ -38,6 +41,7 @@ import java.io.InputStream
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -177,6 +181,20 @@ class WebImportActivity : AppCompatActivity() {
                     if (shouldAutoStart) awaitArticleAndImport(automatic = true)
                 }
             }
+
+            /** A page that never renders is a WebView failure; the URL is never recorded. */
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                if (request.isForMainFrame) {
+                    graph.developerLog.recordFailure("web-import", "webview-${error.errorCode}")
+                }
+            }
+
+            /** An error page is a failed import target; only the status code is recorded. */
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                if (request.isForMainFrame) {
+                    graph.developerLog.recordFailure("web-import", "http-${errorResponse.statusCode}")
+                }
+            }
         }
         view.webChromeClient = object : WebChromeClient() {
             override fun onReceivedTitle(view: WebView, title: String?) {
@@ -289,7 +307,7 @@ class WebImportActivity : AppCompatActivity() {
             Log.w("PeekturnWebImport", "Converter asset missing: ${CONVERTER_SCRIPTS[index]}")
             injecting = false
             converterWaiters.clear()
-            showFailure("failed")
+            showFailure("failed", e)
             return
         }
         view.evaluateJavascript(source) {
@@ -419,6 +437,7 @@ class WebImportActivity : AppCompatActivity() {
             CaptureRefusal.NO_ARTICLE -> R.string.web_import_no_article
             null -> R.string.web_import_not_ready
         }
+        graph.developerLog.recordFailure("web-import", "convert")
         ui = ui.copy(status = status, working = false, canImport = true)
     }
 
@@ -437,7 +456,7 @@ class WebImportActivity : AppCompatActivity() {
         return true
     }
 
-    private fun showFailure(code: String) {
+    private fun showFailure(code: String, cause: Throwable? = null) {
         val knownCode = CaptureRefusal.entries.firstOrNull { it.code == code }?.code ?: "failed"
         Log.w("PeekturnWebImport", "Conversion declined: $knownCode")
         readinessJob?.cancel()
@@ -467,6 +486,7 @@ class WebImportActivity : AppCompatActivity() {
             CaptureRefusal.NO_ARTICLE.code -> R.string.web_import_no_article
             else -> R.string.web_import_failed
         }
+        graph.developerLog.recordFailure("web-import", "convert", cause)
         ui = ui.copy(status = status, working = false, canImport = true)
     }
 
@@ -481,6 +501,9 @@ class WebImportActivity : AppCompatActivity() {
                 finish()
             } catch (e: Exception) {
                 Log.w("PeekturnWebImport", "Generated EPUB was not importable: ${e.javaClass.simpleName}")
+                if (e !is CancellationException) {
+                    graph.developerLog.recordFailure("web-import", "convert", e)
+                }
                 file.delete()
                 ui = ui.copy(status = R.string.web_import_failed, working = false, canImport = true)
             }

@@ -113,19 +113,6 @@ class ReaderControlsTest {
         )
     }
 
-    @Test fun `native selection menu keeps only explain dictionary and copy`() {
-        // Narration starts from the reader menu; the native selection toolbar no longer offers a
-        // fourth read-aloud action in either Quick Explain mode.
-        assertEquals(
-            listOf(
-                ReaderSelectionAction.EXPLAIN,
-                ReaderSelectionAction.DICTIONARY,
-                ReaderSelectionAction.COPY
-            ),
-            readerSelectionActions()
-        )
-    }
-
     @Test fun `queued options and typography changes stay isolated`() {
         val settings = AppSettings(
             quickExplain = false,
