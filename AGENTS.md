@@ -27,6 +27,6 @@ Independent Android EPUB reader for people learning English through sustained re
 - For code changes, shared actors, boundaries and state ownership: [architecture](agent-doc/essential/ARCHITECTURE.md).
 - For feature work, design or verification: follow the [task routes](agent-doc/reference/AGENTS.md) to the affected owner.
 - Domain terminology: [glossary](CONTEXT.md).
-- Build and run commands: [README](README.md#build-and-run).
+- Build and run commands: [README](README.md#build).
 - Dependency, dictionary and audio attribution: [third-party notices](THIRD_PARTY_NOTICES.md).
 - Documentation changes: [ownership conventions](agent-doc/essential/doc-conventions.md).

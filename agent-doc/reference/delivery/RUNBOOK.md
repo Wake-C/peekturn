@@ -20,7 +20,7 @@ This workflow delivers a universal, debug-signed test APK. It does not configure
 
 ## Prerequisites
 
-Use the [build toolchain setup](../../../README.md#build-and-run). The packaging command also requires a POSIX shell, Python 3 and Git with an existing checkout commit. Python uses only its standard library.
+Use the [build toolchain setup](../../../README.md#build). The packaging command also requires a POSIX shell, Python 3 and Git with an existing checkout commit. Python uses only its standard library.
 
 SDK lookup uses `sdk.dir` in ignored `local.properties`, then `ANDROID_HOME`, then `ANDROID_SDK_ROOT`. The wrapper handles Gradle distribution setup. Gradle validates the platform/build tools selected by the manifests and may download uncached dependencies. Model-provider access and an attached Android device are not packaging prerequisites.
 
