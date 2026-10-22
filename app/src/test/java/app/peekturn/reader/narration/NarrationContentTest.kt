@@ -6,6 +6,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.assertFalse
+import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -64,9 +65,11 @@ class NarrationContentTest {
             override fun close() = Unit
         }
         val content = NarrationContent(publication)
+        // Readium parses on a real dispatcher; finish that work before timing synthesis virtually.
+        val paragraphs = content.following(anchor.locator, anchor.text).toList()
         val states = mutableListOf<NarrationBufferState>()
         val buffer = BufferedNarrationResolver(
-            source, backgroundScope, { content.following(anchor.locator, it) },
+            source, backgroundScope, { paragraphs.asFlow() },
             { 1f }, { 0L }, onState = { states += it }
         )
         try {
