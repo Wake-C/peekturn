@@ -355,6 +355,11 @@ import org.readium.r2.shared.publication.Link
                 detail = stringResource(R.string.reader_options_auto_pronounce_detail),
                 checked = options.autoPronounce
             ) { onChange(ReaderOption.AUTO_PRONOUNCE, it) }
+            OptionSwitch(
+                title = stringResource(R.string.reader_options_volume_keys),
+                detail = stringResource(R.string.reader_options_volume_keys_detail),
+                checked = options.volumeKeysNarration
+            ) { onChange(ReaderOption.VOLUME_KEYS_NARRATION, it) }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(8.dp))

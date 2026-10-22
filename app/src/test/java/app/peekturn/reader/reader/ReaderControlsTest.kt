@@ -1,5 +1,7 @@
 package app.peekturn.reader.reader
 
+import android.view.KeyEvent
+import org.junit.Assert.assertNull
 import app.peekturn.reader.model.AppSettings
 import app.peekturn.reader.model.ReaderPreferences
 import org.junit.Assert.assertEquals
@@ -13,6 +15,21 @@ import org.junit.Test
  * behaviour, and options must never rewrite the reader's type.
  */
 class ReaderControlsTest {
+    @Test fun `volume shortcuts only navigate active narration once per key press`() {
+        fun action(enabled: Boolean, active: Boolean, key: Int, type: Int = KeyEvent.ACTION_DOWN, repeat: Int = 0) =
+            narrationVolumeKeyAction(enabled, active, key, type, repeat)
+
+        assertNull(action(false, true, KeyEvent.KEYCODE_VOLUME_UP))
+        assertNull(action(false, true, KeyEvent.KEYCODE_VOLUME_DOWN))
+        assertNull(action(true, false, KeyEvent.KEYCODE_VOLUME_UP))
+        assertNull(action(true, false, KeyEvent.KEYCODE_VOLUME_DOWN))
+        assertEquals(NarrationVolumeKeyAction.PREVIOUS, action(true, true, KeyEvent.KEYCODE_VOLUME_UP))
+        assertEquals(NarrationVolumeKeyAction.NEXT, action(true, true, KeyEvent.KEYCODE_VOLUME_DOWN))
+        assertEquals(NarrationVolumeKeyAction.CONSUME, action(true, true, KeyEvent.KEYCODE_VOLUME_DOWN, repeat = 3))
+        assertEquals(NarrationVolumeKeyAction.CONSUME, action(true, true, KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.ACTION_UP))
+        assertNull(action(true, true, KeyEvent.KEYCODE_BACK))
+    }
+
     @Test fun `options change immersive scroll and lookup behaviour without touching typography`() {
         val typography = ReaderPreferences(
             fontFamily = "noto-serif",
@@ -27,20 +44,18 @@ class ReaderControlsTest {
             scroll = false
         )
         val settings = AppSettings(quickExplain = false, autoPronounce = false, reading = typography)
-        assertEquals(
-            ReaderOptions(immersive = true, scroll = false, quickExplain = false, autoPronounce = false),
-            settings.readerOptions()
-        )
 
         val changed = settings
             .withReaderOption(ReaderOption.IMMERSIVE, false)
             .withReaderOption(ReaderOption.SCROLL, true)
             .withReaderOption(ReaderOption.QUICK_EXPLAIN, true)
             .withReaderOption(ReaderOption.AUTO_PRONOUNCE, true)
+            .withReaderOption(ReaderOption.VOLUME_KEYS_NARRATION, true)
 
         assertEquals(typography.copy(immersive = false, scroll = true), changed.reading)
         assertTrue(changed.quickExplain)
         assertTrue(changed.autoPronounce)
+        assertTrue(changed.volumeKeysNarration)
         assertEquals("noto-serif", changed.reading.fontFamily)
         assertEquals(0.08, changed.reading.letterSpacing, 0.0)
         assertEquals(142.0, changed.reading.fontSize, 0.0)

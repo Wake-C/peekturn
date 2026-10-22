@@ -43,6 +43,8 @@
     <string name="reader_options_quick_explain_detail">Explain a selection once you release it. Off keeps Explain as an explicit action.</string>
     <string name="reader_options_auto_pronounce">Auto-pronounce</string>
     <string name="reader_options_auto_pronounce_detail">Speak the selected word or phrase once when a lookup opens.</string>
+    <string name="reader_options_volume_keys">Volume keys for narration</string>
+    <string name="reader_options_volume_keys_detail">In the reader, volume up: previous sentence; volume down: next sentence.</string>
     <string name="reader_options_done">Done</string>
 
     <!-- Continuous narration -->

@@ -160,6 +160,22 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        val action = narrationVolumeKeyAction(
+            enabled = graph.store.settings.value.volumeKeysNarration,
+            narrationActive = narrationPlayback?.state?.value?.active == true,
+            keyCode = event.keyCode,
+            eventAction = event.action,
+            repeatCount = event.repeatCount
+        ) ?: return super.dispatchKeyEvent(event)
+        when (action) {
+            NarrationVolumeKeyAction.PREVIOUS -> narrationPlayback?.previous()
+            NarrationVolumeKeyAction.NEXT -> narrationPlayback?.next()
+            NarrationVolumeKeyAction.CONSUME -> Unit
+        }
+        return true
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Fragment snapshots contain runtime page indexes. Recreate only from the durable locator,
         // not Android's stale navigator tree, including after process death.

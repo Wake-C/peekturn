@@ -43,6 +43,8 @@
     <string name="reader_options_quick_explain_detail">松开选中文本后立即解释。关闭后，解释仍是需要手动点按的操作。</string>
     <string name="reader_options_auto_pronounce">自动朗读</string>
     <string name="reader_options_auto_pronounce_detail">查询打开时，朗读所选的单词或短语一次。</string>
+    <string name="reader_options_volume_keys">音量键切句</string>
+    <string name="reader_options_volume_keys_detail">阅读页朗读时，音量加跳上一句，音量减跳下一句。</string>
     <string name="reader_options_done">完成</string>
 
     <!-- 连续朗读 -->

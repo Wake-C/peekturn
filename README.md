@@ -48,6 +48,8 @@ System narration caches are separated by engine version, reported voice and synt
 
 Cold narration prepares the current clip, two complete following paragraphs and at least 15 seconds of playable audio before starting. It then builds toward eight following paragraphs and an adaptive time reserve. End-of-book, unavailable content and resource bounds can leave a smaller reserve; the reader shows what is actually ready. Preparation allows at most two active synthesis requests while building reserve and one when healthy; the engine may still serialize its own model inference. Pause retains completed clips without continuing preparation.
 
+In **Reading features**, enable **Volume keys for narration** to use volume up for the previous sentence and volume down for the next sentence during a narration session in the reader; this is off by default.
+
 Settings includes a live developer report with recent diagnostics, a 16 KiB copy limit and a Clear action. Clearing the report does not remove books, preferences or sentence audio.
 
 ## Read from the web

@@ -1,5 +1,6 @@
 package app.peekturn.reader.reader
 
+import android.view.KeyEvent
 import androidx.annotation.StringRes
 import app.peekturn.reader.R
 import app.peekturn.reader.model.AppSettings
@@ -33,14 +34,16 @@ internal data class ReaderOptions(
     val immersive: Boolean,
     val scroll: Boolean,
     val quickExplain: Boolean,
-    val autoPronounce: Boolean
+    val autoPronounce: Boolean,
+    val volumeKeysNarration: Boolean
 )
 
 internal fun AppSettings.readerOptions() = ReaderOptions(
     immersive = reading.immersive,
     scroll = reading.scroll,
     quickExplain = quickExplain,
-    autoPronounce = autoPronounce
+    autoPronounce = autoPronounce,
+    volumeKeysNarration = volumeKeysNarration
 )
 
 /** One options-sheet switch; only the named field changes. */
@@ -48,7 +51,8 @@ internal enum class ReaderOption {
     IMMERSIVE,
     SCROLL,
     QUICK_EXPLAIN,
-    AUTO_PRONOUNCE
+    AUTO_PRONOUNCE,
+    VOLUME_KEYS_NARRATION
 }
 
 /**
@@ -61,6 +65,7 @@ internal fun AppSettings.withReaderOption(option: ReaderOption, enabled: Boolean
         ReaderOption.SCROLL -> copy(reading = reading.copy(scroll = enabled))
         ReaderOption.QUICK_EXPLAIN -> copy(quickExplain = enabled)
         ReaderOption.AUTO_PRONOUNCE -> copy(autoPronounce = enabled)
+        ReaderOption.VOLUME_KEYS_NARRATION -> copy(volumeKeysNarration = enabled)
     }
 
 /**
@@ -70,3 +75,23 @@ internal fun AppSettings.withReaderOption(option: ReaderOption, enabled: Boolean
 internal fun AppSettings.withTypography(reading: ReaderPreferences): AppSettings = copy(
     reading = reading.copy(immersive = this.reading.immersive, scroll = this.reading.scroll)
 )
+
+internal enum class NarrationVolumeKeyAction { PREVIOUS, NEXT, CONSUME }
+
+internal fun narrationVolumeKeyAction(
+    enabled: Boolean,
+    narrationActive: Boolean,
+    keyCode: Int,
+    eventAction: Int,
+    repeatCount: Int
+): NarrationVolumeKeyAction? {
+    if (!enabled || !narrationActive) return null
+    val direction = when (keyCode) {
+        KeyEvent.KEYCODE_VOLUME_UP -> NarrationVolumeKeyAction.PREVIOUS
+        KeyEvent.KEYCODE_VOLUME_DOWN -> NarrationVolumeKeyAction.NEXT
+        else -> return null
+    }
+    // Consume key-up and held-key repeats too, without navigating more than once per press.
+    return if (eventAction == KeyEvent.ACTION_DOWN && repeatCount == 0) direction
+    else NarrationVolumeKeyAction.CONSUME
+}

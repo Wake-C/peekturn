@@ -78,7 +78,8 @@ data class AppSettings(
     val reading: ReaderPreferences = ReaderPreferences(),
     val appTheme: String = "dark",
     /** "system", "en" or "zh"; stored as the in-app choice, never inferred from the current locale. */
-    val uiLanguage: String = "system"
+    val uiLanguage: String = "system",
+    val volumeKeysNarration: Boolean = false
 ) {
     val model: ModelConfig
         get() = profiles.firstOrNull { it.id == activeProfileId }?.config ?: ModelConfig()
