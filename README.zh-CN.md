@@ -4,7 +4,7 @@
 
 一个帮你把英文原版书读完的 Android 阅读器。
 
-**[下载 Android APK](https://github.com/Wake-C/peekturn/releases/latest)** · [English](README.md) · 版本 1.0.1 · Android 8.0+
+**[下载 Android APK](https://github.com/Wake-C/peekturn/releases/latest)** · [English](README.md) · 版本 1.2.3 · Android 8.0+
 
 ## 你完整读完过一本英文书吗？
 

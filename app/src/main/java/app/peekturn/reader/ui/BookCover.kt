@@ -5,10 +5,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -49,9 +52,13 @@ internal fun BookCover(book: Book, modifier: Modifier = Modifier) {
         }
     }
     val coverDescription = stringResource(R.string.shell_cover_description, book.title)
+    // A cover is a paper panel: a two-to-five dp stock corner, a hairline rule, and serif lettering.
+    val coverShape = RoundedCornerShape(topStart = 2.dp, topEnd = 5.dp, bottomEnd = 5.dp, bottomStart = 2.dp)
     val frame = modifier.aspectRatio(2f / 3f)
+        .shadow(2.dp, coverShape)
+        .clip(coverShape)
         .background(MaterialTheme.colorScheme.surfaceVariant)
-        .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, coverShape)
         .semantics { contentDescription = coverDescription }
     if (cover != null) {
         Image(cover!!, contentDescription = null, modifier = frame, contentScale = ContentScale.Fit)
@@ -69,12 +76,14 @@ internal fun BookCover(book: Book, modifier: Modifier = Modifier) {
             ) {
                 Text(initial, modifier = Modifier.weight(1f), fontFamily = FontFamily.Serif,
                     fontSize = if (compact) 24.sp else 52.sp, lineHeight = if (compact) 28.sp else 60.sp,
-                    color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Clip)
+                    letterSpacing = if (compact) (-0.5).sp else (-1.5).sp,
+                    color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Clip)
                 Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 8.dp)) {
                     // The focus card prints the author directly beneath this cover, so the cover
                     // carries only the monogram and its rule instead of repeating the metadata.
-                    Box(Modifier.width(if (compact) 16.dp else 24.dp).height(1.dp).background(MaterialTheme.colorScheme.primary))
+                    Box(Modifier.width(if (compact) 16.dp else 24.dp).height(1.dp)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f)))
                 }
             }
         }

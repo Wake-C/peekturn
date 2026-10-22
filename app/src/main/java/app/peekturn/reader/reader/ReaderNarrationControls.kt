@@ -1,8 +1,10 @@
 package app.peekturn.reader.reader
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,14 +13,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FastForward
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,9 +26,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.peekturn.reader.R
 import app.peekturn.reader.narration.NarrationState
 import java.math.BigDecimal
@@ -69,12 +67,12 @@ internal fun ReaderNarrationCard(
     Surface(
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(15.dp),
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shadowElevation = 2.dp,
+        shadowElevation = 3.dp,
         modifier = modifier.fillMaxWidth().pointerInput(Unit) { detectTapGestures { } }
     ) {
-        Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -87,7 +85,10 @@ internal fun ReaderNarrationCard(
                             else -> R.string.reader_narration_status_paused
                         }
                     ),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.2.sp
+                    ),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1
                 )
@@ -95,7 +96,7 @@ internal fun ReaderNarrationCard(
                 if (state.cached && state.error == null) {
                     Text(
                         stringResource(R.string.reader_narration_cached),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.2.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -111,7 +112,7 @@ internal fun ReaderNarrationCard(
                         state.readyParagraphs,
                         (state.readyDurationMs / 1_000L).toInt()
                     ),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.2.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)
@@ -120,74 +121,97 @@ internal fun ReaderNarrationCard(
             if (state.notice != null && state.error == null) {
                 Text(
                     state.notice,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.2.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)
                 )
             }
             if (state.error != null) {
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
                 ) {
-                    Text(
-                        state.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
-                    )
-                    TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text(stringResource(R.string.reader_narration_retry))
+                    Row(
+                        Modifier.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            state.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f).padding(vertical = 8.dp)
+                        )
+                        TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.reader_narration_retry))
+                        }
                     }
                 }
             }
             Row(
-                Modifier.fillMaxWidth().padding(top = 2.dp),
+                Modifier.fillMaxWidth().padding(top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 IconButton(onClick = onPrevious, modifier = Modifier.size(42.dp)) {
                     Icon(
-                        Icons.Filled.SkipPrevious,
-                        contentDescription = stringResource(R.string.reader_narration_previous)
+                        readerTransportPrevious,
+                        contentDescription = stringResource(R.string.reader_narration_previous),
+                        modifier = Modifier.size(22.dp)
                     )
                 }
-                IconButton(onClick = onPlayPause, modifier = Modifier.size(42.dp)) {
-                    Icon(
-                        if (state.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = stringResource(
-                            if (state.playing) R.string.reader_narration_pause else R.string.reader_narration_play
-                        ),
-                        tint = MaterialTheme.colorScheme.primary
+                Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.size(42.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape)
                     )
+                    IconButton(onClick = onPlayPause, modifier = Modifier.size(42.dp)) {
+                        Icon(
+                            if (state.playing) readerTransportPause else readerTransportPlay,
+                            contentDescription = stringResource(
+                                if (state.playing) R.string.reader_narration_pause
+                                else R.string.reader_narration_play
+                            ),
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
                 IconButton(onClick = onNext, modifier = Modifier.size(42.dp)) {
                     Icon(
-                        Icons.Filled.SkipNext,
-                        contentDescription = stringResource(R.string.reader_narration_next)
+                        readerTransportNext,
+                        contentDescription = stringResource(R.string.reader_narration_next),
+                        modifier = Modifier.size(22.dp)
                     )
                 }
                 IconButton(onClick = onNextParagraph, modifier = Modifier.size(42.dp)) {
                     Icon(
-                        Icons.Filled.FastForward,
-                        contentDescription = stringResource(R.string.reader_narration_next_paragraph)
+                        readerTransportNextParagraph,
+                        contentDescription = stringResource(R.string.reader_narration_next_paragraph),
+                        modifier = Modifier.size(22.dp)
                     )
                 }
-                TextButton(onClick = onSpeed, modifier = Modifier.heightIn(min = 42.dp)) {
+                TextButton(onClick = onSpeed, modifier = Modifier.heightIn(min = 44.dp)) {
                     Text(
                         stringResource(
                             R.string.reader_narration_speed_value,
                             narrationSpeedLabel(state.speed)
-                        )
+                        ),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontFeatureSettings = "tnum"
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Spacer(Modifier.width(2.dp))
                 IconButton(onClick = onStop, modifier = Modifier.size(42.dp)) {
                     Icon(
-                        Icons.Filled.Close,
-                        contentDescription = stringResource(R.string.reader_narration_stop)
+                        toolbarClose,
+                        contentDescription = stringResource(R.string.reader_narration_stop),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }

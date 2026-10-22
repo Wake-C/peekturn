@@ -6,14 +6,18 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
@@ -30,17 +34,35 @@ private val themeChoices = listOf(
 
 /** A setting gets the whole text column, never a narrow chip competing with two other languages. */
 @Composable
-internal fun SettingsDisclosure(title: String, summary: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 68.dp)
-        .padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+internal fun SettingsDisclosure(
+    title: String,
+    summary: String,
+    icon: ImageVector? = null,
+    onClick: () -> Unit
+) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 64.dp)
+        // Grouped rows carry their own gutter; standalone callers already pad the page.
+        .padding(horizontal = if (icon != null) 14.dp else 0.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        if (icon != null) {
+            Surface(Modifier.size(34.dp), shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.primaryContainer) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(summary, style = MaterialTheme.typography.bodyMedium,
+            Text(summary, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(12.dp))
         Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f))
     }
 }
 
@@ -48,21 +70,21 @@ internal fun SettingsDisclosure(title: String, summary: String, onClick: () -> U
 internal fun AppearancePreference(selected: String, onSelect: (String) -> Unit) {
     var choosing by remember { mutableStateOf(false) }
     SettingsDisclosure(stringResource(R.string.settings_appearance),
-        stringResource(themeChoices.firstOrNull { it.first == selected }?.second ?: R.string.settings_theme_dark)) {
+        stringResource(themeChoices.firstOrNull { it.first == selected }?.second ?: R.string.settings_theme_dark),
+        icon = Icons.Outlined.LightMode) {
         choosing = true
     }
     if (choosing) {
         AlertDialog(onDismissRequest = { choosing = false },
             title = { Text(stringResource(R.string.settings_appearance)) },
             text = {
-                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).selectableGroup(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    themeChoices.forEach { (value, label) ->
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).selectableGroup()) {
+                    themeChoices.forEachIndexed { index, (value, label) ->
                         val preview = peekturnColorScheme(value)
                         Row(Modifier.fillMaxWidth().selectable(selected == value, role = Role.RadioButton,
-                            onClick = { onSelect(value); choosing = false }).heightIn(min = 64.dp)
-                            .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(Modifier.size(42.dp), shape = MaterialTheme.shapes.small,
+                            onClick = { onSelect(value); choosing = false }).heightIn(min = 56.dp)
+                            .padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Surface(Modifier.size(42.dp), shape = RoundedCornerShape(10.dp),
                                 color = preview.background, border = BorderStroke(1.dp, preview.outlineVariant)) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text("Aa", color = preview.onBackground, fontFamily = FontFamily.Serif,
@@ -70,8 +92,11 @@ internal fun AppearancePreference(selected: String, onSelect: (String) -> Unit) 
                                 }
                             }
                             Spacer(Modifier.width(14.dp))
-                            Text(stringResource(label), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                            Text(stringResource(label), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
                             RadioButton(selected == value, onClick = null)
+                        }
+                        if (index < themeChoices.lastIndex) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                 }
@@ -89,7 +114,8 @@ internal fun LanguagePreference(selected: String, onSelect: (String) -> Unit) {
         "zh" to R.string.settings_language_zh
     )
     SettingsDisclosure(stringResource(R.string.settings_language),
-        stringResource(choices.firstOrNull { it.first == selected }?.second ?: R.string.settings_language_follow)) {
+        stringResource(choices.firstOrNull { it.first == selected }?.second ?: R.string.settings_language_follow),
+        icon = Icons.Outlined.Language) {
         choosing = true
     }
     if (choosing) {
@@ -97,12 +123,15 @@ internal fun LanguagePreference(selected: String, onSelect: (String) -> Unit) {
             title = { Text(stringResource(R.string.settings_language)) },
             text = {
                 Column(Modifier.fillMaxWidth().selectableGroup()) {
-                    choices.forEach { (value, label) ->
+                    choices.forEachIndexed { index, (value, label) ->
                         Row(Modifier.fillMaxWidth().selectable(selected == value, role = Role.RadioButton,
                             onClick = { choosing = false; onSelect(value) }).heightIn(min = 56.dp),
                             verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(label), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                            Text(stringResource(label), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
                             RadioButton(selected == value, onClick = null)
+                        }
+                        if (index < choices.lastIndex) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                 }
@@ -123,18 +152,21 @@ internal fun ProfilePreference(
     var menu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.weight(1f).selectable(selected, role = Role.RadioButton, onClick = onSelect)
-            .heightIn(min = 68.dp).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            .heightIn(min = 64.dp).padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically) {
             RadioButton(selected, onClick = null)
-            Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Box {
-            IconButton(onClick = { menu = true }) {
-                Icon(Icons.Outlined.MoreHoriz, contentDescription = stringResource(R.string.settings_edit_profile, title))
+        Box(Modifier.padding(end = 2.dp)) {
+            IconButton(onClick = { menu = true }, modifier = Modifier.size(44.dp)) {
+                Icon(Icons.Outlined.MoreHoriz, contentDescription = stringResource(R.string.settings_edit_profile, title),
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text(stringResource(R.string.settings_edit_profile, title)) },

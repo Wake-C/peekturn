@@ -12,9 +12,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -34,6 +34,9 @@ import app.peekturn.reader.model.AppSettings
 import app.peekturn.reader.model.ReaderPreferences
 import app.peekturn.reader.ui.SettingsDisclosure
 import org.readium.r2.shared.publication.Link
+
+/** A's sheets lift on a 24dp top radius over the reading surface. */
+private val readerSheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
 
 /**
  * A compact sheet: bundled fonts first, then size and spacing controls. Content scrolls inside a
@@ -53,7 +56,8 @@ import org.readium.r2.shared.publication.Link
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        shape = readerSheetShape,
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(
             Modifier.fillMaxWidth()
@@ -134,10 +138,13 @@ import org.readium.r2.shared.publication.Link
             title = { Text(stringResource(R.string.reader_typography_font)) },
             text = {
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).selectableGroup()) {
-                    ReaderFonts.all.forEach { font ->
+                    ReaderFonts.all.forEachIndexed { index, font ->
                         FontChoice(font, selected.id == font.id, Modifier.fillMaxWidth()) {
                             draft = draft.copy(fontFamily = font.id)
                             choosingFont = false
+                        }
+                        if (index < ReaderFonts.all.lastIndex) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                 }
@@ -192,7 +199,7 @@ import org.readium.r2.shared.publication.Link
     range: ClosedFloatingPointRange<Float>,
     onChange: (Double) -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -205,7 +212,9 @@ import org.readium.r2.shared.publication.Link
             )
             Text(
                 value,
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontFeatureSettings = "tnum"
+                ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -235,11 +244,12 @@ import org.readium.r2.shared.publication.Link
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        shape = readerSheetShape,
         containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
             Row(
-                Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 4.dp),
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -250,13 +260,15 @@ import org.readium.r2.shared.publication.Link
                 IconButton(onClick = onSearch, modifier = Modifier.size(48.dp)) {
                     Icon(
                         toolbarBinoculars,
-                        contentDescription = stringResource(R.string.reader_contents_search)
+                        contentDescription = stringResource(R.string.reader_contents_search),
+                        modifier = Modifier.size(21.dp)
                     )
                 }
                 IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
                     Icon(
-                        Icons.Filled.Close,
-                        contentDescription = stringResource(R.string.reader_close)
+                        toolbarClose,
+                        contentDescription = stringResource(R.string.reader_close),
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -290,7 +302,9 @@ import org.readium.r2.shared.publication.Link
                         ) {
                             Text(
                                 title,
-                                style = MaterialTheme.typography.bodyLarge,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = if (current) FontWeight.Medium else FontWeight.Normal
+                                ),
                                 color = if (current) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.onSurface,
                                 maxLines = 2,
@@ -323,7 +337,8 @@ import org.readium.r2.shared.publication.Link
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        shape = readerSheetShape,
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(
             Modifier.fillMaxWidth()
@@ -358,37 +373,45 @@ import org.readium.r2.shared.publication.Link
             OptionSwitch(
                 title = stringResource(R.string.reader_options_volume_keys),
                 detail = stringResource(R.string.reader_options_volume_keys_detail),
-                checked = options.volumeKeysNarration
+                checked = options.volumeKeysNarration,
+                divider = false
             ) { onChange(ReaderOption.VOLUME_KEYS_NARRATION, it) }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Spacer(Modifier.height(8.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+            Spacer(Modifier.height(12.dp))
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                    Text(
-                        stringResource(R.string.reader_options_narration_cache),
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Text(
-                        stringResource(
-                            R.string.reader_options_narration_cache_size,
-                            Formatter.formatShortFileSize(LocalContext.current, cacheBytes)
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                TextButton(
-                    onClick = onClearCache,
-                    enabled = cacheBytes > 0,
-                    modifier = Modifier.heightIn(min = 48.dp)
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(stringResource(R.string.reader_options_narration_clear))
+                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text(
+                            stringResource(R.string.reader_options_narration_cache),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            stringResource(
+                                R.string.reader_options_narration_cache_size,
+                                Formatter.formatShortFileSize(LocalContext.current, cacheBytes)
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(
+                        onClick = onClearCache,
+                        enabled = cacheBytes > 0,
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
+                        Text(stringResource(R.string.reader_options_narration_clear))
+                    }
                 }
             }
+            Spacer(Modifier.height(8.dp))
             Text(
                 stringResource(R.string.reader_options_narration_note),
                 style = MaterialTheme.typography.bodySmall,
@@ -411,22 +434,28 @@ import org.readium.r2.shared.publication.Link
     title: String,
     detail: String,
     checked: Boolean,
+    divider: Boolean = true,
     onChange: (Boolean) -> Unit
 ) {
-    Row(
-        Modifier.fillMaxWidth()
-            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(Modifier.weight(1f).padding(end = 16.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth()
+                .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f).padding(end = 16.dp)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = checked, onCheckedChange = null)
         }
-        Switch(checked = checked, onCheckedChange = null)
+        if (divider) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
     }
 }

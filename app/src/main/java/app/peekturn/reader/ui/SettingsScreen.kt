@@ -2,6 +2,7 @@ package app.peekturn.reader.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -10,10 +11,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
-import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.Headphones
+import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -80,15 +85,17 @@ fun SettingsScreen(
         onDispose { lifecycle.removeObserver(observer); speech.stop() }
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-        .widthIn(max = 640.dp).padding(horizontal = 24.dp, vertical = 24.dp),
+        .widthIn(max = 640.dp).padding(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineLarge)
         Spacer(Modifier.height(16.dp))
-        Text(stringResource(R.string.settings_interface_section), style = MaterialTheme.typography.labelLarge,
+        Text(stringResource(R.string.settings_interface_section), style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        AppearancePreference(settings.appTheme) { value -> onSave { latest -> latest.copy(appTheme = value) } }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        LanguagePreference(settings.uiLanguage) { value -> onSave { latest -> latest.copy(uiLanguage = value) } }
+        SettingsGroup {
+            AppearancePreference(settings.appTheme) { value -> onSave { latest -> latest.copy(appTheme = value) } }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            LanguagePreference(settings.uiLanguage) { value -> onSave { latest -> latest.copy(uiLanguage = value) } }
+        }
         Spacer(Modifier.height(16.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.settings_ai_profiles), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
@@ -101,50 +108,62 @@ fun SettingsScreen(
                 Text(stringResource(R.string.settings_add))
             }
         }
-        Column(Modifier.selectableGroup()) {
-            settings.profiles.forEach { profile ->
-                ProfilePreference(
-                    title = profile.config.name.ifBlank { unnamedProfile },
-                    subtitle = if (profile.config.apiKey.isBlank()) stringResource(R.string.settings_not_configured) else profile.config.model,
-                    selected = profile.id == settings.activeProfileId,
-                    onSelect = {
-                        onSave { latest ->
-                            if (latest.profiles.any { it.id == profile.id }) latest.copy(activeProfileId = profile.id) else latest
-                        }
-                    },
-                    onEdit = { addingProfile = false; editingProfile = profile },
-                    onDelete = { deletingProfile = profile }
-                )
+        if (settings.profiles.isNotEmpty()) {
+            SettingsGroup(Modifier.selectableGroup()) {
+                settings.profiles.forEachIndexed { index, profile ->
+                    ProfilePreference(
+                        title = profile.config.name.ifBlank { unnamedProfile },
+                        subtitle = if (profile.config.apiKey.isBlank()) stringResource(R.string.settings_not_configured) else profile.config.model,
+                        selected = profile.id == settings.activeProfileId,
+                        onSelect = {
+                            onSave { latest ->
+                                if (latest.profiles.any { it.id == profile.id }) latest.copy(activeProfileId = profile.id) else latest
+                            }
+                        },
+                        onEdit = { addingProfile = false; editingProfile = profile },
+                        onDelete = { deletingProfile = profile }
+                    )
+                    if (index < settings.profiles.lastIndex) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
             }
         }
         Spacer(Modifier.height(16.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        SettingsDisclosure(
-            stringResource(R.string.settings_pronunciation),
-            stringResource(if (settings.accent == "US") R.string.settings_us_english else R.string.settings_uk_english)
-        ) { pronunciationOpen = true }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        SettingsDisclosure(
-            stringResource(R.string.settings_explanation_cache),
-            stringResource(R.string.settings_explanation_cache_summary)
-        ) { explanationCacheOpen = true }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        SettingsDisclosure(
-            stringResource(R.string.settings_narration_cache),
-            stringResource(R.string.settings_narration_cache_summary)
-        ) { narrationCacheOpen = true }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        SettingsDisclosure(
-            stringResource(R.string.developer_logs_title),
-            stringResource(R.string.developer_logs_summary)
-        ) { developerLogsOpen = true }
-        Text(stringResource(R.string.settings_reading_location), style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SettingsGroup {
+            SettingsDisclosure(
+                stringResource(R.string.settings_pronunciation),
+                stringResource(if (settings.accent == "US") R.string.settings_us_english else R.string.settings_uk_english),
+                icon = Icons.Outlined.Headphones
+            ) { pronunciationOpen = true }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SettingsDisclosure(
+                stringResource(R.string.settings_explanation_cache),
+                stringResource(R.string.settings_explanation_cache_summary),
+                icon = Icons.Outlined.Storage
+            ) { explanationCacheOpen = true }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SettingsDisclosure(
+                stringResource(R.string.settings_narration_cache),
+                stringResource(R.string.settings_narration_cache_summary),
+                icon = Icons.Outlined.GraphicEq
+            ) { narrationCacheOpen = true }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SettingsDisclosure(
+                stringResource(R.string.developer_logs_title),
+                stringResource(R.string.developer_logs_summary),
+                icon = Icons.Outlined.BugReport
+            ) { developerLogsOpen = true }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(stringResource(R.string.settings_reading_location), Modifier.padding(horizontal = 2.dp),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (pronunciationOpen) {
         Dialog(onDismissRequest = { pronunciationOpen = false }) {
-            Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
-                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+            Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     PronunciationSection(settings, playback, speech, onSave)
                     TextButton(onClick = { pronunciationOpen = false }, modifier = Modifier.align(Alignment.End)) {
@@ -202,6 +221,21 @@ fun SettingsScreen(
     }
 }
 
+/**
+ * A soft paper block that carries related settings rows on one shared rounded surface, with
+ * hairline dividers between rows instead of the page background showing through.
+ */
+@Composable
+private fun SettingsGroup(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(content = content)
+    }
+}
+
 
 @Composable
 private fun ExplanationCacheDialog(
@@ -216,8 +250,9 @@ private fun ExplanationCacheDialog(
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { bytes = runCatching { onLoadBytes() }.getOrNull() }
     Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(stringResource(R.string.settings_explanation_cache), style = MaterialTheme.typography.titleLarge)
                 Text(stringResource(R.string.settings_explanation_cache_detail),
@@ -280,8 +315,9 @@ private fun NarrationCacheDialog(
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { bytes = runCatching { onLoadBytes() }.getOrNull() }
     Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(stringResource(R.string.settings_narration_cache), style = MaterialTheme.typography.titleLarge)
                 Text(stringResource(R.string.settings_narration_cache_detail),
@@ -380,26 +416,32 @@ private fun DeveloperLogDialog(
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.widthIn(max = 640.dp).fillMaxWidth(0.94f).fillMaxHeight(0.86f),
-            shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+            Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.developer_logs_title), style = MaterialTheme.typography.titleLarge)
-                Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    when {
-                        loading -> Column(Modifier.align(Alignment.Center),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
-                            Text(stringResource(R.string.developer_logs_loading),
+                Surface(Modifier.weight(1f).fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = MaterialTheme.shapes.small,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
+                        when {
+                            loading -> Column(Modifier.align(Alignment.Center),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                                Text(stringResource(R.string.developer_logs_loading),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            failed -> Text(stringResource(R.string.developer_logs_error),
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        failed -> Text(stringResource(R.string.developer_logs_error),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error)
-                        else -> SelectionContainer {
-                            Text(report.orEmpty(), style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = MaterialTheme.colorScheme.error)
+                            else -> SelectionContainer {
+                                Text(report.orEmpty(), style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }
@@ -631,8 +673,9 @@ private fun ModelConfigurationDialog(
     val incompleteMessage = stringResource(R.string.settings_connection_test_incomplete)
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth().padding(16.dp).imePadding().heightIn(max = 640.dp), shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(stringResource(R.string.settings_ai_profile), style = MaterialTheme.typography.headlineMedium)
                 OutlinedTextField(draft.name, { update(draft.copy(name = it)) }, label = { Text(stringResource(R.string.settings_profile_name)) },
                     modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = !testing)

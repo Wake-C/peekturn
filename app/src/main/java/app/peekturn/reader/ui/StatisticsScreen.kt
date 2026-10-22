@@ -2,25 +2,33 @@ package app.peekturn.reader.ui
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.peekturn.reader.R
 import app.peekturn.reader.model.Book
 import app.peekturn.reader.model.ReadingStats
@@ -111,20 +119,23 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
     val summary = remember(stats, today, period) { readingSummary(stats, today, period) }
     val totals = remember(stats.books) { stats.books.groupBy { it.bookId }.mapValues { (_, records) -> records.sumOf { it.seconds.coerceAtLeast(0L) } } }
     val recent = remember(books, totals) { books.filter { (totals[it.id] ?: 0L) > 0 }.sortedByDescending { it.lastReadAt } }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 24.dp)) {
         item { PeekturnScreenHeader(stringResource(R.string.shell_statistics_title)) }
+        item { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant) }
         item {
-            HorizontalDivider()
             BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
                 val horizontal = maxWidth / LocalDensity.current.fontScale >= 300.dp
                 if (horizontal) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        TimeMetric(R.string.shell_metric_today, summary.today, Modifier.weight(1f), compact = true)
-                        TimeMetric(R.string.shell_metric_week, summary.week, Modifier.weight(1f), compact = true,
-                            accessibleLabel = R.string.shell_metric_week_description)
-                        TimeMetric(R.string.shell_metric_total, summary.total, Modifier.weight(1f), compact = true,
-                            accessibleLabel = R.string.shell_metric_total_description)
+                    // A statistics leads with today's figure, then the week and total as one
+                    // secondary row, instead of three equal columns.
+                    Column {
+                        TimeMetric(R.string.shell_metric_today, summary.today, hero = true)
+                        Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(40.dp)) {
+                            TimeMetric(R.string.shell_metric_week, summary.week, Modifier.weight(1f), compact = true,
+                                accessibleLabel = R.string.shell_metric_week_description)
+                            TimeMetric(R.string.shell_metric_total, summary.total, Modifier.weight(1f), compact = true,
+                                accessibleLabel = R.string.shell_metric_total_description)
+                        }
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -134,62 +145,95 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
                     }
                 }
             }
-            HorizontalDivider()
         }
+        item { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant) }
         item {
-            Text(stringResource(R.string.shell_reading_time), style = MaterialTheme.typography.titleLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(7, 30).forEach { days ->
-                    FilterChip(selected = period == days, onClick = { period = days }, label = { Text(stringResource(R.string.shell_days, days)) },
-                        modifier = Modifier.heightIn(min = 48.dp))
+            Column(Modifier.padding(top = 24.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.shell_reading_time), style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f).padding(end = 12.dp))
+                    // A period control is a quiet segmented pill: soft track, sheet-coloured thumb.
+                    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Row(Modifier.padding(3.dp).selectableGroup()) {
+                            listOf(7, 30).forEach { days ->
+                                val selected = period == days
+                                Box(
+                                    Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(16.dp))
+                                        .background(if (selected) MaterialTheme.colorScheme.surface else Color.Transparent)
+                                        .selectable(selected = selected, onClick = { period = days }, role = Role.RadioButton)
+                                        .padding(horizontal = 14.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(stringResource(R.string.shell_days, days), style = MaterialTheme.typography.labelMedium,
+                                        color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                                }
+                            }
+                        }
+                    }
                 }
+                Text(stringResource(R.string.shell_reading_time_last_days,
+                        readingDurationText(summary.daily.sumOf { it.second }), period),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 12.dp))
             }
-            Text(stringResource(R.string.shell_reading_time_last_days,
-                    readingDurationText(summary.daily.sumOf { it.second }), period),
-                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         }
         item { ReadingChart(summary.daily) }
         if (summary.total == 0L) item {
-            Text(stringResource(R.string.shell_no_reading_time), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.shell_no_reading_time), style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(top = 12.dp))
         }
-        if (recent.isNotEmpty()) item { Text(stringResource(R.string.shell_recent_books), style = MaterialTheme.typography.titleLarge) }
+        if (recent.isNotEmpty()) item {
+            Text(stringResource(R.string.shell_recent_books), style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(top = 28.dp, bottom = 2.dp))
+        }
         items(recent, key = { it.id }) { book ->
-            Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = stringResource(R.string.shell_read_book, book.title)) { onOpen(book) }.padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                BookCover(book, Modifier.width(56.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(book.title, style = MaterialTheme.typography.titleMedium)
-                    Text(book.author.ifBlank { stringResource(R.string.shell_unknown_author) }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                    Text(readingDurationText(totals[book.id] ?: 0L), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
+            Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = stringResource(R.string.shell_read_book, book.title)) { onOpen(book) }
+                    .padding(vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                BookCover(book, Modifier.width(48.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(book.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                    Text(book.author.ifBlank { stringResource(R.string.shell_unknown_author) }, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall)
                 }
+                Text(compactDurationText(totals[book.id] ?: 0L), color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false)
             }
-            HorizontalDivider()
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
 }
 
 @Composable
 private fun TimeMetric(@StringRes label: Int, seconds: Long, modifier: Modifier = Modifier, compact: Boolean = false,
-    @StringRes accessibleLabel: Int = label) {
+    hero: Boolean = false, @StringRes accessibleLabel: Int = label) {
     val duration = readingDurationText(seconds)
     val description = stringResource(R.string.shell_metric_description, stringResource(accessibleLabel), duration)
+    // A stats figures are quiet and tabular; the hero form takes the display scale, the secondary
+    // row stays at section scale so three metrics still share one baseline.
+    val figure = when {
+        hero -> MaterialTheme.typography.headlineLarge.copy(fontSize = 56.sp, lineHeight = 60.sp,
+            fontWeight = FontWeight.Medium, letterSpacing = (-2.2).sp)
+        compact -> MaterialTheme.typography.headlineMedium.copy(fontSize = 26.sp, lineHeight = 30.sp,
+            fontWeight = FontWeight.Medium, letterSpacing = (-0.8).sp)
+        else -> MaterialTheme.typography.headlineMedium.copy(fontSize = 28.sp, lineHeight = 34.sp,
+            fontWeight = FontWeight.Medium, letterSpacing = (-0.4).sp)
+    }
     Column(modifier.clearAndSetSemantics { contentDescription = description },
-        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(stringResource(label), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         // The figure and its unit are one inseparable mark: no wrap, no orphaned "min" on a second line.
         Text(compactDurationText(seconds), maxLines = 1, softWrap = false,
-            style = (if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
-                .copy(fontFeatureSettings = "tnum"))
+            style = figure.copy(fontFeatureSettings = "tnum"))
     }
 }
 
 @Composable
 private fun ReadingChart(days: List<Pair<LocalDate, Long>>) {
     val accent = MaterialTheme.colorScheme.primary
+    val softAccent = MaterialTheme.colorScheme.primaryContainer
     val grid = MaterialTheme.colorScheme.outlineVariant
-    // Bars carry the app's smallest rectangle corner, the same one the search field is drawn with, so a
-    // data mark belongs to the same family as the controls around it.
-    val barCorner = MaterialTheme.shapes.extraSmall.topStart
     val max = days.maxOfOrNull { it.second }?.coerceAtLeast(1L) ?: 1L
     val datePattern = stringResource(R.string.shell_chart_date_pattern)
     val dateFormat = remember(datePattern) { DateTimeFormatter.ofPattern(datePattern) }
@@ -199,26 +243,28 @@ private fun ReadingChart(days: List<Pair<LocalDate, Long>>) {
         dayDescriptions += stringResource(R.string.shell_chart_day, day.format(dateFormat), readingDurationText(seconds))
     }
     val description = stringResource(R.string.shell_chart_description, dayDescriptions.joinToString(separator))
-    Column {
+    Column(Modifier.padding(top = 8.dp)) {
         Text(stringResource(R.string.shell_peak_day, readingDurationText(days.maxOfOrNull { it.second } ?: 0L)),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Canvas(Modifier.fillMaxWidth().height(168.dp).padding(vertical = 12.dp).semantics { contentDescription = description }) {
+        Canvas(Modifier.fillMaxWidth().height(168.dp).padding(top = 10.dp, bottom = 12.dp).semantics { contentDescription = description }) {
             for (line in 0..2) {
                 val y = size.height * line / 2f
                 drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
             }
             val slot = size.width / days.size.coerceAtLeast(1)
-            val barWidth = slot * .55f
-            val corner = CornerRadius(barCorner.toPx(Size.Zero, this))
+            val barWidth = slot * .52f
+            // A chart: soft blue bars, today in the full accent, with a 4dp top corner.
+            val corner = CornerRadius(4.dp.toPx())
             days.forEachIndexed { index, (_, seconds) ->
                 if (seconds > 0L) {
                     val height = size.height * (seconds.toDouble() / max).toFloat()
-                    drawRoundRect(accent, topLeft = Offset(slot * index + (slot - barWidth) / 2f, size.height - height),
+                    drawRoundRect(if (index == days.lastIndex) accent else softAccent,
+                        topLeft = Offset(slot * index + (slot - barWidth) / 2f, size.height - height),
                         size = Size(barWidth, height), cornerRadius = corner)
                 }
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(days.first().first.format(dateFormat), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(days.last().first.format(dateFormat), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

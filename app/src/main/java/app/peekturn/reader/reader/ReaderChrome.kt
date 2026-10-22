@@ -2,17 +2,11 @@
 
 package app.peekturn.reader.reader
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.outlined.Toc
-import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -28,9 +22,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.peekturn.reader.R
 import app.peekturn.reader.narration.NarrationState
 import app.peekturn.reader.ui.isDarkTheme
@@ -72,18 +68,27 @@ private const val SELECTION_ALPHA = 0.32f
     val ink = scheme.onBackground
     val labelInk = ink.copy(alpha = if (isDarkTheme(theme)) 0.62f else 0.72f)
     val labelSize = with(LocalDensity.current) { 11.dp.toSp() }
+    val labelStyle = TextStyle(
+        fontSize = labelSize,
+        lineHeight = labelSize * 1.25f,
+        letterSpacing = 0.6.sp
+    )
+    val progressStyle = labelStyle.copy(
+        letterSpacing = 0.4.sp,
+        fontFeatureSettings = "tnum"
+    )
     Box(Modifier.fillMaxSize().windowInsetsPadding(stableInsets)) {
         val title = chapter.trim()
         if (title.isNotEmpty()) {
-            Text(title, color = labelInk, fontSize = labelSize, lineHeight = labelSize * 1.25f,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            Text(title, color = labelInk, style = labelStyle, maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.align(Alignment.TopStart).fillMaxWidth(0.72f)
                     .padding(start = 20.dp, top = 2.dp))
         }
         val position = progress.trim()
         if (position.isNotEmpty()) {
-            Text(position, color = labelInk, fontSize = labelSize, lineHeight = labelSize * 1.25f,
-                maxLines = 1, modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(0.72f)
+            Text(position, color = labelInk, style = progressStyle, maxLines = 1,
+                modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(0.72f)
                     .padding(start = 20.dp, bottom = 6.dp))
         }
     }
@@ -174,18 +179,18 @@ private const val SELECTION_ALPHA = 0.32f
     ).only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
     Box(Modifier.fillMaxSize().windowInsetsPadding(insets), contentAlignment = Alignment.BottomCenter) {
         Row(
-            modifier = Modifier.padding(bottom = 2.dp),
+            modifier = Modifier.padding(bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
             CompactTransportButton(
-                icon = Icons.Filled.SkipPrevious,
+                icon = readerTransportPrevious,
                 contentDescription = stringResource(R.string.reader_narration_previous),
                 accent = false,
                 onClick = onPrevious
             )
             CompactTransportButton(
-                icon = if (state.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                icon = if (state.playing) readerTransportPause else readerTransportPlay,
                 contentDescription = stringResource(
                     if (state.playing) R.string.reader_narration_pause else R.string.reader_narration_play
                 ),
@@ -193,7 +198,7 @@ private const val SELECTION_ALPHA = 0.32f
                 onClick = onPlayPause
             )
             CompactTransportButton(
-                icon = Icons.Filled.SkipNext,
+                icon = readerTransportNext,
                 contentDescription = stringResource(R.string.reader_narration_next),
                 accent = false,
                 onClick = onNext
@@ -212,7 +217,9 @@ private const val SELECTION_ALPHA = 0.32f
         Icon(
             icon,
             contentDescription = contentDescription,
-            tint = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+            tint = if (accent) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(24.dp)
         )
     }
 }
@@ -233,14 +240,18 @@ private const val SELECTION_ALPHA = 0.32f
     ) {
         Column {
             Row(
-                Modifier.fillMaxWidth().windowInsetsPadding(insets).heightIn(min = 52.dp),
+                Modifier.fillMaxWidth().windowInsetsPadding(insets).heightIn(min = 56.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
                     onClick = onClose,
                     modifier = Modifier.padding(start = 4.dp).size(48.dp)
                 ) {
-                    Icon(Icons.Filled.Close, contentDescription = closeLabel)
+                    Icon(
+                        toolbarClose,
+                        contentDescription = closeLabel,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
                 Text(
                     title,
@@ -276,15 +287,17 @@ private const val SELECTION_ALPHA = 0.32f
         Column {
             HorizontalDivider(thickness = 1.dp, color = scheme.outlineVariant)
             Row(
-                Modifier.fillMaxWidth().windowInsetsPadding(navigationInset).heightIn(min = 64.dp),
+                Modifier.fillMaxWidth().windowInsetsPadding(navigationInset).heightIn(min = 58.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 readerToolbarEntries.forEach { entry ->
                     val label = stringResource(entry.labelRes)
+                    val active = entry == ReaderToolbarEntry.READ_ALOUD && narrationActive
                     ReaderToolbarAction(
                         entry = entry,
                         label = label,
-                        ink = if (entry == ReaderToolbarEntry.READ_ALOUD && narrationActive) scheme.primary else scheme.onSurface,
+                        ink = if (active) scheme.primary else scheme.onSurface,
+                        active = active,
                         modifier = Modifier.weight(1f),
                         onClick = when (entry) {
                             ReaderToolbarEntry.CONTENTS -> onContents
@@ -303,43 +316,55 @@ private const val SELECTION_ALPHA = 0.32f
     entry: ReaderToolbarEntry,
     label: String,
     ink: Color,
+    active: Boolean,
     modifier: Modifier,
     onClick: () -> Unit
 ) {
     val icon = when (entry) {
-        ReaderToolbarEntry.CONTENTS -> Icons.Outlined.Toc
+        ReaderToolbarEntry.CONTENTS -> toolbarContents
         ReaderToolbarEntry.TYPOGRAPHY -> toolbarTypography
-        ReaderToolbarEntry.OPTIONS -> Icons.Outlined.Tune
+        ReaderToolbarEntry.OPTIONS -> toolbarOptions
         ReaderToolbarEntry.READ_ALOUD -> toolbarSpeaker
     }
     Column(
         modifier = modifier
-            .heightIn(min = 64.dp)
-            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick)
-            .padding(horizontal = 2.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .heightIn(min = 58.dp)
+            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // A's active rail is a short accent rule at the top of the entry, not a second icon colour.
+        Box(
+            Modifier.fillMaxWidth(0.44f).height(2.dp).background(
+                if (active) ink else Color.Transparent,
+                RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp)
+            )
+        )
+        Spacer(Modifier.height(6.dp))
         Icon(
             icon,
             contentDescription = null,
             tint = ink,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(21.dp)
         )
         Spacer(Modifier.height(3.dp))
         Text(
             label,
             color = ink,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                letterSpacing = 0.2.sp
+            ),
             textAlign = TextAlign.Center,
             maxLines = 2
         )
+        Spacer(Modifier.height(12.dp))
     }
 }
 
-// The stock outlined set mixes thick bars and a heavy filled "Tt", which read as different
-// families beside the hairline magnifier. The rail's own mark shares one hairline weight on
-// Material's 24dp grid, so the four glyphs carry the same stroke and optical size.
+// The stock outlined set mixes thick bars with the text mark, which read as different families
+// beside the hairline magnifier. Every glyph the reader draws shares one hairline weight on
+// Material's 24dp grid, so the rail, top bar and transport carry the same stroke and optical size.
 private const val RAIL_STROKE = 1.6f
 
 private fun railPath(builder: ImageVector.Builder, pathBuilder: PathBuilder.() -> Unit): ImageVector.Builder =
@@ -396,6 +421,80 @@ private val toolbarSpeaker: ImageVector = ImageVector.Builder(
         moveTo(19f, 5.5f)
         arcToRelative(9f, 9f, 0f, isMoreThanHalf = false, isPositiveArc = true, dx1 = 0f, dy1 = 13f)
     }
+}.build()
+
+/** The contents mark is a three-line list with a small leading bullet per row. */
+private val toolbarContents: ImageVector = ImageVector.Builder(
+    name = "PeekturnToolbarContents", defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f
+).apply {
+    railPath(this) { moveTo(9.5f, 6.5f); lineTo(20f, 6.5f) }
+    railPath(this) { moveTo(9.5f, 12f); lineTo(20f, 12f) }
+    railPath(this) { moveTo(9.5f, 17.5f); lineTo(20f, 17.5f) }
+    railPath(this) { ring(4.8f, 6.5f, 0.8f) }
+    railPath(this) { ring(4.8f, 12f, 0.8f) }
+    railPath(this) { ring(4.8f, 17.5f, 0.8f) }
+}.build()
+
+/** Two slider tracks with their handles, drawn on the same hairline as the rest of the rail. */
+private val toolbarOptions: ImageVector = ImageVector.Builder(
+    name = "PeekturnToolbarOptions", defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f
+).apply {
+    railPath(this) { moveTo(4f, 8.5f); lineTo(20f, 8.5f) }
+    railPath(this) { moveTo(4f, 15.5f); lineTo(20f, 15.5f) }
+    railPath(this) { ring(9f, 8.5f, 2.1f) }
+    railPath(this) { ring(15f, 15.5f, 2.1f) }
+}.build()
+
+/** The close mark used by the top bar and the contents header. */
+internal val toolbarClose: ImageVector = ImageVector.Builder(
+    name = "PeekturnToolbarClose", defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f
+).apply {
+    railPath(this) { moveTo(6f, 6f); lineTo(18f, 18f) }
+    railPath(this) { moveTo(18f, 6f); lineTo(6f, 18f) }
+}.build()
+
+/** Transport glyphs: outlined on the same grid so the compact footer and card agree. */
+internal val readerTransportPrevious: ImageVector = ImageVector.Builder(
+    name = "PeekturnTransportPrevious", defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f
+).apply {
+    railPath(this) { moveTo(7f, 5.5f); lineTo(7f, 18.5f) }
+    railPath(this) { moveTo(18.5f, 5.5f); lineTo(9.5f, 12f); lineTo(18.5f, 18.5f); close() }
+}.build()
+
+internal val readerTransportNext: ImageVector = ImageVector.Builder(
+    name = "PeekturnTransportNext", defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f
+).apply {
+    railPath(this) { moveTo(17f, 5.5f); lineTo(17f, 18.5f) }
+    railPath(this) { moveTo(5.5f, 5.5f); lineTo(14.5f, 12f); lineTo(5.5f, 18.5f); close() }
+}.build()
+
+internal val readerTransportPlay: ImageVector = ImageVector.Builder(
+    name = "PeekturnTransportPlay", defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f
+).apply {
+    railPath(this) { moveTo(8f, 5.5f); lineTo(18.5f, 12f); lineTo(8f, 18.5f); close() }
+}.build()
+
+internal val readerTransportPause: ImageVector = ImageVector.Builder(
+    name = "PeekturnTransportPause", defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f
+).apply {
+    railPath(this) { moveTo(9.5f, 5.5f); lineTo(9.5f, 18.5f) }
+    railPath(this) { moveTo(14.5f, 5.5f); lineTo(14.5f, 18.5f) }
+}.build()
+
+/** A double chevron stays distinct from the single-skip mark at the card's icon size. */
+internal val readerTransportNextParagraph: ImageVector = ImageVector.Builder(
+    name = "PeekturnTransportNextParagraph", defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f
+).apply {
+    railPath(this) { moveTo(6.5f, 5.5f); lineTo(12.5f, 12f); lineTo(6.5f, 18.5f) }
+    railPath(this) { moveTo(12.5f, 5.5f); lineTo(18.5f, 12f); lineTo(12.5f, 18.5f) }
 }.build()
 
 /** Binoculars mark the whole-book search entry inside the contents header. */

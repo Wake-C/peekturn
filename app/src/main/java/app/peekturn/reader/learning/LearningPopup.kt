@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.window.Popup
@@ -160,7 +161,7 @@ fun LearningPopup(
                     if (event.changes.any { it.pressed && !it.previousPressed }) activity?.onUserInteraction()
                 }
             }
-        }, shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.surface,
+        }, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), tonalElevation = 0.dp) {
             val accent = latestSettings.accent
             val sentenceProvider = latestSettings.sentenceSpeechProvider
@@ -169,21 +170,22 @@ fun LearningPopup(
             val loading = if (dictionaryTab) dictionaryLoading else explanation.loading
             val error = if (dictionaryTab) dictionaryError else explanationErrorMessage
             Column {
-                Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 4.dp),
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(context.selection, modifier = Modifier.weight(1f).heightIn(max = height * .2f)
-                        .verticalScroll(rememberScrollState()), fontSize = 20.sp, lineHeight = 25.sp,
+                        .verticalScroll(rememberScrollState()), fontSize = 21.sp, lineHeight = 26.sp,
                         fontFamily = FontFamily.Serif)
                     SpeakButton(context.selection, speech, playback.text, playback.playing) {
                         speech.speakSelection(context.selection, accent, sentenceProvider)
                     }
                     IconButton(onClick = { close() }, modifier = Modifier.size(48.dp)) {
-                        Icon(popupClose, contentDescription = stringResource(R.string.reader_lookup_close_description), modifier = Modifier.size(20.dp))
+                        Icon(popupClose, contentDescription = stringResource(R.string.reader_lookup_close_description),
+                            modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 val details = listOf(phonetic.takeIf { it.isNotBlank() }, partOfSpeech.takeIf { it.isNotBlank() })
                     .filterNotNull().joinToString(" · ")
-                if (details.isNotEmpty()) Text(details, modifier = Modifier.padding(horizontal = 14.dp),
+                if (details.isNotEmpty()) Text(details, modifier = Modifier.padding(horizontal = 16.dp),
                     fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.fillMaxWidth().selectableGroup()) {
@@ -195,18 +197,22 @@ fun LearningPopup(
                 HorizontalDivider()
                 key(context, dictionaryTab) {
                     Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())
-                        .padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        .padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         val meaning = if (dictionaryTab) entry?.meaning.orEmpty() else answer.meaning
                         if (meaning.isNotBlank()) Text(meaning, fontFamily = FontFamily.Serif,
-                            fontSize = 17.sp, lineHeight = 23.sp)
+                            fontSize = 17.sp, lineHeight = 26.sp)
                         if (!dictionaryTab) {
                             if (answer.context.isNotBlank()) Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Text(stringResource(R.string.reader_lookup_section_context), fontSize = 12.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.primary)
+                                Text(stringResource(R.string.reader_lookup_section_context),
+                                    fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold,
+                                    letterSpacing = 0.2.sp, color = MaterialTheme.colorScheme.primary)
                                 Text(answer.context, fontSize = 15.sp, lineHeight = 21.sp)
                             }
                             if (answer.examples.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(stringResource(R.string.reader_lookup_section_examples), fontSize = 12.sp, lineHeight = 16.sp, color = MaterialTheme.colorScheme.primary)
-                                answer.examples.forEach { example ->
+                                Text(stringResource(R.string.reader_lookup_section_examples),
+                                    fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold,
+                                    letterSpacing = 0.2.sp, color = MaterialTheme.colorScheme.primary)
+                                answer.examples.forEachIndexed { exampleIndex, example ->
                                     // Both examples share one trailing icon column, and each speaker
                                     // stays on its own first line: a wrapped example can no longer
                                     // push its glyph into the middle of the text block.
@@ -223,6 +229,10 @@ fun LearningPopup(
                                         SpeakButton(example.spokenText, speech, playback.text, playback.playing, firstLine = true) {
                                             speech.speakExample(example.spokenText, accent, sentenceProvider)
                                         }
+                                    }
+                                    if (exampleIndex < answer.examples.lastIndex) {
+                                        HorizontalDivider(Modifier.padding(vertical = 2.dp),
+                                            color = MaterialTheme.colorScheme.outlineVariant)
                                     }
                                 }
                             }
@@ -290,10 +300,14 @@ private fun LookupTab(label: String, selected: Boolean, modifier: Modifier, onCl
         verticalArrangement = Arrangement.Center) {
         Box(Modifier.weight(1f, fill = false).padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
             Text(label, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1,
+                fontWeight = if (selected) FontWeight.SemiBold else null,
                 color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Box(Modifier.fillMaxWidth().height(2.dp).background(
-            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface))
+        Box(Modifier.fillMaxWidth().height(2.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth(.56f).height(2.dp).background(
+                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                RoundedCornerShape(2.dp)))
+        }
     }
 }
 
@@ -308,7 +322,8 @@ private fun SpeakButton(
             contentAlignment = if (firstLine) Alignment.TopCenter else Alignment.Center) {
             Icon(if (active) Icons.Outlined.Stop else Icons.AutoMirrored.Outlined.VolumeUp,
                 contentDescription = stringResource(if (active) R.string.reader_lookup_stop_pronouncing else R.string.reader_lookup_pronounce),
-                modifier = Modifier.size(20.dp))
+                modifier = Modifier.size(20.dp),
+                tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

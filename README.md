@@ -4,7 +4,7 @@
 
 An Android reader for finishing real English books.
 
-**[Download the Android APK](https://github.com/Wake-C/peekturn/releases/latest)** · [简体中文](README.zh-CN.md) · Version 1.0.1 · Android 8.0+
+**[Download the Android APK](https://github.com/Wake-C/peekturn/releases/latest)** · [简体中文](README.zh-CN.md) · Version 1.2.3 · Android 8.0+
 
 ## Have you ever finished an English book?
 
@@ -36,7 +36,7 @@ A 28-second tour that loops: read, listen, look up a word, and import an article
 - Shows an explanation for the selected word or phrase, including its meaning in the current sentence and examples.
 - Includes an offline dictionary, online pronunciation for words and examples, a US or UK accent choice, and optional autoplay.
 - Reads continuously from the current sentence, with play, pause, sentence and paragraph navigation, speed and stop. It prepares upcoming paragraphs, keeps playing with the screen off, and saves completed clips privately for offline replay, including Android system speech.
-- Offers five reading fonts, adjustable size, spacing and margins, five themes, and an interface language choice: Follow system, English or 简体中文.
+- Offers five reading fonts, adjustable size, spacing and margins, five paper and dark themes with blue-accent controls, and an interface language choice: Follow system, English or 简体中文.
 - Shows your actual reading time. There are no invented statistics or demo answers.
 - A fresh install includes *The Prophet* by Kahlil Gibran from Project Gutenberg. It is public domain in the USA and stays in your local library like any imported book.
 
