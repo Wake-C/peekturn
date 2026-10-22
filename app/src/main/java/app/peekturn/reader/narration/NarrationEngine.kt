@@ -35,7 +35,7 @@ internal data class NarrationSettings(
     val speed: Float
 ) : TtsEngine.Settings
 
-/** The only narration preference is language and playback speed; the voice is fixed per session. */
+/** Readium preferences own language and playback speed; system engine configuration is resolved separately. */
 @ExperimentalReadiumApi
 internal data class NarrationPreferences(
     override val language: Language? = null,
@@ -61,7 +61,7 @@ internal sealed class NarrationError(
 ) : TtsEngine.Error {
     class Unavailable : NarrationError("The read-aloud service returned no complete audio.")
     class TooLong : NarrationError("The sentence is too long to read aloud in one piece.")
-    class InvalidAudio : NarrationError("The read-aloud answer was not complete MPEG audio.")
+    class InvalidAudio : NarrationError("The read-aloud answer was not complete supported audio.")
     class TooLarge : NarrationError("The sentence audio is larger than the cache allows.")
     class Storage : NarrationError("The sentence audio could not be stored.")
     class Playback : NarrationError("The cached sentence audio could not be played.")
@@ -72,17 +72,24 @@ internal sealed class NarrationError(
 
 /**
  * A Readium [TtsEngine] backed by the persistent sentence cache. It receives one complete sentence
- * from the official tokenizer, plays exactly that sentence, and never falls back to a second
- * provider or to device speech: narration either plays the requested sentence or stops with an error.
+ * from the official tokenizer, plays exactly that sentence, and never falls back to a second source:
+ * narration either plays the requested sentence or stops with an error.
+ *
+ * The engine is source-agnostic: online MP3 and Android file-rendered WAV both arrive through
+ * [NarrationAudioResolver] and play through the same MediaPlayer unit. A pause keeps only the clip
+ * the reader actually heard; resuming resolves the sentence again so a changed voice, engine or
+ * provider configuration cannot replay an old file, and the paused offset is applied only when the
+ * resolution returns that same file within the same reading intent.
  */
 @ExperimentalReadiumApi
 internal class CachedNarrationEngine(
     application: Application,
     private val accent: String,
-    private val synthesizer: NarrationSynthesizer,
-    private val onStarted: (text: String, fromCache: Boolean) -> Unit,
+    private val resolver: NarrationAudioResolver,
+    private val onStarted: (text: String, audio: NarrationAudio) -> Unit,
     private val resumePolicy: NarrationResumePolicy = NarrationResumePolicy(),
-    private val provider: SentenceSpeechProvider = SentenceSpeechProvider.MICROSOFT
+    private val provider: SentenceSpeechProvider = SentenceSpeechProvider.MICROSOFT,
+    private val onCompleted: () -> Unit = {}
 ) : TtsEngine<NarrationSettings, NarrationPreferences, NarrationError, NarrationVoice> {
 
     private val main = Handler(Looper.getMainLooper())
@@ -92,7 +99,6 @@ internal class CachedNarrationEngine(
     )
     override val settings: StateFlow<NarrationSettings> = mutableSettings.asStateFlow()
 
-    private val voice = narrationVoice(provider, accent)
     override val voices: Set<NarrationVoice> = when (provider) {
         SentenceSpeechProvider.MICROSOFT -> buildSet {
             narrationVoice("US")?.let { add(NarrationVoice(Language(Locale.US))) }
@@ -140,10 +146,6 @@ internal class CachedNarrationEngine(
 
     override fun speak(requestId: TtsEngine.RequestId, text: String, language: Language?) {
         if (closed) return
-        if (voice == null) {
-            listener?.onError(requestId, NarrationError.Unavailable())
-            return
-        }
         // A stop caused by Readium's pause keeps one checkpoint. The same sentence requested again
         // at the same reading intent is the resume; anything else starts at zero.
         val resume = pausePoint?.takeIf {
@@ -158,21 +160,26 @@ internal class CachedNarrationEngine(
         clipGeneration = resumePolicy.checkpointGeneration()
         job = scope.launch {
             val result = try {
-                // Reuse the exact paused file rather than resolving or synthesizing the sentence
-                // again. Only an externally removed clip falls back to the ordinary cache path.
-                if (resume != null && resume.audio.file.isFile) {
-                    Result.success(resume.audio)
-                } else {
-                    synthesizer.audioFor(text)
-                }
+                // Always resolve the current source configuration. The paused clip is only a
+                // position reference; it is never replayed just because its file still exists.
+                resolver.audioFor(text)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
+            } catch (failure: NarrationFailure) {
+                Result.failure(failure)
             } catch (_: Exception) {
                 Result.failure(NarrationFailure.Unavailable())
             }
             if (closed || active != requestId) return@launch
             result.fold(
-                onSuccess = { audio -> play(audio, requestId, resume?.positionMs ?: 0) },
+                onSuccess = { audio ->
+                    // Only the same resolved file at the same reading intent may carry the offset.
+                    val pausedMs = resume
+                        ?.takeIf { it.audio.file.absolutePath == audio.file.absolutePath }
+                        ?.positionMs
+                        ?: 0
+                    play(audio, requestId, pausedMs)
+                },
                 onFailure = { failure ->
                     fail(
                         requestId,
@@ -187,14 +194,15 @@ internal class CachedNarrationEngine(
         // Readium implements pause as cancellation followed by stop(). Keeping the checkpoint here
         // is what lets the next speak() of the same sentence continue at the audible position.
         stopPlayback(notify = true, preserve = true)
-        synthesizer.cancelPending()
+        resolver.cancelPending()
     }
 
     override fun close() {
         if (closed) return
         closed = true
         stopPlayback(notify = false, preserve = false)
-        synthesizer.cancelPending()
+        // The resolver owns TTS clients and buffer scope; the session is over, so release them.
+        resolver.close()
         scope.cancel()
         listener = null
     }
@@ -245,13 +253,13 @@ internal class CachedNarrationEngine(
                     // clip's prefix before the seek lands. Seek first, then start and set speed.
                     prepared.setOnSeekCompleteListener { seeked ->
                         if (closed || active != requestId || media !== seeked) return@setOnSeekCompleteListener
-                        beginPlayback(seeked, requestId, audio.fromCache)
+                        beginPlayback(seeked, requestId, audio)
                     }
                     if (runCatching { prepared.seekTo(resumeMs) }.isFailure) {
                         fail(requestId, NarrationError.Playback())
                     }
                 } else {
-                    beginPlayback(prepared, requestId, audio.fromCache)
+                    beginPlayback(prepared, requestId, audio)
                 }
             }
             player.setOnCompletionListener { completed ->
@@ -262,6 +270,7 @@ internal class CachedNarrationEngine(
                 pausePoint = null
                 currentAudio = null
                 runCatching { completed.release() }
+                runCatching { onCompleted() }
                 listener?.onDone(requestId)
             }
             player.setOnErrorListener { failed, _, _ ->
@@ -279,7 +288,7 @@ internal class CachedNarrationEngine(
     private fun beginPlayback(
         prepared: MediaPlayer,
         requestId: TtsEngine.RequestId,
-        fromCache: Boolean
+        audio: NarrationAudio
     ) {
         if (closed || active != requestId || media !== prepared) return
         val startedPlaying = runCatching { prepared.start() }.isSuccess
@@ -292,7 +301,7 @@ internal class CachedNarrationEngine(
         // playback, and some implementations accept the speed only once playback has begun.
         runCatching { prepared.playbackParams = prepared.playbackParams.setSpeed(speed) }
         listener?.onStart(requestId)
-        runCatching { onStarted(currentText, fromCache) }
+        runCatching { onStarted(currentText, audio) }
     }
 
     private fun fail(requestId: TtsEngine.RequestId, error: NarrationError) {
@@ -363,22 +372,35 @@ internal fun NarrationFailure.toNarrationError(): NarrationError = when (this) {
     is NarrationFailure.TooLarge -> NarrationError.TooLarge()
     is NarrationFailure.Storage -> NarrationError.Storage()
     is NarrationFailure.Unavailable -> NarrationError.Unavailable()
+    is NarrationFailure.Device -> NarrationError.Device(AndroidSpeechFailure(code))
+}
+
+/** A numeric platform failure stays numeric so no real error can read like success. */
+internal class AndroidSpeechFailure(
+    val code: Int,
+    detail: String = "The device speech engine failed."
+) : Error {
+    override val message: String = "$detail (code $code)"
+    override val cause: Error? = null
 }
 
 /**
- * The Readium TTS provider for cached online narration. It uses the official sentence tokenizer,
- * maps speed to Media3 playback parameters, and keeps the session fixed to the selected provider's
- * voice: the reader's US or UK Microsoft voice, or Baidu's single English voice.
+ * The Readium TTS provider for cached narration. It uses the official sentence tokenizer, maps
+ * speed to Media3 playback parameters, and keeps the session fixed to the chosen provider: the
+ * reader's US or UK Microsoft voice, Baidu's single English voice, or Android's own preferred
+ * engine voice for file-rendered WAV. The resolver owns synthesis and cache identity; Readium only
+ * selects languages and transport.
  */
 @ExperimentalReadiumApi
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class NarrationEngineProvider(
     private val application: Application,
     private val accent: String,
-    private val synthesizer: NarrationSynthesizer,
-    private val onStarted: (text: String, fromCache: Boolean) -> Unit,
+    private val resolver: NarrationAudioResolver,
+    private val onStarted: (text: String, audio: NarrationAudio) -> Unit,
     private val resumePolicy: NarrationResumePolicy,
-    private val provider: SentenceSpeechProvider = SentenceSpeechProvider.MICROSOFT
+    private val provider: SentenceSpeechProvider = SentenceSpeechProvider.MICROSOFT,
+    private val onCompleted: () -> Unit = {}
 ) : TtsEngineProvider<
     NarrationSettings,
     NarrationPreferences,
@@ -391,14 +413,19 @@ internal class NarrationEngineProvider(
         publication: Publication,
         initialPreferences: NarrationPreferences
     ): Try<TtsEngine<NarrationSettings, NarrationPreferences, NarrationError, NarrationVoice>, Error> {
-        if (narrationVoice(provider, accent) == null) return Try.failure(NarrationError.Unavailable())
+        // Android narration has no Readium voice to select: the system engine owns its voice, and
+        // the cache configuration comes from the resolver. Online providers still need their spec.
+        if (provider != SentenceSpeechProvider.ANDROID && narrationVoice(provider, accent) == null) {
+            return Try.failure(NarrationError.Unavailable())
+        }
         val engine = CachedNarrationEngine(
             application = application,
             accent = accent,
-            synthesizer = synthesizer,
+            resolver = resolver,
             onStarted = onStarted,
             resumePolicy = resumePolicy,
-            provider = provider
+            provider = provider,
+            onCompleted = onCompleted
         )
         engine.submitPreferences(initialPreferences)
         return Try.success(engine)

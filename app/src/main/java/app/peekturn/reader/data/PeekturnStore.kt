@@ -209,6 +209,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
         var invalid = false
         var rewriteProfiles = false
         var rewriteProvider = false
+        var rewriteObsoleteSpeech = false
         fun restoreFields(target: JsonObject, source: JsonObject) {
             for ((name, fallback) in target.entrySet()) {
                 val value = source.get(name) ?: continue
@@ -262,6 +263,10 @@ class PeekturnStore internal constructor(private val context: Context, private v
             invalid = true
             rewriteProvider = true
         }
+        // The in-app engine and voice picker is gone; the system engine owns both. An older stored
+        // selection is neither a damaged preference nor a choice to keep, so it is silently dropped
+        // by the next rewrite instead of lingering as a dormant pinned voice.
+        if (source?.has("systemSpeech") == true) rewriteObsoleteSpeech = true
         var saved = gson.fromJson(restored, AppSettings::class.java)
         val profiles = mutableListOf<LlmProfile>()
         // Obsolete thinking flags and unusable stored temperatures are rewritten from the current contract.
@@ -314,7 +319,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
             profile.copy(config = profile.config.copy(apiKey = key))
         })
         if (invalid) _error.value = "Some preferences could not be restored. Please check Settings."
-        if (migrating || rewriteProfiles || rewriteProvider || source?.has("model") == true ||
+        if (migrating || rewriteProfiles || rewriteProvider || rewriteObsoleteSpeech || source?.has("model") == true ||
             profileValues?.takeIf { it.isJsonArray }?.asJsonArray?.any {
                 it.isJsonObject && it.asJsonObject.get("config")?.takeIf { config -> config.isJsonObject }
                     ?.asJsonObject?.has("apiKey") == true

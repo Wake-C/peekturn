@@ -34,6 +34,7 @@
     <string name="settings_source_baidu_detail">只有一个英语语音，无法满足美式或英式选择。</string>
     <string name="settings_source_android">Android 系统语音</string>
     <string name="settings_source_android_detail">使用设备的语音引擎；其语音可能通过网络合成。</string>
+    <string name="settings_source_android_system_voice">语音模型与音色由系统语音引擎应用决定，返回 Peekturn 后生效。</string>
     <string name="settings_stop">停止</string>
     <string name="settings_hide_audio_details">收起音频详情</string>
     <string name="settings_audio_details">音频详情</string>
@@ -61,7 +62,7 @@
     <string name="settings_explanation_cache_cleared">缓存已清除。</string>
     <string name="settings_narration_cache">句子音频缓存</string>
     <string name="settings_narration_cache_summary">不自动过期 · 上限 4 GB</string>
-    <string name="settings_narration_cache_detail">朗读音频保存在应用私有存储中，可离线重播。音频不会自动过期；仅在缓存超过 4 GB 时按最久未使用顺序腾出空间。清除会先停止正在进行的朗读，只删除句子音频，不影响书籍、阅读进度或设置。</string>
+    <string name="settings_narration_cache_detail">已完成的朗读音频保存在应用私有存储中，按来源、引擎及其报告的音色隔离，可离线重播。引擎无法报告音色时，只在当前连接内复用。更换引擎内部模型后若仍听到旧音频，可清除此缓存。音频不会自动过期，超过 4 GB 时按最久未使用顺序腾出空间。清除会先停止朗读，只删除句子音频，不影响书籍、阅读进度或设置。</string>
     <string name="settings_narration_cache_usage">已占用：%1$s</string>
     <string name="settings_narration_cache_calculating">正在计算…</string>
     <string name="settings_narration_cache_clear">清除句子音频</string>

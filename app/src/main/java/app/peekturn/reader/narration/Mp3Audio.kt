@@ -1,6 +1,7 @@
 package app.peekturn.reader.narration
 
 import java.io.ByteArrayOutputStream
+import kotlin.math.roundToLong
 
 /**
  * MPEG audio coverage for cached sentence clips. A provider answer is only accepted when every byte
@@ -22,13 +23,41 @@ internal object Mp3Audio {
     )
 
     /** True only when [bytes] is tags plus one or more complete frames and nothing partial. */
-    fun complete(bytes: ByteArray): Boolean = audioPortion(bytes) != null
+    fun complete(bytes: ByteArray): Boolean = inspect(bytes) != null
+
+    /** The audible length of a complete frame sequence, or null for partial or invalid audio. */
+    fun durationMs(bytes: ByteArray): Long? = inspect(bytes)?.durationMs
 
     /**
      * The frame bytes without ID3v2/ID3v1 metadata, or null when the answer is not entirely made of
      * complete frames. This is what gets concatenated for a long sentence.
      */
     fun audioPortion(bytes: ByteArray): ByteArray? {
+        val scanned = inspect(bytes) ?: return null
+        return bytes.copyOfRange(scanned.start, scanned.end)
+    }
+
+    /** Two or more provider answers as one frame sequence, or null when any part is incomplete. */
+    fun concat(chunks: List<ByteArray>): ByteArray? {
+        if (chunks.isEmpty()) return null
+        val output = ByteArrayOutputStream()
+        for (chunk in chunks) {
+            val portion = audioPortion(chunk) ?: return null
+            output.write(portion)
+        }
+        val joined = output.toByteArray()
+        return joined.takeIf(::complete)
+    }
+
+    private class Scanned(val start: Int, val end: Int, val durationMs: Long)
+
+    private class Frame(val length: Int, val sampleRate: Int, val samples: Int)
+
+    /**
+     * One pass over tags and frames: the audio bounds and the summed real frame durations. Any
+     * trailing byte that is not a complete frame rejects the whole answer.
+     */
+    private fun inspect(bytes: ByteArray): Scanned? {
         var start = 0
         if (bytes.size >= 10 && bytes[0] == 'I'.code.toByte() && bytes[1] == 'D'.code.toByte() && bytes[2] == '3'.code.toByte()) {
             val size = ((bytes[6].toInt() and 0x7F) shl 21) or
@@ -47,30 +76,19 @@ internal object Mp3Audio {
         }
 
         var position = start
-        var first = -1
+        if (position >= end) return null
+        var durationMs = 0.0
         while (position < end) {
-            val length = frameLength(bytes, position, end) ?: return null
-            if (first < 0) first = position
-            position += length
+            val frame = frameAt(bytes, position, end) ?: return null
+            durationMs += frame.samples * 1000.0 / frame.sampleRate
+            position += frame.length
         }
-        if (first < 0 || position != end) return null
-        return bytes.copyOfRange(first, end)
+        if (position != end) return null
+        return Scanned(start, end, durationMs.roundToLong())
     }
 
-    /** Two or more provider answers as one frame sequence, or null when any part is incomplete. */
-    fun concat(chunks: List<ByteArray>): ByteArray? {
-        if (chunks.isEmpty()) return null
-        val output = ByteArrayOutputStream()
-        for (chunk in chunks) {
-            val portion = audioPortion(chunk) ?: return null
-            output.write(portion)
-        }
-        val joined = output.toByteArray()
-        return joined.takeIf(::complete)
-    }
-
-    /** The frame's total length from its header at [offset], bounded by [until]. */
-    private fun frameLength(bytes: ByteArray, offset: Int, until: Int): Int? {
+    /** The complete frame at [offset], bounded by [until], with its real playing time. */
+    private fun frameAt(bytes: ByteArray, offset: Int, until: Int): Frame? {
         if (offset + 4 > until) return null
         val b0 = bytes[offset].toInt() and 0xFF
         val b1 = bytes[offset + 1].toInt() and 0xFF
@@ -106,6 +124,11 @@ internal object Mp3Audio {
         if (length < 4 || offset + length > until) return null
         // Reserved emphasis bits are not audio.
         if ((b3 and 0x03) == 0x02) return null
-        return length
+        val samples = when (layer) {
+            3 -> 384
+            2 -> 1152
+            else -> if (version == 3) 1152 else 576
+        }
+        return Frame(length, sampleRate, samples)
     }
 }

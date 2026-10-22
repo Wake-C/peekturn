@@ -5,7 +5,9 @@ import android.content.Context
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import androidx.test.core.app.ApplicationProvider
 import app.peekturn.reader.R
 import app.peekturn.reader.model.SentenceSpeechProvider
@@ -19,6 +21,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -28,6 +31,7 @@ import org.robolectric.shadow.api.Shadow
 import org.robolectric.shadows.ShadowMediaPlayer
 import org.robolectric.shadows.ShadowTextToSpeech
 import org.robolectric.shadows.util.DataSource
+import org.robolectric.util.ReflectionHelpers
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [28])
@@ -81,6 +85,14 @@ class PronunciationPlayerTest {
     private val appContext = ApplicationProvider.getApplicationContext<Application>()
     private fun text(id: Int): String = appContext.getString(id)
 
+    @Before fun startFromAnUnsetSystemEngine() {
+        Settings.Secure.putString(
+            appContext.contentResolver,
+            Settings.Secure.TTS_DEFAULT_SYNTH,
+            null
+        )
+    }
+
     private fun loseAudioFocus() {
         val audio = ApplicationProvider.getApplicationContext<Context>().getSystemService(AudioManager::class.java)
         shadowOf(audio).lastAudioFocusRequest.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_LOSS)
@@ -91,30 +103,47 @@ class PronunciationPlayerTest {
     /** The engine the player created last, so a test can inspect or complete its initialization. */
     private fun lastEngine(): ShadowTextToSpeech = Shadow.extract(ShadowTextToSpeech.getLastTextToSpeechInstance())
 
-    /** Reports the result the engine would deliver for the initialization the player started last. */
-    private fun engineInitialization(status: Int) {
+    /**
+     * Reports the result the engine would deliver for the initialization the player started last.
+     * [boundEngine] records what the platform bound, which is what a real engine reports through the
+     * hidden getCurrentEngine(); Robolectric's engine shadow leaves that field unset.
+     */
+    private fun engineInitialization(status: Int, boundEngine: String? = null) {
+        boundEngine?.let {
+            ReflectionHelpers.setField(ShadowTextToSpeech.getLastTextToSpeechInstance(), "mCurrentEngine", it)
+        }
         lastEngine().onInitListener.onInit(status)
         settle()
     }
 
     private fun player(
         source: WordAudioSource,
-        sentence: List<SentenceAudioSource> = listOf(FakeSentenceSource()),
-        engines: List<String> = emptyList()
-    ) = PronunciationPlayer(ApplicationProvider.getApplicationContext<Context>(), source, sentence) { engines }
+        sentence: List<SentenceAudioSource> = listOf(FakeSentenceSource())
+    ) = PronunciationPlayer(
+        ApplicationProvider.getApplicationContext<Context>(),
+        source,
+        sentence
+    )
 
     /** The same player with the production diagnostics hook captured, so log content is testable. */
     private fun diagnosticPlayer(
         diagnostics: MutableList<String>,
-        sentence: List<SentenceAudioSource> = listOf(FakeSentenceSource()),
-        alternativeEngines: List<String> = emptyList()
+        sentence: List<SentenceAudioSource> = listOf(FakeSentenceSource())
     ) = PronunciationPlayer(
         ApplicationProvider.getApplicationContext<Context>(),
         FakeSource(),
         sentence,
-        onDiagnostic = { diagnostics += it },
-        engines = { alternativeEngines }
+        onDiagnostic = { diagnostics += it }
     )
+
+    /** The engine Android would resolve for a new request, set the way the system settings app does. */
+    private fun systemEngine(packageName: String) {
+        Settings.Secure.putString(
+            appContext.contentResolver,
+            Settings.Secure.TTS_DEFAULT_SYNTH,
+            packageName
+        )
+    }
 
     private fun settle() = shadowOf(Looper.getMainLooper()).idle()
 
@@ -285,7 +314,6 @@ class PronunciationPlayerTest {
     /** The explicitly chosen Android route uses installed speech and makes no online request at all. */
     @Test fun androidSystemSpeechIsChosenAndNeverContactsAnOnlineService() {
         ShadowTextToSpeech.reset()
-        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
         val word = FakeSource()
         val microsoft = FakeSentenceSource("bing")
         val baidu = FakeSentenceSource("baidu")
@@ -298,6 +326,32 @@ class PronunciationPlayerTest {
         assertTrue("Neither online route is contacted", microsoft.calls.isEmpty() && baidu.calls.isEmpty())
         assertEquals("A little further, one page at a time.", lastEngine().lastSpokenText)
         assertNull(player.state.value.error)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /**
+     * The app does not choose the engine's voice, so the voice's own metadata cannot veto speech: an
+     * engine whose current voice is flagged not-installed is still asked to speak, and the synthesis
+     * callbacks decide what really happened. Basing a refusal on that flag is what the old
+     * app-owned voice selection did, so this is the seam that proves the system owns the voice.
+     */
+    @Test fun aVoiceFlaggedNotInstalledDoesNotBlockSystemSpeech() {
+        ShadowTextToSpeech.reset()
+        val player = player(FakeSource())
+        player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
+        val engine = lastEngine()
+        val flagged = Voice(
+            "flagged", Locale.US, Voice.QUALITY_NORMAL, Voice.LATENCY_NORMAL, false,
+            setOf(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)
+        )
+        ReflectionHelpers.setField(engine, "currentVoice", flagged)
+
+        engineInitialization(TextToSpeech.SUCCESS)
+
+        assertEquals("The engine's own voice is still asked to speak",
+            "A little further, one page at a time.", engine.lastSpokenText)
+        assertNull("Metadata does not turn into a speech failure", player.state.value.error)
         player.shutdown()
         ShadowTextToSpeech.reset()
     }
@@ -348,7 +402,6 @@ class PronunciationPlayerTest {
     @Test fun deviceSpeechWaitsForEveryOnlineRouteAndIsAnnouncedAsTheFallback() {
         ShadowTextToSpeech.reset()
         ShadowMediaPlayer.resetStaticState()
-        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
         val word = FakeSource().apply { clip = null }
         val sentence = FakeSentenceSource()
         val gate = CompletableDeferred<AudioClip?>()
@@ -554,33 +607,62 @@ class PronunciationPlayerTest {
         player.shutdown()
     }
 
-    /** A broken default engine must not end the request while another installed engine can speak. */
-    @Test fun aBrokenDefaultEngineGivesWayToAnotherInstalledEngine() {
+    /**
+     * The system's preferred engine is the only engine asked. When it cannot start, the request fails
+     * and says so: another installed engine is never bound in its place, so the report names only the
+     * engine the system resolved.
+     */
+    @Test fun theSystemEngineThatFailsIsNeverReplacedByAnotherInstalledEngine() {
         ShadowTextToSpeech.reset()
-        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
-        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
+        val system = "com.example.system-engine"
+        systemEngine(system)
+        val player = player(FakeSource())
         player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
-        val brokenDefault = lastEngine()
+        val engine = lastEngine()
 
         engineInitialization(TextToSpeech.ERROR)
 
-        assertTrue("The failed default engine is released", brokenDefault.isShutdown)
-        val alternative = lastEngine()
-        assertTrue("The other installed engine became the speaker", alternative !== brokenDefault)
-        alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
-        settle()
-
-        assertNull(player.state.value.error)
-        assertEquals("A little further, one page at a time.", alternative.lastSpokenText)
+        assertFailure(player, null, text(R.string.speech_failure_engine_not_started))
+        assertSame("No other engine may be bound in the system engine's place", engine, lastEngine())
+        assertNull("Nothing is spoken by an engine that never started", engine.lastSpokenText)
+        val report = player.state.value.diagnostic
+        assertNotNull(report)
+        assertTrue("The report names the engine the system resolved", report!!.contains(system))
         player.shutdown()
         ShadowTextToSpeech.reset()
     }
 
-    /** An engine that never answers its initialization callback must not hold the request forever. */
-    @Test fun anEngineThatNeverInitializesGivesWayToTheNextOne() {
+    /**
+     * Android may bind a package other than the one the app asked for, and it may expose no identity
+     * at all. That is not a reason to refuse system speech: the engine the platform actually bound
+     * speaks, and its identity is only named as evidence, never used as a gate.
+     */
+    @Test fun aDifferentBoundEngineStillSpeaksAndIsOnlyReported() {
         ShadowTextToSpeech.reset()
-        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
-        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
+        systemEngine("com.example.system-engine")
+        val diagnostics = mutableListOf<String>()
+        val player = diagnosticPlayer(diagnostics)
+        player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
+        val engine = lastEngine()
+
+        engineInitialization(TextToSpeech.SUCCESS, boundEngine = "com.example.platform-engine")
+
+        assertEquals("The engine the platform actually bound speaks",
+            "A little further, one page at a time.", engine.lastSpokenText)
+        assertNull("A differently resolved engine is not a failure", player.state.value.error)
+        assertFalse("The bound engine is kept", engine.isShutdown)
+        assertTrue("The engine the platform bound is still reported",
+            diagnostics.any { it.contains("com.example.platform-engine") })
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /**
+     * An engine that never answers its initialization cannot speak, and no other engine is tried.
+     */
+    @Test fun anEngineThatNeverInitializesFailsInsteadOfTryingAnother() {
+        ShadowTextToSpeech.reset()
+        val player = player(FakeSource())
         player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
         val silent = lastEngine()
         assertTrue("The request waits while its engine initializes", player.state.value.playing)
@@ -588,193 +670,232 @@ class PronunciationPlayerTest {
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(8_000))
 
         assertTrue("A silent engine is released when its initialization times out", silent.isShutdown)
-        val alternative = lastEngine()
-        assertTrue("The next installed engine is tried", alternative !== silent)
-        alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
-        settle()
-
-        assertNull(player.state.value.error)
-        assertEquals("A little further, one page at a time.", alternative.lastSpokenText)
-        player.shutdown()
-        ShadowTextToSpeech.reset()
-    }
-
-    /**
-     * Text in another script never goes to the device's own voice, because the app cannot call that voice
-     * English, so every installed engine is still asked before the failure reports what it saw.
-     */
-    @Test fun textInAnotherScriptNeverUsesTheDeviceVoiceAndEveryEngineIsStillAsked() {
-        ShadowTextToSpeech.reset()
-        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
-        player.speakExample("你好，世界", "US", SentenceSpeechProvider.ANDROID)
-        val firstEngine = lastEngine()
-
-        engineInitialization(TextToSpeech.SUCCESS)
-
-        val alternative = lastEngine()
-        assertTrue("An engine that may not substitute gives way", firstEngine.isShutdown)
-        assertTrue("The next installed engine is asked", alternative !== firstEngine)
-        alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
-        settle()
-
-        assertNull("Another script is never spoken by a voice the app cannot name", alternative.lastSpokenText)
-        assertFailure(player, null, text(R.string.speech_failure_no_english_voice))
-        val report = player.state.value.diagnostic
-        assertNotNull("The reader can send back what the engines answered", report)
-        assertTrue("Every engine that was asked is named", report!!.contains("com.example.other-engine"))
-        player.shutdown()
-        ShadowTextToSpeech.reset()
-    }
-
-    /** An engine that never starts is a different failure, and the report says which engines were asked. */
-    @Test fun aDeviceWhoseEnginesNeverStartReportsTheEnginesItAsked() {
-        ShadowTextToSpeech.reset()
-        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
-        player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
-
-        engineInitialization(TextToSpeech.ERROR)
-        lastEngine().onInitListener.onInit(TextToSpeech.ERROR)
-        settle()
-
+        assertSame("A silenced engine is not replaced by another one", silent, lastEngine())
         assertFailure(player, null, text(R.string.speech_failure_engine_not_started))
-        val report = player.state.value.diagnostic
-        assertNotNull(report)
-        assertTrue("The engine that was asked is named", report!!.contains("com.example.other-engine"))
-        assertTrue("An engine that never started gives no language answers to report",
-            report.contains(DeviceSpeechFailure.NotStarted.verdict))
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** The system default is read per request, so a changed default binds the newly resolved engine. */
+    @Test fun aChangedSystemEngineBindsTheNewEngineBeforeTheNextRequest() {
+        ShadowTextToSpeech.reset()
+        systemEngine("com.example.first-engine")
+        val player = player(FakeSource())
+
+        player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
+        engineInitialization(TextToSpeech.SUCCESS, boundEngine = "com.example.first-engine")
+        val first = lastEngine()
+        assertEquals("A little further, one page at a time.", first.lastSpokenText)
+
+        systemEngine("com.example.second-engine")
+        player.speakExample("Another page, still English.", "US", SentenceSpeechProvider.ANDROID)
+
+        val second = lastEngine()
+        assertTrue("The changed system engine must not reuse the old one", second !== first)
+        assertTrue("The replaced engine is shut down", first.isShutdown)
+        engineInitialization(TextToSpeech.SUCCESS, boundEngine = "com.example.second-engine")
+        assertEquals("Another page, still English.", second.lastSpokenText)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    @Test fun anOldInitializationTimeoutCannotFailTheNewSystemChoice() {
+        ShadowTextToSpeech.reset()
+        systemEngine("old.engine")
+        val player = player(FakeSource())
+        player.speakExample("The current system engine must get its turn.", "US", SentenceSpeechProvider.ANDROID)
+        val old = lastEngine()
+        systemEngine("new.engine")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(8_001))
+        val fresh = lastEngine()
+        assertTrue("A stale engine timeout must not prevent binding the current engine", fresh !== old)
+        assertNull(player.state.value.error)
+        engineInitialization(TextToSpeech.SUCCESS, boundEngine = "new.engine")
+        assertEquals("The current system engine must get its turn.", fresh.lastSpokenText)
+        assertTrue(old.isShutdown)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    @Test fun anOldInitializationFailureCannotFailTheNewSystemChoice() {
+        ShadowTextToSpeech.reset()
+        systemEngine("old.engine")
+        val player = player(FakeSource())
+        player.speakExample("The new system engine must get this sentence.", "US", SentenceSpeechProvider.ANDROID)
+        val old = lastEngine()
+        systemEngine("new.engine")
+        old.onInitListener.onInit(TextToSpeech.ERROR)
+        settle()
+        val fresh = lastEngine()
+        assertTrue("The old initialization failure must rebind the waiting request", fresh !== old)
+        assertTrue(old.isShutdown)
+        assertNull(player.state.value.error)
+        engineInitialization(TextToSpeech.SUCCESS, boundEngine = "new.engine")
+        assertEquals("The new system engine must get this sentence.", fresh.lastSpokenText)
+        assertNull(old.lastSpokenText)
         player.shutdown()
         ShadowTextToSpeech.reset()
     }
 
     /**
-     * An engine that does offer English keeps the request through the documented probes: the voice it was
-     * asked for is the one that is set, and no substitute notice is attached.
+     * The system default changed while an engine was still initializing. That engine belongs to the
+     * old configuration, so its callback releases it, discards its stale answer and binds a fresh
+     * engine while the waiting request is kept.
      */
-    @Test fun anOfferedEnglishVoiceKeepsBeingTheVoiceThatSpeaks() {
+    @Test fun aSystemEngineChangeDuringInitializationRebindsTheWaitingRequest() {
         ShadowTextToSpeech.reset()
-        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
+        systemEngine("com.example.first-engine")
         val player = player(FakeSource())
         player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
+        val stale = lastEngine()
 
+        systemEngine("com.example.second-engine")
+        stale.onInitListener.onInit(TextToSpeech.SUCCESS)
+        settle()
+
+        val fresh = lastEngine()
+        assertTrue("The engine for the old system default is released", stale.isShutdown)
+        assertTrue("The waiting request is bound against the new default", fresh !== stale)
+        assertNull("The stale engine never speaks", stale.lastSpokenText)
+        assertTrue("The request is still waiting to be spoken", player.state.value.playing)
+
+        engineInitialization(TextToSpeech.SUCCESS, boundEngine = "com.example.second-engine")
+        assertEquals("The waiting request survives the rebind",
+            "A little further, one page at a time.", fresh.lastSpokenText)
+        assertNull(player.state.value.error)
+
+        stale.onInitListener.onInit(TextToSpeech.SUCCESS)
+        settle()
+        assertEquals("A superseded initialization cannot speak or replace the request",
+            "A little further, one page at a time.", fresh.lastSpokenText)
+        assertNull(player.state.value.error)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** A shared revision change during initialization also releases the engine prepared before it. */
+    @Test fun aCatalogRefreshDuringInitializationRebindsTheWaitingRequest() {
+        ShadowTextToSpeech.reset()
+        systemEngine("com.example.engine")
+        val player = player(FakeSource())
+        player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
+        val stale = lastEngine()
+
+        refreshSpeechConfiguration()
+        stale.onInitListener.onInit(TextToSpeech.SUCCESS)
+        settle()
+
+        val fresh = lastEngine()
+        assertTrue("The engine bound before the refresh is released", stale.isShutdown)
+        assertTrue("The waiting request binds again", fresh !== stale)
+        engineInitialization(TextToSpeech.SUCCESS, boundEngine = "com.example.engine")
+        assertEquals("A little further, one page at a time.", fresh.lastSpokenText)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /**
+     * An engine was switched while its initialization was pending. The callback of the engine
+     * superseded by the newer request must not speak that request or make it fail.
+     */
+    @Test fun aStaleInitializationAfterAnEngineSwitchCannotSpeakTheNewestRequest() {
+        ShadowTextToSpeech.reset()
+        systemEngine("com.example.first-engine")
+        val player = player(FakeSource())
+        player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
+        val stale = lastEngine()
+
+        systemEngine("com.example.second-engine")
+        player.speakExample("Another page, still English.", "US", SentenceSpeechProvider.ANDROID)
+        val fresh = lastEngine()
+        assertTrue("The superseded engine is released by the newer request", stale.isShutdown)
+        assertTrue("The newer request binds the new system engine", fresh !== stale)
+
+        stale.onInitListener.onInit(TextToSpeech.SUCCESS)
+        settle()
+
+        assertNull("A superseded initialization never speaks", stale.lastSpokenText)
+        assertEquals("Another page, still English.", player.state.value.text)
+        assertNull("A superseded initialization cannot fail the newer request", player.state.value.error)
+        engineInitialization(TextToSpeech.SUCCESS, boundEngine = "com.example.second-engine")
+        assertEquals("Another page, still English.", fresh.lastSpokenText)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /**
+     * The engine owns its voice. Nothing about the engine is changed by the app, and the request
+     * says plainly that the engine's own voice is the one speaking.
+     */
+    @Test fun theEnginesOwnVoiceIsLeftUntouchedAndNamed() {
+        ShadowTextToSpeech.reset()
+        val player = player(FakeSource())
+
+        player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
         engineInitialization(TextToSpeech.SUCCESS)
 
         val engine = lastEngine()
         assertEquals("A little further, one page at a time.", engine.lastSpokenText)
-        assertNotNull("The English voice that was offered is the voice that is set", engine.getCurrentVoice())
-        assertFalse("An offered English voice carries no substitute notice",
-            player.state.value.notice?.contains(text(DEVICE_DEFAULT_VOICE_NOTICE)) == true)
+        assertNull("The engine's own voice is not replaced", engine.getCurrentVoice())
+        assertNull(player.state.value.error)
+        assertTrue("The request labels the device's own voice",
+            player.state.value.notice?.contains(text(R.string.speech_notice_device_default_voice)) == true)
         player.shutdown()
         ShadowTextToSpeech.reset()
     }
 
-    /**
-     * The final device attempt comes only after every installed engine has declined, and it uses the voice
-     * the engine already holds, untouched and labelled: the reader's own engine choice, a vendor engine's
-     * own voice, may be the only English-capable one on the device, but a real English voice found on any
-     * engine was still worth more than a substituted one.
-     */
-    @Test fun everyEngineDeclinesBeforeTheDeviceOwnVoiceIsUsed() {
+    /** A catalog revision change releases the cached engine even when the system engine is unchanged. */
+    @Test fun aCatalogRefreshRebindsEvenWhenTheSystemEngineIsUnchanged() {
         ShadowTextToSpeech.reset()
-        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
-        player.speakWord("hello", "US")
-        val defaultEngine = lastEngine()
+        val player = player(FakeSource())
 
-        engineInitialization(TextToSpeech.SUCCESS)
-
-        assertFalse("A substitute is not used while another engine may still have English",
-            player.state.value.notice?.contains(text(DEVICE_DEFAULT_VOICE_NOTICE)) == true)
-        val alternative = lastEngine()
-        assertTrue("The other installed engine is asked first", alternative !== defaultEngine)
-
-        alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
-        settle()
-
-        val substituting = lastEngine()
-        assertTrue("The final pass starts with the engine the reader chose",
-            substituting !== alternative && substituting !== defaultEngine)
-        substituting.onInitListener.onInit(TextToSpeech.SUCCESS)
-        settle()
-
-        assertEquals("hello", substituting.lastSpokenText)
-        assertNull("Nothing about the engine's own voice is changed", substituting.getCurrentVoice())
-        assertNull("A voice the engine could speak with is not an installation error", player.state.value.error)
-        assertTrue("A substituted voice is labelled as one",
-            player.state.value.notice?.contains(text(DEVICE_DEFAULT_VOICE_NOTICE)) == true)
-        player.shutdown()
-        ShadowTextToSpeech.reset()
-    }
-
-    /**
-     * The explicitly chosen Android route means installed English speech, not any voice the engine
-     * happens to hold. With no English voice found it reports, matching narration's rejection of the
-     * unverified default voice; the word route keeps its final pass above.
-     */
-    @Test fun explicitlyChosenAndroidSpeechNeverUsesTheDeviceOwnVoice() {
-        ShadowTextToSpeech.reset()
-        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
         player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
         engineInitialization(TextToSpeech.SUCCESS)
-        val alternative = lastEngine()
-        alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
-        settle()
+        val first = lastEngine()
 
-        assertFailure(player, null, text(R.string.speech_failure_no_english_voice))
-        assertSame("No unverified voice engine is started", alternative, lastEngine())
-        assertNull("No voice the app did not choose reads the text", alternative.lastSpokenText)
-        assertNull("No substitute notice is shown", player.state.value.notice)
-        assertNotNull("The engines' answers are still reported", player.state.value.diagnostic)
-        player.shutdown()
-        ShadowTextToSpeech.reset()
-    }
+        refreshSpeechConfiguration()
+        player.speakExample("Another page, still English.", "US", SentenceSpeechProvider.ANDROID)
 
-    /**
-     * A substituted voice is not a promise. An engine that accepts the utterance and then fails it hands
-     * the request to the next engine of the final pass, and only the end of that pass reports, with
-     * everything the engines answered.
-     */
-    @Test fun aSubstitutedVoiceThatFailsHandsTheRequestToTheNextEngineOfTheFinalPass() {
-        ShadowTextToSpeech.reset()
-        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
-        player.speakWord("hello", "US")
+        val second = lastEngine()
+        assertTrue("The stale engine is shut down", first.isShutdown)
+        assertTrue("The next request binds a fresh engine", second !== first)
         engineInitialization(TextToSpeech.SUCCESS)
-        val alternative = lastEngine()
-        alternative.onInitListener.onInit(TextToSpeech.SUCCESS)
-        settle()
-
-        val firstSubstitute = lastEngine()
-        firstSubstitute.onInitListener.onInit(TextToSpeech.SUCCESS)
-        failUtterance(firstSubstitute, TextToSpeech.ERROR_SYNTHESIS)
-        settle()
-
-        assertNull("A failed substituted voice is not the end of the story", player.state.value.error)
-        val secondSubstitute = lastEngine()
-        assertTrue("The next engine of the final pass was asked", secondSubstitute !== firstSubstitute)
-
-        // Only the end of the final pass reports, and the report keeps what every engine answered. Both
-        // engines accepted the text before failing it, so the honest verdict is a playback failure, not
-        // a claim that no English voice exists.
-        secondSubstitute.onInitListener.onInit(TextToSpeech.SUCCESS)
-        failUtterance(secondSubstitute, TextToSpeech.ERROR_SYNTHESIS)
-        settle()
-
-        assertFailure(player, null, text(DeviceSpeechFailure.PlaybackFailed.message))
-        assertNotNull("That report carries what the engines answered", player.state.value.diagnostic)
-        assertFalse(player.state.value.playing)
+        assertEquals("Another page, still English.", second.lastSpokenText)
         player.shutdown()
         ShadowTextToSpeech.reset()
     }
 
-    /** An engine that cannot speak its own voice has its own words end the report. */
-    @Test fun anEngineThatCannotSpeakItsOwnVoiceReportsWhatItSaid() {
+    /** Returning from system settings drops the cached engine so the next request binds current reality. */
+    @Test fun refreshSystemSpeechDropsTheCachedEngineSoTheNextRequestRebinds() {
+        ShadowTextToSpeech.reset()
+        val player = player(FakeSource())
+
+        player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
+        engineInitialization(TextToSpeech.SUCCESS)
+        val first = lastEngine()
+        assertEquals("A little further, one page at a time.", player.state.value.text)
+
+        player.refreshSystemSpeech()
+        settle()
+
+        assertFalse("A refresh silences any request in flight", player.state.value.playing)
+        assertTrue("The cached engine is released", first.isShutdown)
+        player.speakExample("Another page, still English.", "US", SentenceSpeechProvider.ANDROID)
+        assertTrue("The next request binds a fresh engine", lastEngine() !== first)
+        player.shutdown()
+        ShadowTextToSpeech.reset()
+    }
+
+    /** An engine that accepted the utterance and reported missing voice data is reported as such. */
+    @Test fun anEngineThatReportsMissingVoiceDataSaysSo() {
         ShadowTextToSpeech.reset()
         val player = player(FakeSource())
         player.speakWord("hello", "US")
-        // The only engine declines the voice pass, and the final pass asks it again.
-        engineInitialization(TextToSpeech.SUCCESS)
+        settle()
+        val engine = lastEngine()
 
-        val substituting = lastEngine()
-        substituting.onInitListener.onInit(TextToSpeech.SUCCESS)
-        failUtterance(substituting, TextToSpeech.ERROR_NOT_INSTALLED_YET)
+        engine.onInitListener.onInit(TextToSpeech.SUCCESS)
+        failUtterance(engine, TextToSpeech.ERROR_NOT_INSTALLED_YET)
         settle()
 
         assertFailure(player, null, text(R.string.speech_failure_missing_english_data))
@@ -785,13 +906,12 @@ class PronunciationPlayerTest {
     }
 
     /**
-     * A voice the engine offered and set is a real answer: its playback failure is reported as one, and
-     * the request is not handed to another engine behind the reader's back.
+     * The engine's accepted utterance is the request's answer: its playback failure is reported as one,
+     * and the request is not handed to another engine.
      */
-    @Test fun anOfferedVoiceIsNotGivenAwayWhenItsPlaybackFails() {
+    @Test fun aPlaybackFailureIsNotHandedToAnotherEngine() {
         ShadowTextToSpeech.reset()
-        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
-        val player = player(FakeSource(), engines = listOf("com.example.other-engine"))
+        val player = player(FakeSource())
         player.speakExample("A little further, one page at a time.", "US", SentenceSpeechProvider.ANDROID)
         val engine = lastEngine()
 
@@ -806,7 +926,7 @@ class PronunciationPlayerTest {
             report!!.contains(DeviceSpeechFailure.PlaybackFailed.verdict))
         assertTrue(report.contains("Device speech report:"))
         assertFalse(player.state.value.playing)
-        assertSame("An offered voice's failure is not handed to another engine", engine, lastEngine())
+        assertSame("The failed engine's request is not handed to another engine", engine, lastEngine())
         player.shutdown()
         ShadowTextToSpeech.reset()
     }
@@ -815,7 +935,6 @@ class PronunciationPlayerTest {
     @Test fun aFallbackReusesTheFocusItAlreadyHoldsForTheSameRequest() {
         ShadowMediaPlayer.resetStaticState()
         ShadowTextToSpeech.reset()
-        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
         val source = FakeSource().apply { clip = wordAudio() }
         val manager = audioManager()
         val player = player(source)
@@ -864,7 +983,7 @@ class PronunciationPlayerTest {
         assertTrue("The device evidence is still the second half", report.contains("Device speech report:"))
         assertTrue("A wrong device clock is visible", report.contains("device clock:"))
         assertTrue("The build is visible", report.contains("app: "))
-        assertFalse("The report never carries the selection", report.contains(spoken))
+        assertFalse("The report never carries the spoken text", report.contains(spoken))
         player.shutdown()
         ShadowTextToSpeech.reset()
     }
@@ -1087,7 +1206,6 @@ class PronunciationPlayerTest {
      */
     @Test fun aReusedReadyEngineIsIdentifiedAgainInTheSecondRequestsEvidence() {
         ShadowTextToSpeech.reset()
-        ShadowTextToSpeech.addLanguageAvailability(Locale.US)
         val diagnostics = mutableListOf<String>()
         val player = diagnosticPlayer(diagnostics)
 

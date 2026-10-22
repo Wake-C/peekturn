@@ -58,6 +58,33 @@ class SentenceAudioKeyTest {
         ))
     }
 
+    @Test fun theExistingOnlineCacheNameIsStable() {
+        // Pinned material: persisted MP3 clips from before system narration must still be found.
+        assertEquals(
+            "778f81a3f7949319f6e5125811206515da0b80456d20c55ffdc1daac1d316445",
+            sentenceAudioKey("Today is a perfect day.", us)
+        )
+    }
+
+    @Test fun anAndroidWaveProfileSeparatesEngineVersionVoiceProsodyAndFormat() {
+        val wave = NarrationVoiceSpec(
+            engine = "com.google.android.tts/1.0",
+            voice = "en-us-x-iol-local",
+            prosody = "pitch=1.0;lang=en-US",
+            format = "wav-pcm16-24000hz-mono"
+        )
+        val base = sentenceAudioKey("One sentence.", wave)
+        assertNotEquals(base, sentenceAudioKey("One sentence.", wave.copy(engine = "com.google.android.tts/2.0")))
+        assertNotEquals(base, sentenceAudioKey("One sentence.", wave.copy(voice = "en-gb-x-gbb-local")))
+        assertNotEquals(base, sentenceAudioKey("One sentence.", wave.copy(prosody = "pitch=1.2;lang=en-US")))
+        assertNotEquals(base, sentenceAudioKey("One sentence.", wave.copy(format = "wav-pcm16-48000hz-mono")))
+        assertNotEquals(
+            "a system wave never collides with an online MP3",
+            base,
+            sentenceAudioKey("One sentence.", us)
+        )
+    }
+
     @Test fun theKeyIsOpaque() {
         val key = sentenceAudioKey("Today is a perfect day.", us)
         assertEquals(64, key.length)

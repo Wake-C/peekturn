@@ -49,18 +49,21 @@
     <string name="reader_options_narration_cache">Sentence audio cache</string>
     <string name="reader_options_narration_cache_size">%1$s saved privately</string>
     <string name="reader_options_narration_clear">Clear</string>
-    <string name="reader_options_narration_note">Microsoft Read Aloud is free and key-free, but unofficial and not guaranteed to stay available. Only the current sentence and up to two following sentences leave the device. Cached sentence audio stays in private app storage and can be cleared here. Popup word and example pronunciation stays memory-only.</string>
+    <string name="reader_options_narration_note">Microsoft Read Aloud is free and key-free, but unofficial and not guaranteed to stay available. Only the current sentence and nearby upcoming sentences leave the device. Cached sentence audio stays in private app storage and can be cleared here. Popup word and example pronunciation stays memory-only.</string>
 
     <string name="reader_narration_status_playing">Reading aloud</string>
     <string name="reader_narration_status_paused">Paused</string>
+    <string name="reader_narration_status_preparing">Preparing audio…</string>
     <string name="reader_narration_play">Play</string>
     <string name="reader_narration_pause">Pause</string>
     <string name="reader_narration_previous">Previous sentence</string>
     <string name="reader_narration_next">Next sentence</string>
+    <string name="reader_narration_next_paragraph">Next paragraph</string>
     <string name="reader_narration_stop">Stop reading aloud</string>
     <string name="reader_narration_speed">Speed</string>
     <string name="reader_narration_speed_value">%1$s×</string>
     <string name="reader_narration_cached">Saved for offline replay</string>
+    <string name="reader_narration_reserve">Paragraphs ready: %1$d · Audio: %2$ds</string>
     <string name="reader_narration_retry">Retry</string>
     <string name="reader_narration_error_unavailable">This sentence could not be fetched. Check your connection, then retry; sentences already saved still play offline.</string>
     <string name="reader_narration_error_too_long">This sentence is too long to read aloud in one piece.</string>

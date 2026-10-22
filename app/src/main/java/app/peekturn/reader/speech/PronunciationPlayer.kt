@@ -16,7 +16,6 @@ import android.speech.tts.UtteranceProgressListener
 import app.peekturn.reader.R
 import app.peekturn.reader.diagnostics.diagnosticMetadata
 import app.peekturn.reader.model.SentenceSpeechProvider
-import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -79,10 +78,13 @@ private const val FAILURE_OUTCOME_LIMIT = 96
 
 /**
  * Main-thread serialized, latest-only pronunciation. A selected word keeps its free dictionary
- * recording first, then the key-free speech services and installed device speech. A phrase, example
- * or preview follows exactly the provider chosen in Settings, with no cross-route fallback: Microsoft
- * and Baidu either answer or fail, and Android means installed English system speech only. Nothing
- * about a superseded request may still reach the speaker. Call shutdown when its owner is destroyed.
+ * recording first, then the key-free speech services and finally device speech. A phrase, example or
+ * preview follows exactly the provider chosen in Settings, with no cross-route fallback: Microsoft and
+ * Baidu either answer or fail, and Android means the platform's preferred engine with the voice that
+ * engine already holds. The app neither picks nor substitutes an engine or voice: it binds whatever
+ * the system currently resolves, reads the bound identity only as diagnostic evidence, and reports
+ * the engine's own synthesis answers. Nothing about a superseded request may still reach the speaker.
+ * Call shutdown when its owner is destroyed.
  */
 class PronunciationPlayer(
     context: Context,
@@ -93,8 +95,7 @@ class PronunciationPlayer(
      * outcomes, the engine's answers and terminal or playback failures. It never receives the text
      * being spoken, an endpoint or a credential, and a missing owner simply has no log to write.
      */
-    private val onDiagnostic: (String) -> Unit = {},
-    private val engines: (Context) -> List<String> = ::installedSpeechEngines
+    private val onDiagnostic: (String) -> Unit = {}
 ) {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -115,28 +116,22 @@ class PronunciationPlayer(
     private var mediaPrepared = false
     private var focus: AudioFocusRequest? = null
     private var initTimeout: Runnable? = null
-    private var candidates: List<String?> = emptyList()
-    private var candidateIndex = 0
-    private var currentCandidate: String? = null
+    /**
+     * The system speech configuration the held engine was bound for: the platform's preferred engine
+     * and the shared revision. A changed default or a refresh changes this key, and the engine is
+     * released before the next request can use it.
+     */
+    private var boundKey: SpeechConfigurationKey? = null
     /**
      * The engine the player currently holds and may reuse after a stop. Evidence is cleared per
      * request, so a ready engine has to be identified to the new request's evidence explicitly.
      */
     private var currentEngineName: String = "system default engine"
     private var currentEngineVersion: String? = null
-    private var substitutionPass = false
-    private val substitutable = LinkedHashSet<String?>()
     private var engineStarted = false
     private var missingEnglishData = false
     /** An engine accepted the text and then failed it, which is playback, not a missing voice. */
     private var utteranceAccepted = false
-
-    /**
-     * Whether the utterance in flight is the engine's own voice, which the app neither chose nor can
-     * name. Such a voice is not a promise, so its failure hands the request to the next engine instead
-     * of being reported as the end of the story.
-     */
-    private var substituting = false
     private val evidence = SpeechEvidence()
 
     /** What each online route answered for the current request, in the order they were tried. */
@@ -157,7 +152,6 @@ class PronunciationPlayer(
 
     private data class Request(
         val text: String,
-        val locale: Locale,
         val id: Long,
         /** Set for a phrase-like request: exactly this source, never another route. */
         val provider: SentenceSpeechProvider? = null
@@ -203,9 +197,25 @@ class PronunciationPlayer(
         }
     }
 
+    /**
+     * The device's preferred engine, its version or the reader's system speech settings may have
+     * changed outside the app. Stop the audible request, drop the cached engine so the next request
+     * binds against current reality, and advance the shared configuration revision so every holder
+     * of a key notices that the configuration is stale.
+     */
+    fun refreshSystemSpeech() = onMain {
+        if (closed) return@onMain
+        stopInternal()
+        releaseEngine()
+        refreshSpeechConfiguration()
+    }
+
     fun openSystemSettings() = onMain {
         stopInternal()
         releaseEngine()
+        // The reader is about to change the system's engine or voice outside the app, so holders of
+        // the shared key (narration included) must not keep using a configuration read before that.
+        refreshSpeechConfiguration()
         val intents = listOf(
             Intent("com.android.settings.TTS_SETTINGS"),
             Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA),
@@ -238,7 +248,7 @@ class PronunciationPlayer(
         }
         // A word keeps its dictionary-first chain; only non-word speech is bound to the chosen source.
         val strictProvider = provider.takeUnless { word }
-        val request = Request(text, locale, generation, strictProvider)
+        val request = Request(text, generation, strictProvider)
         pending = request
         path = Path.Speech
         utteranceAccepted = false
@@ -470,6 +480,11 @@ class PronunciationPlayer(
         if (!isCurrent(request)) return
         path = Path.Speech
         speechNotice = notice
+        // The system's preferred engine or the shared revision may have changed since the engine was
+        // bound. The cached engine is then not evidence about the current configuration, so it is
+        // released before anything is asked of it.
+        val key = systemSpeechConfigurationKey(app)
+        if (engine != null && key != boundKey) releaseEngine()
         if (ready) {
             // stopInternal keeps a ready engine but clears the evidence, so the retained engine has to
             // be identified again before this request's answers can be attributed to it.
@@ -481,43 +496,18 @@ class PronunciationPlayer(
     }
 
     /**
-     * Tries the engines in order: the user's default first, then every other engine that declares the
-     * TTS service. Each one is asked for a real English voice, and only a failure of the engine being
-     * tried moves on to the next candidate, so a broken or English-less default cannot hide an engine
-     * that can speak. Once every engine has declined, a word request gives the engines that actually
-     * started one final pass, in the same order, where the engine's own voice is asked to speak the
-     * text unchanged: the reader's own engine choice may be the only English-capable voice on the
-     * device, but a real English voice found on any engine was still worth more than a substituted
-     * one. An explicitly chosen Android request never takes that pass; it reports what the engines
-     * answered instead of using a voice the app cannot name.
+     * Binds the platform's preferred engine, or the platform default when the system has no explicit
+     * preference. No installed alternative is ever a candidate: the engine the system resolves is the
+     * only one tried, and its own voice and language are left untouched.
      */
     private fun initialize() {
         if (closed || engine != null) return
-        if (candidates.isEmpty()) {
-            candidates = listOf<String?>(null) + engines(app)
-            candidateIndex = 0
-        }
-        if (candidateIndex >= candidates.size) {
-            // The explicitly chosen Android route means installed English speech; it must not fall
-            // back to an unverified engine voice. A word request keeps its existing final pass.
-            if (!substitutionPass && substitutable.isNotEmpty() &&
-                pending?.provider != SentenceSpeechProvider.ANDROID
-            ) {
-                substitutionPass = true
-                candidates = substitutable.toList()
-                candidateIndex = 0
-            } else {
-                reportEngineFailure()
-                return
-            }
-        }
-        val candidate = candidates[candidateIndex++]
-        currentCandidate = candidate
-        // The engine the reader chose is the one whose answers a report keeps, and a package name and
-        // version the reader can send back are worth more than "the default engine".
-        val engineName = candidate ?: defaultSpeechEngine(app)
-        currentEngineName = engineName ?: "system default engine"
-        currentEngineVersion = engineName?.let { speechEngineVersion(app, it) }
+        val key = systemSpeechConfigurationKey(app)
+        boundKey = key
+        val enginePackage = key.enginePackage?.takeIf { it.isNotBlank() }
+        // A package name and version the reader can send back are worth more than "the default engine".
+        currentEngineName = enginePackage ?: "system default engine"
+        currentEngineVersion = enginePackage?.let { speechEngineVersion(app, it) }
         evidence.addEngine(currentEngineName, currentEngineVersion)
         val initialization = ++engineGeneration
         val onInit = TextToSpeech.OnInitListener { status ->
@@ -525,17 +515,17 @@ class PronunciationPlayer(
             main.post { onEngineInitialized(initialization, status) }
         }
         try {
-            engine = if (candidate == null) TextToSpeech(app, onInit) else TextToSpeech(app, onInit, candidate)
+            engine = if (enginePackage == null) TextToSpeech(app, onInit) else TextToSpeech(app, onInit, enginePackage)
         } catch (_: RuntimeException) {
             // An engine that cannot even be constructed has told us nothing about its voices.
             engine = null
-            initialize()
+            reportEngineFailure()
             return
         }
         scheduleInitTimeout(initialization)
     }
 
-    /** An engine that never reports its initialization must not hold the request: the next one gets a turn. */
+    /** An engine that never reports its initialization cannot speak, and no other engine is tried. */
     private fun scheduleInitTimeout(initialization: Long) {
         cancelInitTimeout()
         val timeout = Runnable { onEngineTimeout(initialization) }
@@ -547,8 +537,18 @@ class PronunciationPlayer(
         initTimeout = null
         if (closed || initialization != engineGeneration || engine == null) return
         evidence.recordUtterance("init timeout")
+        val changed = systemSpeechConfigurationKey(app) != boundKey
         releaseEngine()
-        if (path == Path.Speech && pending != null) initialize() else forgetEngines()
+        if (path == Path.Speech && pending != null) {
+            if (changed) {
+                engineStarted = false
+                missingEnglishData = false
+                utteranceAccepted = false
+                pending?.let { requestSpeech(it, speechNotice) }
+            } else {
+                reportEngineFailure()
+            }
+        }
     }
 
     private fun cancelInitTimeout() {
@@ -560,118 +560,102 @@ class PronunciationPlayer(
         if (closed || initialization != engineGeneration) return
         cancelInitTimeout()
         evidence.observe(SpeechObservation.InitAnswered(status))
+        if (systemSpeechConfigurationKey(app) != boundKey) {
+            // The system default or the shared revision changed while this engine initialized. This
+            // engine and its callbacks describe the old configuration, so both are dropped and the
+            // newest request is bound again against current reality.
+            evidence.recordUtterance("system speech configuration changed during initialization")
+            engineStarted = false
+            missingEnglishData = false
+            utteranceAccepted = false
+            releaseEngine()
+            if (path == Path.Speech) pending?.let { requestSpeech(it, speechNotice) }
+            return
+        }
         if (status != TextToSpeech.SUCCESS) {
             releaseEngine()
             // A superseded sentence's engine must not fail the newer request, which may not need
             // system speech at all.
-            if (path == Path.Speech && pending != null) initialize() else forgetEngines()
+            if (path == Path.Speech && pending != null) reportEngineFailure()
             return
         }
         // An engine that started is a different device fact from one that never answered, so a failure
-        // says which of the two happened even when every engine is tried.
+        // says which of the two happened.
         engineStarted = true
-        ready = true
         val speaking = engine ?: return
-        if (currentCandidate == null) {
-            val resolved = runCatching { speaking.defaultEngine }.getOrNull()
-            if (!resolved.isNullOrBlank()) {
-                currentEngineName = resolved
-                currentEngineVersion = speechEngineVersion(app, resolved)
-                evidence.addEngine(currentEngineName, currentEngineVersion)
-                evidence.observe(SpeechObservation.InitAnswered(status))
-            }
+        // The bound identity is diagnostic only: reflection may be unavailable, and the platform may
+        // legitimately resolve a different package. Neither is a reason to refuse system speech.
+        boundSpeechEngine(speaking)?.let { bound ->
+            currentEngineName = bound
+            currentEngineVersion = speechEngineVersion(app, bound)
+            evidence.addEngine(currentEngineName, currentEngineVersion)
         }
+        ready = true
         speaking.setAudioAttributes(attributes)
         speaking.setOnUtteranceProgressListener(listenerFor(speaking))
         playLatest()
     }
 
     /**
-     * The engine gets the request in a fixed order: the best installed English voice first, then the
-     * standard language API for the requested accent, the other English country and plain English, and
-     * only once every engine has declined does any engine's own voice get its single unlabelled-voice
-     * attempt, which is decided in [initialize] and taken here. Every answer is recorded, so a request
-     * that ends without a speaker can say what it was told.
+     * Asks the bound engine, with the voice it already holds, to speak the newest request. The engine
+     * owns its voice, so the current voice is read as evidence only; no voice or language is selected,
+     * and metadata such as a not-installed flag never refuses the request. The synthesis callbacks
+     * decide whether the text was spoken.
      */
     private fun playLatest() {
         if (path != Path.Speech) return
         val request = pending ?: return
         val tts = engine ?: return
-        // Only the final pass speaks with a voice the app did not choose; anything that throws before
-        // that is not a substituted attempt, whatever the previous engine was asked for.
-        substituting = false
+        if (systemSpeechConfigurationKey(app) != boundKey) {
+            // The system may change underneath a prepared engine; rebind rather than speak through a
+            // configuration the reader no longer has.
+            engineStarted = false
+            missingEnglishData = false
+            utteranceAccepted = false
+            releaseEngine()
+            if (isCurrent(request)) requestSpeech(request, speechNotice)
+            return
+        }
         try {
             if (request.text.length > TextToSpeech.getMaxSpeechInputLength()) {
                 fail(app.getString(R.string.speech_failure_too_long_for_system))
                 return
             }
-            if (substitutionPass) {
-                // The final device attempt, and the only one that does not change the voice: no voice and
-                // no language is selected, so the reader's own engine choice may be the only
-                // English-capable voice on the device. Only text that is itself English reaches this pass.
-                emitDiagnostic("prepared with the device's own voice")
-                speak(request, tts, app.getString(DEVICE_DEFAULT_VOICE_NOTICE), substituting = true)
-                return
-            }
-            when (val availability = configureSpeech(
-                request.locale, { tts.voices }, { tts.setVoice(it) },
-                { tts.setLanguage(it) }, { tts.voice }, evidence::observe
-            )) {
-                is SpeechAvailability.Available -> {
-                    // Success is logged too: a working engine whose own voice metadata disagrees with
-                    // the accepted language is exactly the device fact a later bug report needs.
-                    emitDiagnostic(
-                        if (availability.noticeRes == null) "prepared" else "prepared with caveat"
-                    )
-                    speak(request, tts, availability.noticeRes?.let(app::getString), substituting = false)
-                }
-                SpeechAvailability.MissingData, SpeechAvailability.Unsupported -> {
-                    if (availability == SpeechAvailability.MissingData) missingEnglishData = true
-                    // What the engine answered was about the voice that was asked for, not about the voice
-                    // it already holds, so this engine is worth keeping for the final pass - but only for
-                    // text that is itself English, and only after the other engines have had their chance
-                    // at a real English voice.
-                    if (substitutedDeviceVoiceNotice(availability, request.text) != null) {
-                        substitutable += currentCandidate
-                    }
-                    releaseEngine()
-                    initialize()
-                }
-            }
+            evidence.observe(
+                SpeechObservation.DefaultVoiceReported(
+                    runCatching { tts.voice }.getOrNull()?.let(::speechVoiceFact)
+                )
+            )
+            // Success is logged too: the engine's own voice metadata is a device fact a later bug
+            // report needs, even when the app never chose that voice.
+            emitDiagnostic("prepared")
+            speak(request, tts, app.getString(R.string.speech_notice_device_default_voice))
         } catch (_: RuntimeException) {
             // The throwable's own message is never logged; it may echo engine internals or text.
             evidence.recordUtterance("preparation threw")
             releaseEngine()
-            // An engine that throws instead of answering is the same fact as one that answers with a
-            // failure: the substituted voice gives way, and a promised one is reported.
-            if (substituting && pending != null) {
-                initialize()
-            } else {
-                fail(app.getString(R.string.speech_failure_playback))
-            }
+            reportEngineFailure()
         }
     }
 
     /**
-     * Speaks [request] with whatever voice [tts] holds, labelling a voice the app neither chose nor can
-     * name. A voice the engine offered and set is a real answer, so the request is settled here either
-     * way; an engine's own voice is not a promise, so while it speaks the request stays open for the next
-     * engine, which is what the failure paths rely on.
+     * Speaks [request] with the voice the bound engine currently holds. The app never selected that
+     * voice, so there is no alternative voice or engine to hand a failure to: the engine's answer is
+     * the request's answer either way.
      */
-    private fun speak(request: Request, tts: TextToSpeech, notice: String?, substituting: Boolean) {
-        this.substituting = substituting
+    private fun speak(request: Request, tts: TextToSpeech, notice: String?) {
         if (!requestFocus(request)) return
         val notices = listOfNotNull(speechNotice, notice)
         val returned = tts.speak(request.text, TextToSpeech.QUEUE_FLUSH, null, request.id.toString())
         evidence.observe(SpeechObservation.SpeakAnswered(returned))
         val accepted = returned == TextToSpeech.SUCCESS
-        // An engine that accepted the text has answered about its ability to speak it, whether the app
-        // chose the voice or the engine offered its own; a later failure is playback either way.
+        // An engine that accepted the text has answered about its ability to speak it; a later failure
+        // is playback either way.
         if (accepted) utteranceAccepted = true
-        if (!substituting) pending = null
+        pending = null
         if (!accepted) {
             releaseEngine()
-            if (substituting) initialize() else fail(app.getString(R.string.speech_failure_playback_settings))
+            fail(app.getString(R.string.speech_failure_playback_settings))
             return
         }
         speechNotice = null
@@ -681,30 +665,20 @@ class PronunciationPlayer(
         )
     }
 
-    /** No engine is left to try, so the request fails with what every engine answered, and says so. */
+    /** The bound engine's failure ends the request with what the engine itself answered. */
     private fun reportEngineFailure() {
         val failure = deviceSpeechFailure(engineStarted, missingEnglishData, utteranceAccepted)
         engineStarted = false
         missingEnglishData = false
         utteranceAccepted = false
-        substituting = false
-        forgetEngines()
         if (path != Path.Speech || pending == null) return
         fail(app.getString(failure.message), evidence.report(failure))
     }
 
-    private fun forgetEngines() {
-        candidates = emptyList()
-        candidateIndex = 0
-        substitutable.clear()
-        substitutionPass = false
-    }
-
     /**
      * The listener belongs to one engine, and only the engine the player still owns may report progress
-     * for the request. A released engine can still deliver a final callback, and on the final pass the
-     * request is deliberately left open for the next engine, so its stale `onDone` must never finish the
-     * request the failure just handed on.
+     * for the request. A released engine can still deliver a final callback, so its stale `onDone` must
+     * never finish a newer request.
      */
     private fun listenerFor(source: TextToSpeech) = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) = callback(utteranceId) {
@@ -743,19 +717,12 @@ class PronunciationPlayer(
     }
 
     /**
-     * An engine that accepted the request but could not speak it. The engine's own substituted voice was
-     * never promised, so its failure hands the request to the next installed engine; a voice the engine
-     * offered and set is a real answer, so its failure is reported as one, with the same verdict and
-     * evidence as any other playback failure - and in the engine's own words when it said the voice is
-     * not installed yet.
+     * An engine that accepted the request but could not speak it. There is no other engine or voice to
+     * hand the request to, so the failure is reported with the verdict and evidence the engine produced;
+     * an engine that says its voice data is not installed yet is reported as missing data.
      */
     private fun utteranceFailed(errorCode: Int?) {
         releaseEngine()
-        if (substituting && pending != null) {
-            if (errorCode == TextToSpeech.ERROR_NOT_INSTALLED_YET) missingEnglishData = true
-            initialize()
-            return
-        }
         if (errorCode == TextToSpeech.ERROR_NOT_INSTALLED_YET) missingEnglishData = true
         val failure = deviceSpeechFailure(engineStarted, missingEnglishData, utteranceAccepted)
         fail(app.getString(failure.message), evidence.report(failure))
@@ -821,7 +788,6 @@ class PronunciationPlayer(
 
     private fun finish() {
         pending = null
-        substituting = false
         clipObtained = false
         onlineUnavailable = null
         onlineOutcomes.clear()
@@ -851,11 +817,9 @@ class PronunciationPlayer(
         engine?.stop()
         releaseMedia()
         abandonFocus()
-        forgetEngines()
         engineStarted = false
         missingEnglishData = false
         utteranceAccepted = false
-        substituting = false
         clipObtained = false
         onlineUnavailable = null
         onlineOutcomes.clear()
@@ -925,11 +889,9 @@ class PronunciationPlayer(
         releaseMedia()
         abandonFocus()
         // Capabilities are re-read on the next request, so a retry after system settings sees the change.
-        forgetEngines()
         engineStarted = false
         missingEnglishData = false
         utteranceAccepted = false
-        substituting = false
         clipObtained = false
         onlineUnavailable = null
         evidence.clear()
@@ -970,6 +932,7 @@ class PronunciationPlayer(
         cancelInitTimeout()
         engineGeneration++
         ready = false
+        boundKey = null
         val previous = engine
         engine = null
         previous?.shutdown()
@@ -1004,30 +967,7 @@ class PronunciationPlayer(
 internal fun focusLossSilences(playing: Boolean, closed: Boolean, requestId: Long, generation: Long): Boolean =
     !closed && playing && requestId == generation
 
-/**
- * Other engines that declare the platform's TTS service action, so a broken or English-less default
- * engine is not the end of the story. Discovery mirrors how the platform itself finds engines: the
- * declared service action is the only requirement, because real engines such as eSpeak-NG export
- * their TTS service without the binding permission and would otherwise be invisible. Only enabled
- * services are listed, the engine the user chose stays with the default candidate, and nothing
- * OEM-specific is assumed. The default is read from settings rather than
- * TextToSpeech.getDefaultEngine(), which needs an engine context a first-ever lookup may not have.
- */
-internal fun installedSpeechEngines(context: Context): List<String> {
-    val default = defaultSpeechEngine(context)
-    return try {
-        val intent = Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE).addCategory(Intent.CATEGORY_DEFAULT)
-        context.packageManager.queryIntentServices(intent, 0)
-            .mapNotNull { it.serviceInfo?.packageName }
-            .filter { it != default }
-            .distinct()
-            .sorted()
-    } catch (_: Exception) {
-        emptyList()
-    }
-}
-
-/** The engine the reader chose in system settings, or null when the system has no preference yet. */
+/** The engine the system currently prefers, or null when the platform has no preference yet. */
 internal fun defaultSpeechEngine(context: Context): String? = try {
     Settings.Secure.getString(context.contentResolver, Settings.Secure.TTS_DEFAULT_SYNTH)
 } catch (_: Exception) {

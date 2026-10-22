@@ -10,10 +10,6 @@ internal const val NARRATION_CHUNK_CHARS = 190
  */
 internal const val NARRATION_MAX_CHUNKS = 16
 
-/** The lookahead is at most two sentences, and stops adding once the word target is met. */
-internal const val NARRATION_PREFETCH_SENTENCES = 2
-internal const val NARRATION_PREFETCH_WORDS = 50
-
 /**
  * Splits one complete sentence into bounded provider requests without changing a character. Breaks
  * happen at whitespace when possible and at the hard bound only for an unbroken run. The caller still
@@ -49,28 +45,3 @@ internal fun narrationChunks(
     }
     return chunks.takeIf { it.isNotEmpty() }
 }
-
-/** The sentences worth synthesizing ahead: bounded by [maxAhead] and, after the first, by words. */
-internal fun nextNarrationSentences(
-    sentences: List<String>,
-    currentIndex: Int,
-    maxAhead: Int = NARRATION_PREFETCH_SENTENCES,
-    wordTarget: Int = NARRATION_PREFETCH_WORDS
-): List<String> {
-    if (currentIndex !in sentences.indices || maxAhead <= 0) return emptyList()
-    val result = mutableListOf<String>()
-    var words = 0
-    var index = currentIndex + 1
-    while (index < sentences.size && result.size < maxAhead) {
-        val sentence = sentences[index]
-        val sentenceWords = narrationWords(sentence)
-        if (result.isNotEmpty() && words + sentenceWords > wordTarget) break
-        result += sentence
-        words += sentenceWords
-        index++
-    }
-    return result
-}
-
-internal fun narrationWords(sentence: String): Int =
-    sentence.split(Regex("[\\s\\p{Z}\\u0085]+")).count { word -> word.any { it.isLetterOrDigit() } }

@@ -23,6 +23,24 @@ class SentenceStartSkipperTest {
             tokenizer.tokenize(next).map { next.substring(it) }
         )
     }
+    @Test fun precedingBlocksRemainAvailableToPreviousBeforeTheSelectedParagraph() {
+        val skipper = SentenceStartSkipper("The selected paragraph starts here.")
+        val tokenizer = tokenizer(skipper)
+        val precedingBlocks = (1..9).map { "Earlier paragraph $it." }
+
+        val spokenBeforeTarget = precedingBlocks.flatMap { block ->
+            tokenizer.tokenize(block).map { block.substring(it) }
+        }
+        val selectedBlock = "The selected paragraph starts here. Its next sentence follows."
+        val spokenAtTarget = tokenizer.tokenize(selectedBlock).map { selectedBlock.substring(it) }
+
+        assertEquals(precedingBlocks, spokenBeforeTarget)
+        assertEquals(
+            listOf("The selected paragraph starts here.", "Its next sentence follows."),
+            spokenAtTarget
+        )
+    }
+
 
     @Test fun aTargetAtTheStartKeepsEverySentence() {
         val skipper = SentenceStartSkipper("Today is a perfect day.")
@@ -33,17 +51,16 @@ class SentenceStartSkipperTest {
         )
     }
 
-    @Test fun aMismatchingTargetFallsBackInsteadOfSwallowingTheBlock() {
+    @Test fun aMismatchingTargetDoesNotDropEarlierBlocks() {
         val skipper = SentenceStartSkipper("Not in this text.")
-        val text = "First sentence. Second sentence."
         val tokenizer = tokenizer(skipper)
-        repeat(8) {
-            assertEquals(emptyList<IntRange>(), tokenizer.tokenize(text))
+        repeat(9) { index ->
+            val earlierBlock = "Earlier paragraph ${index + 1}."
+            assertEquals(
+                listOf(earlierBlock),
+                tokenizer.tokenize(earlierBlock).map { earlierBlock.substring(it) }
+            )
         }
-        assertEquals(
-            listOf("First sentence.", "Second sentence."),
-            tokenizer.tokenize(text).map { text.substring(it) }
-        )
     }
 
     @Test fun resetRearmsTheSameSkipperForANewVisibleSentence() {

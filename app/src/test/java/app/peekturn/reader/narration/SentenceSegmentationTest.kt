@@ -99,12 +99,11 @@ class SentenceSegmentationTest {
         assertEquals(ranges, skipper.filter(text, ranges))
     }
 
-    @Test fun anAbsentStartTargetFallsBackBeforeSwallowingTheChapter() {
+    @Test fun anAbsentStartTargetPreservesPrecedingContent() {
         val text = "One. Two."
         val ranges = sentenceRanges(text)
         val skipper = SentenceStartSkipper("Not on this page.")
-        repeat(8) { assertTrue(skipper.filter(text, ranges).isEmpty()) }
-        assertEquals(ranges, skipper.filter(text, ranges))
+        repeat(9) { assertEquals(ranges, skipper.filter(text, ranges)) }
     }
 
     @Test fun theReadiumTokenizerAdapterReturnsTheSameRanges() {

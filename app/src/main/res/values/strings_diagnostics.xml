@@ -10,4 +10,7 @@
     <string name="developer_logs_copy">Copy</string>
     <string name="developer_logs_copied">Copied to clipboard</string>
     <string name="developer_logs_clip_label">Peekturn developer log</string>
+    <string name="developer_logs_clear">Clear</string>
+    <string name="developer_logs_cleared">Logs cleared</string>
+    <string name="developer_logs_clear_error">Could not clear the log. Try again.</string>
 </resources>

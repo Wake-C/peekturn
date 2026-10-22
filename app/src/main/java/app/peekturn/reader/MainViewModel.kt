@@ -31,6 +31,7 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
     fun initialize(reopen: Boolean) {
         if (initialized) return
         initialized = true
+        graph.developerLog.recordEvent("library", "startup")
         viewModelScope.launch {
             try {
                 graph.store.load()
@@ -78,9 +79,11 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
         if (_state.value.busy) return
         if (uri.scheme != "content") { message("Choose a readable EPUB from the document picker."); return }
         _state.update { it.copy(busy = true) }
+        graph.developerLog.recordEvent("import", "start")
         viewModelScope.launch {
             try {
                 val book = graph.importer.import(uri)
+                graph.developerLog.recordEvent("import", "complete")
                 _state.update { it.copy(busy = false, pendingBookId = book.id, tab = 0) }
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) {
@@ -107,8 +110,12 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
         }
     }
     fun save(transform: (AppSettings) -> AppSettings) {
+        graph.developerLog.recordEvent("settings", "save-start")
         viewModelScope.launch {
-            try { graph.store.updateSettings(transform) }
+            try {
+                graph.store.updateSettings(transform)
+                graph.developerLog.recordEvent("settings", "save-complete")
+            }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 Log.w("PeekturnSettings", "Save failed: ${e.javaClass.simpleName}")

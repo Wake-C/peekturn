@@ -6,6 +6,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -140,6 +141,42 @@ class DeveloperLogTest {
             val exported = log.export()
             assertTrue(exported.contains("| event-49"))
         } finally {
+            writer.shutdownNow()
+        }
+    }
+
+    @Test fun exportContainsOnlyRecentRecordsWithinSixteenKiB() = runTest {
+        val log = log()
+        repeat(500) { index -> log.recordEvent("app", "event-$index") }
+
+        val exported = log.export()
+
+        assertTrue(exported.toByteArray(Charsets.UTF_8).size <= 16 * 1024)
+        assertTrue(exported.contains(DEVELOPER_LOG_TRUNCATION_MARKER))
+        assertTrue(exported.contains("| event-499"))
+        assertFalse(exported.contains("| event-0"))
+    }
+
+    @Test fun clearWaitsForQueuedWritesAndKeepsLaterRecords() = runTest {
+        val writer = Executors.newSingleThreadExecutor()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        try {
+            writer.execute { entered.countDown(); release.await() }
+            assertTrue(entered.await(10, TimeUnit.SECONDS))
+            val log = log(writer = writer)
+            log.recordEvent("app", "before-clear")
+            val clearing = async { log.clear() }
+            release.countDown()
+            clearing.await()
+            log.recordEvent("app", "after-clear")
+
+            val exported = log.export()
+
+            assertFalse(exported.contains("| before-clear"))
+            assertTrue(exported.contains("| after-clear"))
+        } finally {
+            release.countDown()
             writer.shutdownNow()
         }
     }

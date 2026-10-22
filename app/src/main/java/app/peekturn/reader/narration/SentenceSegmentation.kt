@@ -39,27 +39,22 @@ private val sentenceOpeners = setOf(
 )
 
 /**
- * A one-shot bridge from "what the reader can see" to Readium's utterance iterator. It drops the
- * leading sentences of the first visible block until the canonical sentence containing the visible
- * text begins, then passes everything through. The fallback after [MAX_SKIP_SEGMENTS] prevents a
- * cross-segment tokenization mismatch from swallowing the rest of the block or chapter.
+ * Preserves every non-target block for Readium's backward traversal and trims leading sentences
+ * only from the block containing the selected sentence. Later blocks pass through unchanged.
  */
 internal class SentenceStartSkipper(targetSentence: String) {
     private var target = canonicalSentence(targetSentence)
     private var targetBlock: String? = null
-    private var segments = 0
 
     /** Re-arms the same shared skipper for a new playback position. */
     fun reset(targetSentence: String) {
         target = canonicalSentence(targetSentence)
         targetBlock = null
-        segments = 0
     }
 
     /**
-     * Drops leading sentences until the target, and repeats that trim whenever Readium tokenizes
-     * the same start block again (it builds more than one utterance window). Other blocks pass
-     * through unchanged, so earlier context and later text are never swallowed.
+     * Nonmatching blocks remain intact so previous-utterance navigation keeps its context. The
+     * target block is remembered because Readium can tokenize it more than once.
      */
     fun filter(data: String, ranges: List<IntRange>): List<IntRange> {
         targetBlock?.let { block ->
@@ -67,18 +62,13 @@ internal class SentenceStartSkipper(targetSentence: String) {
             val targetIndex = ranges.indexOfFirst { canonicalSentence(data.substring(it)) == target }
             return if (targetIndex < 0) ranges else ranges.drop(targetIndex)
         }
-        segments++
-        if (segments > MAX_SKIP_SEGMENTS) return ranges
         val targetIndex = ranges.indexOfFirst { canonicalSentence(data.substring(it)) == target }
-        if (targetIndex < 0) return emptyList()
+        if (targetIndex < 0) return ranges
         targetBlock = data
         return ranges.drop(targetIndex)
     }
-
-    private companion object {
-        const val MAX_SKIP_SEGMENTS = 8
-    }
 }
+
 
 @OptIn(ExperimentalReadiumApi::class)
 internal class SentenceTextTokenizer(

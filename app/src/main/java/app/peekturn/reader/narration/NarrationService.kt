@@ -43,8 +43,8 @@ import org.readium.r2.shared.publication.Publication
  *
  * There is no alternate paginator: playback is the same official Readium TTS unit as the in-app
  * controls. The Settings provider choice owns the whole session — Microsoft Read Aloud, Baidu
- * Translate, or the installed Android English voice — and a source change stops this session so a
- * new one cannot inherit old-provider audio.
+ * Translate, or the engine chosen in Android's own TTS settings — and a source change stops this
+ * session so a new one cannot inherit old-provider audio.
  */
 @OptIn(ExperimentalReadiumApi::class)
 class NarrationService : MediaSessionService() {
@@ -90,6 +90,7 @@ class NarrationService : MediaSessionService() {
         }
 
         fun next() { ensureCaller(); playback.value?.next() }
+        fun nextParagraph() { ensureCaller(); playback.value?.nextParagraph() }
         fun previous() { ensureCaller(); playback.value?.previous() }
         fun retry() { ensureCaller(); playback.value?.retry() }
         fun setSpeed(speed: Float) { ensureCaller(); playback.value?.setSpeed(speed) }
@@ -191,6 +192,7 @@ class NarrationService : MediaSessionService() {
         releasePlayback(stopService = false)
         opening?.cancel()
         opening = scope.launch {
+            graph.developerLog.recordEvent("narration", "opening")
             try {
                 val book = graph.store.findBook(requestedBook)
                     ?: error("The book is no longer in the library.")
@@ -206,9 +208,10 @@ class NarrationService : MediaSessionService() {
                     provider = requestedProvider,
                     initialSpeed = speed,
                     providerGate = graph.narrationProviderGate,
+                    systemSynthesisGate = graph.systemSynthesisGate,
                     onEnded = { scope.launch { stopNarration() } },
                     onLocator = { position -> persist(requestedBook, position) },
-                    onDiagnostic = graph.developerLog::recordSystemSpeech
+                    onDiagnostic = graph.developerLog::recordNarration
                 )
                 playback = created
                 if (graph.store.settings.value.sentenceSpeechProvider != requestedProvider) {
@@ -228,7 +231,8 @@ class NarrationService : MediaSessionService() {
                 created.play()
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
+            } catch (failure: Exception) {
+                graph.developerLog.recordFailure("narration", "open", failure)
                 binder.fail(getString(R.string.reader_narration_error_open))
                 scope.launch { stopNarration() }
             }
@@ -246,6 +250,10 @@ class NarrationService : MediaSessionService() {
                     ?: graph.store.findBook(bookId)?.progression
                     ?: 0.0
                 graph.store.savePosition(bookId, json, progression)
+            }.onFailure { failure ->
+                if (failure !is CancellationException) {
+                    graph.developerLog.recordFailure("narration", "position", failure)
+                }
             }
         }
     }

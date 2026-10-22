@@ -55,7 +55,7 @@ class NarrationEnginePauseTest {
         CachedNarrationEngine(
             application = ApplicationProvider.getApplicationContext<Application>(),
             accent = "US",
-            synthesizer = synthesizer,
+            resolver = synthesizer,
             onStarted = { _, _ -> },
             resumePolicy = policy
         )
@@ -90,7 +90,36 @@ class NarrationEnginePauseTest {
         }
     }
 
-    private fun speak(text: String) {
+    /**
+     * A resolver whose synthesis configuration can change between two utterances, as Android's
+     * system voice settings or an online provider selection can while a sentence is paused.
+     */
+    private class SwitchingResolver(private val directory: File) : NarrationAudioResolver {
+        var configuration = "first"
+        val audioRequests = CopyOnWriteArrayList<String>()
+
+        override suspend fun configuration(): String = configuration
+
+        override suspend fun audioFor(sentence: String): Result<NarrationAudio> {
+            audioRequests += sentence
+            val file = File(directory, "clip-$configuration.mp3")
+            if (!file.isFile) {
+                file.writeBytes(ByteArray(417).also {
+                    it[0] = 0xFF.toByte()
+                    it[1] = 0xFB.toByte()
+                    it[2] = 0x90.toByte()
+                    it[3] = 0x64
+                })
+            }
+            return Result.success(NarrationAudio(file, fromCache = false))
+        }
+
+        override fun cancelPending() = Unit
+    }
+
+    private fun speak(text: String) = speak(engine, text)
+
+    private fun speak(engine: CachedNarrationEngine, text: String) {
         val latch = CountDownLatch(1)
         engine.setListener(object : TtsEngine.Listener<NarrationError> {
             override fun onStart(requestId: TtsEngine.RequestId) {
@@ -155,5 +184,39 @@ class NarrationEnginePauseTest {
         speak(sentence)
 
         assertTrue("changing speed does not restart the sentence", lastPlayer().currentPositionRaw >= 9_000)
+    }
+
+    @Test fun aPausedClipDoesNotResumeAfterTheNarrationSourceConfigurationChanged() {
+        val sentence = "The forty fifth word is where the reader pauses to look it up."
+        val resolver = SwitchingResolver(directory)
+        val switching = CachedNarrationEngine(
+            application = ApplicationProvider.getApplicationContext<Application>(),
+            accent = "US",
+            resolver = resolver,
+            onStarted = { _, _ -> },
+            resumePolicy = NarrationResumePolicy()
+        )
+        try {
+            speak(switching, sentence)
+            lastPlayer().setCurrentPosition(45_000)
+            switching.stop()
+
+            // The system voice or provider changed while the sentence was paused. The next resume
+            // must resolve the current configuration instead of replaying the old paused file.
+            resolver.configuration = "second"
+            speak(switching, sentence)
+
+            assertEquals(
+                "a resume resolves the sentence again instead of trusting the old paused file",
+                2,
+                resolver.audioRequests.size
+            )
+            assertTrue(
+                "the old configuration's paused offset cannot carry into the new clip",
+                lastPlayer().currentPositionRaw < 1_000
+            )
+        } finally {
+            switching.close()
+        }
     }
 }

@@ -214,6 +214,39 @@ class PeekturnStoreTest {
         assertTrue("The repaired choice is persisted", repaired.contains("\"sentenceSpeechProvider\":\"MICROSOFT\""))
     }
 
+    @Test fun obsoleteSystemSpeechIsIgnoredAndRemovedWithoutReportingInvalidPreferences() {
+        val prefs = context.getSharedPreferences("peekturn", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("settings", """{"quickExplain":true,"accent":"UK","systemSpeech":7}""")
+            .commit()
+
+        val restored = PeekturnStore(context)
+        assertTrue(restored.settings.value.quickExplain)
+        assertEquals("UK", restored.settings.value.accent)
+        assertNull("An obsolete field is not a damaged preference", restored.error.value)
+        val persisted = prefs.getString("settings", "").orEmpty()
+        assertFalse("The obsolete selection cannot stay dormant in storage", persisted.contains("systemSpeech"))
+        assertEquals(restored.settings.value, PeekturnStore(context).settings.value)
+    }
+
+    @Test fun storedSystemSpeechSelectionIsRemovedWhileOtherSettingsSurvive() {
+        val prefs = context.getSharedPreferences("peekturn", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("settings", """{"quickExplain":true,"accent":"UK","sentenceSpeechProvider":"ANDROID","profiles":[{"id":"default","config":{"name":"Mine","endpoint":"https://provider.example/v1","model":"reader"}}],"systemSpeech":{"enginePackage":"com.google.android.tts","voiceName":"en-us-x-sfg#female_1-local","languageTag":"en-US"}}""")
+            .commit()
+
+        val restored = PeekturnStore(context)
+        assertTrue(restored.settings.value.quickExplain)
+        assertEquals("UK", restored.settings.value.accent)
+        assertEquals(SentenceSpeechProvider.ANDROID, restored.settings.value.sentenceSpeechProvider)
+        assertEquals("Mine", restored.settings.value.model.name)
+        assertNull(restored.error.value)
+        val persisted = prefs.getString("settings", "").orEmpty()
+        assertFalse(persisted.contains("systemSpeech"))
+        assertFalse(persisted.contains("com.google.android.tts"))
+        assertEquals(restored.settings.value, PeekturnStore(context).settings.value)
+    }
+
     @Test fun obsoleteAndUnusableStoredProfileValuesAreRepairedWithoutLosingTheCredential() {
         context.getSharedPreferences("peekturn", Context.MODE_PRIVATE).edit()
             .putString("settings", """{"activeProfileId":"one","profiles":[{"id":"one","config":{"name":"Personal","model":"reader","thinking":true,"temperature":9.5}}]}""")

@@ -49,18 +49,21 @@
     <string name="reader_options_narration_cache">句子音频缓存</string>
     <string name="reader_options_narration_cache_size">已在私有存储保存 %1$s</string>
     <string name="reader_options_narration_clear">清除</string>
-    <string name="reader_options_narration_note">Microsoft Read Aloud 免费且无需密钥，但非官方，也不保证一直可用。只有当前句子及最多后两句会离开设备。句子音频缓存在应用私有存储中，可在这里清除。查词浮窗的单词和例句朗读仍然只保存在内存中。</string>
+    <string name="reader_options_narration_note">Microsoft Read Aloud 免费且无需密钥，但非官方，也不保证一直可用。只有当前句子及附近的后几句会离开设备。句子音频缓存在应用私有存储中，可在这里清除。查词浮窗的单词和例句朗读仍然只保存在内存中。</string>
 
     <string name="reader_narration_status_playing">正在朗读</string>
     <string name="reader_narration_status_paused">已暂停</string>
+    <string name="reader_narration_status_preparing">正在准备音频…</string>
     <string name="reader_narration_play">播放</string>
     <string name="reader_narration_pause">暂停</string>
     <string name="reader_narration_previous">上一句</string>
     <string name="reader_narration_next">下一句</string>
+    <string name="reader_narration_next_paragraph">下一段</string>
     <string name="reader_narration_stop">停止朗读</string>
     <string name="reader_narration_speed">速度</string>
     <string name="reader_narration_speed_value">%1$s×</string>
     <string name="reader_narration_cached">已保存，可离线重播</string>
+    <string name="reader_narration_reserve">已准备 %1$d 段 · 可播放 %2$d 秒</string>
     <string name="reader_narration_retry">重试</string>
     <string name="reader_narration_error_unavailable">无法获取这个句子。请检查网络后重试；已保存的句子仍可离线播放。</string>
     <string name="reader_narration_error_too_long">这个句子太长，无法一次朗读。</string>

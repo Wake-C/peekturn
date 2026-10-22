@@ -1,6 +1,7 @@
 package app.peekturn.reader
 
 import android.app.Application
+import app.peekturn.reader.speech.SystemSpeechLifecycle
 import android.content.Context
 import app.peekturn.reader.data.PeekturnStore
 import app.peekturn.reader.data.OfflineDictionary
@@ -17,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 
 class PeekturnApp : Application() {
     /**
@@ -35,6 +37,7 @@ class PeekturnApp : Application() {
         developerLog.installCrashHandler()
         developerLog.recordEvent("app", "start")
         AppLanguage.apply(this, graph.store.settings.value.uiLanguage)
+        registerActivityLifecycleCallbacks(SystemSpeechLifecycle())
     }
 }
 class AppGraph(
@@ -62,12 +65,12 @@ class AppGraph(
     )
 
     /**
-     * Persistent sentence audio for continuous narration and the app-wide gate that permits only one
-     * provider synthesis request at a time, even across playback-session switches. Popup word and
-     * example speech keeps its separate memory-only player above.
+     * Narration files share one disk budget. Online endpoints remain serialized; system file
+     * requests have a separate app-wide bound of two, including sessions being replaced.
      */
     internal val sentenceAudio = SentenceAudioCache(SentenceAudioCache.directory(context.applicationContext.noBackupFilesDir))
     internal val narrationProviderGate = Mutex()
+    internal val systemSynthesisGate = Semaphore(2)
 
     init {
         var provider = store.settings.value.sentenceSpeechProvider

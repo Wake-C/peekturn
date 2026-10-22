@@ -35,12 +35,20 @@ A 28-second tour that loops: read, listen, look up a word, and import an article
 - Keeps your place when you close the app, restart the phone or change the text size.
 - Shows an explanation for the selected word or phrase, including its meaning in the current sentence and examples.
 - Includes an offline dictionary, online pronunciation for words and examples, a US or UK accent choice, and optional autoplay.
-- Reads the current sentence and the next few sentences aloud, with play, pause, previous, next, speed and stop. It keeps playing with the screen off, and sentences you have heard can be replayed offline.
+- Reads continuously from the current sentence, with play, pause, sentence and paragraph navigation, speed and stop. It prepares upcoming paragraphs, keeps playing with the screen off, and saves completed clips privately for offline replay, including Android system speech.
 - Offers five reading fonts, adjustable size, spacing and margins, five themes, and an interface language choice: Follow system, English or 简体中文.
 - Shows your actual reading time. There are no invented statistics or demo answers.
 - A fresh install includes *The Prophet* by Kahlil Gibran from Project Gutenberg. It is public domain in the USA and stays in your local library like any imported book.
 
 Explanations use an AI provider you configure yourself. Add an HTTPS endpoint, model name and API key in Settings. Peekturn does not include a key or a canned answer. A connection test is a real request and may incur charges.
+
+For system speech, select **Android system speech** in **Settings → Pronunciation**, then open **System speech settings** to choose Android's preferred engine. Manage models, voices and language in that engine's app; Peekturn leaves them untouched. Engine changes apply on the next speech request, and returning from system or engine settings refreshes cached connections without restarting Peekturn.
+
+System narration caches are separated by engine version, reported voice and synthesis settings. Refreshing a connection preserves audio for the same reported configuration. Engines that cannot identify their voice reuse clips only within that connection. If an engine changes its internal model but reports the same voice information, clear sentence audio in Settings. An engine that generates audio more slowly than playback can still exhaust the reserve.
+
+Cold narration prepares the current clip, two complete following paragraphs and at least 15 seconds of playable audio before starting. It then builds toward eight following paragraphs and an adaptive time reserve. End-of-book, unavailable content and resource bounds can leave a smaller reserve; the reader shows what is actually ready. Preparation allows at most two active synthesis requests while building reserve and one when healthy; the engine may still serialize its own model inference. Pause retains completed clips without continuing preparation.
+
+Settings includes a live developer report with recent diagnostics, a 16 KiB copy limit and a Clear action. Clearing the report does not remove books, preferences or sentence audio.
 
 ## Read from the web
 
@@ -81,7 +89,7 @@ For a signed release, see the [release process](RELEASE.md).
 
 Books, progress, preferences and reading statistics stay on the device. There are no accounts and no cloud library.
 
-When you ask for an explanation, only the selected text, a short surrounding snippet and the available book or chapter title are sent to the provider you configured. Your API key is encrypted on the device. Word and sentence audio uses public, key-free services; only the text you asked to hear leaves the device. The offline dictionary does not contact a provider. See the [third-party notices](THIRD_PARTY_NOTICES.md) for the exact audio routes and attribution.
+When you ask for an explanation, only the selected text, a short surrounding snippet and the available book or chapter title are sent to the provider you configured. Your API key is encrypted on the device. Online pronunciation sends the requested word or sentence. Continuous narration also sends bounded upcoming paragraphs to the selected provider; Android system engines may themselves use network voices. The offline dictionary does not contact a provider. See the [third-party notices](THIRD_PARTY_NOTICES.md) for the exact audio routes and attribution.
 
 ## More
 

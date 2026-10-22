@@ -1,5 +1,6 @@
 package app.peekturn.reader.diagnostics
 
+import java.io.IOException
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
@@ -14,14 +15,18 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * The persisted budget. Rotation retains the newest half plus one explicit truncation marker.
- * 256 KiB of UTF-8 plus the small export header stays well inside the clipboard's Binder parcel,
- * so one-tap copy of a full log remains safe.
+ * Default exports stay small enough for one-tap copying while retaining recent UTF-8 records.
  */
 internal const val DEVELOPER_LOG_MAX_BYTES = 256L * 1024
+internal const val DEVELOPER_LOG_EXPORT_MAX_BYTES = 16 * 1024
 
 /** Always written as the first record after rotation, so truncation is visible in a copied log. */
 internal const val DEVELOPER_LOG_TRUNCATION_MARKER = "[developer log truncated: older entries removed]"
@@ -53,6 +58,9 @@ class DeveloperLog internal constructor(
     private val file = File(directory, DEVELOPER_LOG_FILE)
     private val lock = Any()
     private val recordLimit = (maxBytes / 4).coerceIn(512L, MAX_RECORD_BYTES.toLong()).toInt()
+    private val _updates = MutableStateFlow(0L)
+    val updates = _updates.asStateFlow()
+
 
     init {
         require(maxBytes >= MIN_LOG_BYTES) { "Developer log budget is too small" }
@@ -67,6 +75,13 @@ class DeveloperLog internal constructor(
         if (detail.isBlank()) return
         enqueue(record("report", "system-speech", boundedUtf8(detail, recordLimit)))
     }
+    /** Bounded narration lifecycle details; callers must pass only safe diagnostic summaries. */
+    fun recordNarration(report: String) {
+        val detail = normalizeText(report)
+        if (detail.isBlank()) return
+        enqueue(record("report", "narration", boundedUtf8(detail, recordLimit)))
+    }
+
 
     /**
      * A failure in an app-owned feature. [feature] and [category] are fixed short codes. [cause] is
@@ -91,28 +106,42 @@ class DeveloperLog internal constructor(
     }
 
     /**
-     * The current safe device/app/OS/speech-engine snapshot followed by every persisted record.
-     * Pending background writes are drained first, so a just-recorded failure is included. An
-     * existing but unreadable log fails instead of returning a misleading empty report, letting the
-     * viewer show its error and retry state.
+     * The current safe device/app/OS/speech-engine snapshot followed by the newest records that fit
+     * the small export budget. Pending background writes are drained first.
      */
     suspend fun export(): String = withContext(io) {
         drain()
         val current = runCatching { snapshot() }.getOrDefault("Snapshot unavailable.")
         synchronized(lock) {
-            // An existing but unreadable path must reach the viewer's error/retry state; it must never
-            // masquerade as a valid empty log.
-            val events = if (file.exists()) file.readText(StandardCharsets.UTF_8).trimEnd() else ""
-            buildString {
+            val events = if (file.exists()) file.readLines(StandardCharsets.UTF_8) else emptyList()
+            val header = buildString {
                 appendLine("Peekturn developer log")
                 appendLine("Exported: ${Instant.ofEpochMilli(clock())}")
                 appendLine(boundedUtf8(current, MAX_SNAPSHOT_BYTES).trimEnd())
                 appendLine("----")
-                append(if (events.isBlank()) "No recorded events." else events)
-                append('\n')
             }
+            recentExport(header, events)
         }
     }
+    /** Removes persisted diagnostics after all writes already queued on the writer have completed. */
+    suspend fun clear() = withContext(io) {
+        val completed = CompletableDeferred<Unit>()
+        writer.execute {
+            try {
+                synchronized(lock) {
+                    if (file.exists() && !file.delete()) {
+                        throw IOException("Could not clear developer log")
+                    }
+                }
+                _updates.update { it + 1 }
+                completed.complete(Unit)
+            } catch (error: Throwable) {
+                completed.completeExceptionally(error)
+            }
+        }
+        completed.await()
+    }
+
 
     /**
      * Installs the process handler once and preserves whatever handler was already present. Logging
@@ -133,6 +162,7 @@ class DeveloperLog internal constructor(
     private fun enqueue(line: String) {
         try {
             writer.execute { appendSafely(line) }
+            _updates.update { it + 1 }
         } catch (_: Throwable) {
             // Diagnostics must never break the feature or surface a second failure.
         }
@@ -210,6 +240,30 @@ class DeveloperLog internal constructor(
         private val crashHandlerInstalled = AtomicBoolean(false)
 
         internal fun directory(noBackupFilesDir: File): File = File(noBackupFilesDir, DEVELOPER_LOG_DIRECTORY)
+    }
+}
+
+private fun recentExport(header: String, records: List<String>): String {
+    val maxBytes = DEVELOPER_LOG_EXPORT_MAX_BYTES
+    val headerBytes = header.toByteArray(StandardCharsets.UTF_8).size
+    val markerBytes = (DEVELOPER_LOG_TRUNCATION_MARKER + "\n").toByteArray(StandardCharsets.UTF_8).size
+    val retained = ArrayDeque<String>()
+    var used = headerBytes
+    for (record in records.asReversed()) {
+        val size = record.toByteArray(StandardCharsets.UTF_8).size + 1
+        if (used + markerBytes + size > maxBytes) break
+        retained.addFirst(record)
+        used += size
+    }
+    val truncated = retained.size < records.size
+    return buildString {
+        append(header)
+        if (records.isEmpty()) {
+            appendLine("No recorded events.")
+        } else {
+            if (truncated) appendLine(DEVELOPER_LOG_TRUNCATION_MARKER)
+            retained.forEach { appendLine(it) }
+        }
     }
 }
 

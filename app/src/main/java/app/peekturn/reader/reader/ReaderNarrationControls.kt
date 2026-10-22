@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -59,6 +60,7 @@ internal fun ReaderNarrationCard(
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onNextParagraph: () -> Unit,
     onSpeed: () -> Unit,
     onStop: () -> Unit,
     onRetry: () -> Unit,
@@ -79,8 +81,11 @@ internal fun ReaderNarrationCard(
             ) {
                 Text(
                     stringResource(
-                        if (state.playing) R.string.reader_narration_status_playing
-                        else R.string.reader_narration_status_paused
+                        when {
+                            state.buffering -> R.string.reader_narration_status_preparing
+                            state.playing -> R.string.reader_narration_status_playing
+                            else -> R.string.reader_narration_status_paused
+                        }
                     ),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -98,6 +103,19 @@ internal fun ReaderNarrationCard(
                         modifier = Modifier.weight(1f)
                     )
                 }
+            }
+            if (state.active) {
+                Text(
+                    stringResource(
+                        R.string.reader_narration_reserve,
+                        state.readyParagraphs,
+                        (state.readyDurationMs / 1_000L).toInt()
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)
+                )
             }
             if (state.notice != null && state.error == null) {
                 Text(
@@ -149,6 +167,12 @@ internal fun ReaderNarrationCard(
                     Icon(
                         Icons.Filled.SkipNext,
                         contentDescription = stringResource(R.string.reader_narration_next)
+                    )
+                }
+                IconButton(onClick = onNextParagraph, modifier = Modifier.size(42.dp)) {
+                    Icon(
+                        Icons.Filled.FastForward,
+                        contentDescription = stringResource(R.string.reader_narration_next_paragraph)
                     )
                 }
                 TextButton(onClick = onSpeed, modifier = Modifier.heightIn(min = 42.dp)) {

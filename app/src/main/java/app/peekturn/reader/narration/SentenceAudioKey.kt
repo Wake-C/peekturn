@@ -3,7 +3,11 @@ package app.peekturn.reader.narration
 import app.peekturn.reader.model.SentenceSpeechProvider
 import java.security.MessageDigest
 
-/** The synthesis configuration a cached clip belongs to; none of this is the reading cursor. */
+/**
+ * The synthesis configuration a cached clip belongs to; none of this is the reading cursor. The
+ * four fields stay separate in the hash, so an engine version, voice, prosody or container change
+ * each produces a different key (for system speech, [format] names the Wave sample format).
+ */
 internal data class NarrationVoiceSpec(
     val engine: String,
     val voice: String,
@@ -32,7 +36,8 @@ internal fun narrationVoice(accent: String): NarrationVoiceSpec? = when (accent)
  * The synthesis configuration for a selected online narration provider. Baidu has one English voice,
  * so the accent does not reach it and does not enter its cache key; its engine, voice, prosody and
  * format still differ from Microsoft's, so neither route can ever read the other's cached clip.
- * Android speech is rendered by the installed system engine and has no cache configuration.
+ * Android speech is rendered locally by the installed system engine, whose cache profile is built
+ * from the bound engine's reported identity by that renderer, so this online route has none.
  */
 internal fun narrationVoice(
     provider: SentenceSpeechProvider,

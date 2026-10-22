@@ -13,12 +13,27 @@ import kotlinx.coroutines.sync.withLock
 internal sealed class NarrationFailure(message: String) : Exception(message) {
     class Unavailable : NarrationFailure("The read-aloud service returned no complete audio.")
     class TooLong : NarrationFailure("The sentence is too long to read aloud in one piece.")
-    class InvalidAudio : NarrationFailure("The read-aloud answer was not complete MPEG audio.")
+    class InvalidAudio : NarrationFailure("The read-aloud answer was not complete supported audio.")
     class TooLarge : NarrationFailure("The sentence audio is larger than the cache allows.")
     class Storage : NarrationFailure("The sentence audio could not be stored.")
+    class Device(val code: Int) : NarrationFailure("The system speech engine could not produce complete audio (code $code).")
 }
 
-internal data class NarrationAudio(val file: File, val fromCache: Boolean)
+internal data class NarrationAudio(
+    val file: File,
+    val fromCache: Boolean,
+    val durationMs: Long = 0L,
+    val configuration: String? = null,
+    val diagnosticIdentity: String? = null
+)
+
+/** The complete cached audio for a sentence; providers own synthesis and its configuration identity. */
+internal interface NarrationAudioResolver {
+    suspend fun configuration(): String
+    suspend fun audioFor(sentence: String): Result<NarrationAudio>
+    fun cancelPending()
+    fun close() { cancelPending() }
+}
 
 /** One bounded provider request for transport; a returned null means the whole sentence failed. */
 internal fun interface NarrationChunkSource {
@@ -44,15 +59,18 @@ internal class NarrationSynthesizer(
     private val accent: String,
     private val voice: NarrationVoiceSpec,
     private val providerGate: Mutex = Mutex()
-) {
+) : NarrationAudioResolver {
     private val flights = mutableMapOf<String, Deferred<Result<NarrationAudio>>>()
+    private val configurationKey = sentenceAudioKey("", voice)
 
-    suspend fun audioFor(sentence: String): Result<NarrationAudio> {
+    override suspend fun configuration(): String = configurationKey
+
+    override suspend fun audioFor(sentence: String): Result<NarrationAudio> {
         val canonical = canonicalSentence(sentence)
         if (canonical.isBlank()) return Result.failure(NarrationFailure.Unavailable())
         val key = sentenceAudioKey(canonical, voice)
 
-        cache.get(key)?.let { return Result.success(NarrationAudio(it, fromCache = true)) }
+        cache.get(key)?.let { return Result.success(it) }
 
         val flight = synchronized(flights) {
             flights[key] ?: scope.async(start = CoroutineStart.LAZY) { synthesize(canonical, key) }
@@ -67,13 +85,8 @@ internal class NarrationSynthesizer(
         return flight.await()
     }
 
-    /** Best-effort lookahead; a prefetch failure never reaches the reader as a playback error. */
-    suspend fun prefetch(sentence: String) {
-        audioFor(sentence)
-    }
-
     /** A stop cancels every queued or in-flight synthesis; the cache keeps only complete clips. */
-    fun cancelPending() {
+    override fun cancelPending() {
         val pending = synchronized(flights) {
             flights.values.toList().also { flights.clear() }
         }
@@ -86,7 +99,7 @@ internal class NarrationSynthesizer(
         return try {
             providerGate.withLock {
                 // A concurrent caller may have stored the same sentence while this one waited.
-                cache.get(key)?.let { return@withLock Result.success(NarrationAudio(it, true)) }
+                cache.get(key)?.let { return@withLock Result.success(it) }
 
                 val collected = ArrayList<ByteArray>(chunks.size)
                 var total = 0L
@@ -103,7 +116,7 @@ internal class NarrationSynthesizer(
                     ?: return@withLock Result.failure(NarrationFailure.InvalidAudio())
                 val file = cache.put(key, joined, epoch)
                     ?: return@withLock Result.failure(NarrationFailure.Storage())
-                Result.success(NarrationAudio(file, fromCache = false))
+                Result.success(file)
             }
         } catch (cancelled: CancellationException) {
             throw cancelled

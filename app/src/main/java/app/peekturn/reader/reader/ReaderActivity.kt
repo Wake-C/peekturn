@@ -250,6 +250,7 @@ class ReaderActivity : AppCompatActivity() {
                                         },
                                         onPrevious = { narrationPlayback?.previous() },
                                         onNext = { narrationPlayback?.next() },
+                                        onNextParagraph = { narrationPlayback?.nextParagraph() },
                                         onSpeed = { narrationPlayback?.setSpeed(nextNarrationSpeed(narrationUi.speed)) },
                                         onStop = { stopNarration(showChrome = true) },
                                         onRetry = { narrationPlayback?.retry() },

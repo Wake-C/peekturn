@@ -51,4 +51,12 @@ class Mp3AudioTest {
         assertNull(Mp3Audio.concat(listOf(frame(), frame().copyOf(100))))
         assertNull(Mp3Audio.concat(emptyList()))
     }
+
+    @Test fun durationIsTheSumOfRealFrameTimeNotTheFileSize() {
+        // One MPEG-1 Layer III frame is 1152 samples at 44.1 kHz: 26 ms, not the 417-byte length.
+        assertEquals(26L, Mp3Audio.durationMs(frame()))
+        assertEquals(52L, Mp3Audio.durationMs(frame() + frame()))
+        assertNull(Mp3Audio.durationMs(frame().copyOf(416)))
+        assertNull(Mp3Audio.durationMs(byteArrayOf()))
+    }
 }

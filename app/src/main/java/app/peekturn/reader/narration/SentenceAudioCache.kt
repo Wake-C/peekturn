@@ -19,10 +19,17 @@ internal const val NARRATION_MAX_SENTENCE_AUDIO_BYTES = 16L * 1024 * 1024
 
 internal val sentenceAudioKeyPattern = Regex("[0-9a-f]{64}")
 
+/** The container a cached clip is stored in. The extension is the only format-specific disk name. */
+internal enum class NarrationAudioFormat(val extension: String) {
+    Mp3("mp3"),
+    Wave("wav")
+}
+
 /**
  * Persistent, app-private sentence audio. A name is the opaque synthesis key; no book text reaches
- * a filename or a log. Writes are validated complete MP3 frame sequences and land with an atomic
- * rename, so a killed process can leave a temporary file but never a partial playable clip.
+ * a filename or a log. Writes are validated complete streams and land with an atomic rename, so a
+ * killed process can leave a temporary file but never a partial playable clip. MP3 and WAV clips
+ * share one byte budget and one least-recently-used order.
  *
  * This store belongs to continuous narration only. Popup word and example pronunciation keeps its
  * existing memory-only lifetime and never reads or writes here.
@@ -35,8 +42,8 @@ internal class SentenceAudioCache(
     private val generation = AtomicLong(0L)
 
     /**
-     * Total bytes of `.mp3` clips, initialized once from the directory and then maintained under
-     * [mutex]. A cache hit or a normal write below the quota never enumerates the directory.
+     * Total bytes of every clip in both formats, initialized once from the directory and then
+     * maintained under [mutex]. A cache hit or a normal write below the quota never enumerates.
      */
     private var usageBytes: Long? = null
 
@@ -47,57 +54,65 @@ internal class SentenceAudioCache(
     /** The cache-wide clear generation; a synthesis begun before a clear cannot write afterward. */
     fun epoch(): Long = generation.get()
 
-    /** A complete, previously synthesized clip, refreshed as most recently used. */
-    suspend fun get(key: String): File? = withContext(Dispatchers.IO) {
+    /**
+     * A complete, previously synthesized clip with its real duration, refreshed as most recently
+     * used. A damaged clip is removed instead of being decoded as a shorter sentence.
+     */
+    suspend fun get(
+        key: String,
+        format: NarrationAudioFormat = NarrationAudioFormat.Mp3
+    ): NarrationAudio? = withContext(Dispatchers.IO) {
         if (!sentenceAudioKeyPattern.matches(key)) return@withContext null
         mutex.withLock {
             ensureAccounting()
-            val file = clip(key)
+            val file = clip(key, format)
             if (!file.isFile) return@withLock null
             val length = file.length()
-            if (length <= 0L) return@withLock null
-            if (length > NARRATION_MAX_SENTENCE_AUDIO_BYTES) {
-                file.delete()
-                usageBytes = null
+            if (length <= 0L) {
+                discard(file)
                 return@withLock null
             }
-            // The write was validated, but a private file can still be damaged by the device. A
-            // damaged clip is removed rather than decoded as a shorter sentence.
-            val valid = runCatching { Mp3Audio.complete(file.readBytes()) }.getOrDefault(false)
-            if (!valid) {
-                file.delete()
-                // The file's counted size may no longer match its current size, so recompute once
-                // on the next operation rather than subtracting a stale length.
-                usageBytes = null
+            if (length > NARRATION_MAX_SENTENCE_AUDIO_BYTES) {
+                discard(file)
+                return@withLock null
+            }
+            // The write was validated, but a private file can still be damaged by the device.
+            val durationMs = when (format) {
+                NarrationAudioFormat.Mp3 ->
+                    runCatching { Mp3Audio.durationMs(file.readBytes()) }.getOrNull()
+                NarrationAudioFormat.Wave -> WaveAudio.durationMs(file)
+            }
+            if (durationMs == null) {
+                discard(file)
                 return@withLock null
             }
             file.setLastModified(System.currentTimeMillis())
-            file
+            NarrationAudio(file = file, fromCache = true, durationMs = durationMs)
         }
     }
 
-    /** Writes [audio] atomically when it is a complete frame sequence; null means nothing was kept. */
+    /** Writes MP3 [audio] atomically when it is a complete frame sequence; null keeps nothing. */
     suspend fun put(
         key: String,
         audio: ByteArray,
         expectedEpoch: Long = generation.get()
-    ): File? = withContext(Dispatchers.IO) {
+    ): NarrationAudio? = withContext(Dispatchers.IO) {
         if (!sentenceAudioKeyPattern.matches(key)) return@withContext null
         if (
             audio.isEmpty() ||
             audio.size.toLong() > NARRATION_MAX_SENTENCE_AUDIO_BYTES ||
-            audio.size.toLong() > maxBytes ||
-            !Mp3Audio.complete(audio)
+            audio.size.toLong() > maxBytes
         ) {
             return@withContext null
         }
+        val durationMs = Mp3Audio.durationMs(audio) ?: return@withContext null
         mutex.withLock {
             if (expectedEpoch != generation.get()) return@withLock null
             ensureAccounting()
             directory.mkdirs()
-            val target = clip(key)
+            val target = clip(key, NarrationAudioFormat.Mp3)
             val previousLength = if (target.isFile) target.length() else 0L
-            val temporary = File(directory, "$key.tmp")
+            val temporary = File(directory, "${target.name}.tmp")
             try {
                 FileOutputStream(temporary).use { output ->
                     output.write(audio)
@@ -112,7 +127,59 @@ internal class SentenceAudioCache(
             changeUsage(audio.size.toLong() - previousLength)
             target.setLastModified(System.currentTimeMillis())
             evictIfNeeded(protected = target)
-            target
+            // A clear that incremented the epoch while this write held the lock must win.
+            if (expectedEpoch != generation.get()) {
+                discard(target)
+                return@withLock null
+            }
+            NarrationAudio(file = target, fromCache = false, durationMs = durationMs)
+        }
+    }
+
+    /**
+     * Validates an already rendered WAV and moves [source] into the cache atomically. The file is
+     * streamed for validation, never copied into one byte array. Null means nothing was kept; a
+     * source that was not moved remains the caller's to delete.
+     */
+    suspend fun putWave(
+        key: String,
+        source: File,
+        expectedEpoch: Long = generation.get()
+    ): NarrationAudio? = withContext(Dispatchers.IO) {
+        if (!sentenceAudioKeyPattern.matches(key)) return@withContext null
+        if (!source.isFile) return@withContext null
+        val sourceLength = source.length()
+        if (
+            sourceLength <= 0L ||
+            sourceLength > NARRATION_MAX_SENTENCE_AUDIO_BYTES ||
+            sourceLength > maxBytes
+        ) {
+            return@withContext null
+        }
+        val durationMs = WaveAudio.durationMs(source) ?: return@withContext null
+        mutex.withLock {
+            if (expectedEpoch != generation.get()) return@withLock null
+            ensureAccounting()
+            directory.mkdirs()
+            val target = clip(key, NarrationAudioFormat.Wave)
+            val previousLength = if (target.isFile) target.length() else 0L
+            if (!moveValidated(source, target)) return@withLock null
+            // The caller owned the source and could have written it mid-validation; a length that
+            // no longer matches the validated stream must not be published.
+            val storedLength = target.length()
+            if (storedLength != sourceLength) {
+                discard(target)
+                return@withLock null
+            }
+            changeUsage(storedLength - previousLength)
+            target.setLastModified(System.currentTimeMillis())
+            evictIfNeeded(protected = target)
+            // A clear that incremented the epoch while this move held the lock must win.
+            if (expectedEpoch != generation.get()) {
+                discard(target)
+                return@withLock null
+            }
+            NarrationAudio(file = target, fromCache = false, durationMs = durationMs)
         }
     }
 
@@ -130,10 +197,19 @@ internal class SentenceAudioCache(
         }
     }
 
-    private fun clip(key: String) = File(directory, "$key.mp3")
+    private fun clip(key: String, format: NarrationAudioFormat) =
+        File(directory, "$key.${format.extension}")
 
     private fun clips(): List<File> =
-        directory.listFiles { file -> file.isFile && file.name.endsWith(".mp3") }?.toList().orEmpty()
+        directory.listFiles { file -> file.isFile && clipNamePattern.matches(file.name) }
+            ?.toList()
+            .orEmpty()
+
+    /** Removes a damaged file and forces the next accounting pass to recount what is left. */
+    private fun discard(file: File) {
+        file.delete()
+        usageBytes = null
+    }
 
     /** First use scans the directory once; every later call is O(1). Caller holds [mutex]. */
     private fun ensureAccounting(): Long {
@@ -151,9 +227,10 @@ internal class SentenceAudioCache(
 
     /**
      * Oldest access first, with the name breaking timestamp ties, until the cache is within its
-     * bound. Only a write that crossed the bound enumerates the directory, and it trims to 95% so
-     * the next several sentence writes do not scan again. [protected] is never evicted: the clip
-     * just written must remain readable even when it is the only entry and the bound is tight.
+     * bound. Both formats share this order. Only a write that crossed the bound enumerates the
+     * directory, and it trims to 95% so the next several sentence writes do not scan again.
+     * [protected] is never evicted: the clip just written must remain readable even when it is the
+     * only entry and the bound is tight.
      */
     private fun evictIfNeeded(protected: File) {
         var total = usageBytes ?: return
@@ -168,6 +245,42 @@ internal class SentenceAudioCache(
             if (clip.delete()) total -= length
         }
         usageBytes = total
+    }
+
+    /**
+     * Moves the validated source to its final name without ever exposing a partial target. A
+     * same-filesystem move is one atomic rename; anything else is streamed to a temporary inside
+     * the cache directory and then atomically renamed.
+     */
+    private fun moveValidated(source: File, target: File): Boolean {
+        if (source.absoluteFile == target.absoluteFile) return true
+        try {
+            Files.move(
+                source.toPath(), target.toPath(),
+                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING
+            )
+            return true
+        } catch (_: AtomicMoveNotSupportedException) {
+            // Fall through to a same-directory temporary file.
+        } catch (_: Exception) {
+            return false
+        }
+        val temporary = File(directory, "${target.name}.tmp")
+        return try {
+            source.inputStream().use { input ->
+                FileOutputStream(temporary).use { output ->
+                    input.copyTo(output)
+                    output.flush()
+                    output.fd.sync()
+                }
+            }
+            moveAtomically(temporary, target)
+            source.delete()
+            true
+        } catch (_: Exception) {
+            temporary.delete()
+            false
+        }
     }
 
     private fun moveAtomically(temporary: File, target: File) {
@@ -188,3 +301,5 @@ internal class SentenceAudioCache(
         fun directory(noBackupFiles: File): File = File(noBackupFiles, DIRECTORY_NAME)
     }
 }
+
+private val clipNamePattern = Regex("[0-9a-f]{64}\\.(mp3|wav)")

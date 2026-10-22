@@ -132,10 +132,19 @@ private fun PeekturnHome(
                 1 -> StatisticsScreen(stats, books, vm::open)
                 else -> SettingsScreen(
                     settings, vm::save, vm.graph.explanations::testConnection, vm.graph.speech,
-                    vm.graph.explanationCache::sizeBytes, vm.graph.explanationCache::clear,
+                    vm.graph.explanationCache::sizeBytes,
+                    {
+                        vm.graph.explanationCache.clear()
+                        vm.graph.developerLog.recordEvent("cache", "explanation-clear")
+                    },
                     vm.graph.sentenceAudio::sizeBytes,
-                    { NarrationService.clearCache(context) },
-                    vm.graph.developerLog::export
+                    {
+                        NarrationService.clearCache(context)
+                        vm.graph.developerLog.recordEvent("cache", "narration-clear")
+                    },
+                    vm.graph.developerLog::export,
+                    vm.graph.developerLog::clear,
+                    vm.graph.developerLog.updates
                 )
             }
             if (state.busy) Surface(color = MaterialTheme.colorScheme.background.copy(alpha = .96f), modifier = Modifier.fillMaxSize()) {

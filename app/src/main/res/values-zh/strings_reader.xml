@@ -45,9 +45,7 @@
     <string name="reader_toast_unsafe_location">此位置标识不安全。</string>
 
     <!-- 语音提示与错误。其下的诊断报告保持英文。 -->
-    <string name="speech_notice_accent_not_guaranteed">正在使用系统英语语音，可能无法按所选口音朗读。</string>
-    <string name="speech_notice_language_unconfirmed">语音引擎已接受英语，但无法确认其语音的语言或口音。</string>
-    <string name="speech_notice_device_default_voice">正在使用本机自带的语音，而不是已安装的英语语音；可能无法按所选口音朗读。</string>
+    <string name="speech_notice_device_default_voice">正在使用系统语音引擎配置的音色和语言，可在系统或引擎设置中更改。</string>
     <string name="speech_notice_baidu_accent">百度翻译只有一个英语语音，可能无法按所选口音朗读。</string>
     <string name="speech_notice_no_online_audio">这段文字没有可用的在线音频，已改用系统语音。</string>
     <string name="speech_failure_too_long_online">这段文字过长，无法使用在线音频</string>
@@ -60,8 +58,8 @@
     <string name="speech_failure_baidu_unavailable">百度翻译没有返回音频。</string>
     <string name="speech_failure_online_and_device">%1$s，%2$s</string>
     <string name="speech_failure_engine_not_started">设备语音引擎没有启动，请打开系统语音设置检查。</string>
-    <string name="speech_failure_missing_english_data">语音引擎报告英语语音数据缺失，请打开系统语音设置下载后再试。</string>
-    <string name="speech_failure_no_english_voice">设备上的语音引擎都没有提供英语语音，请检查系统语音设置。</string>
+    <string name="speech_failure_missing_english_data">系统语音引擎报告音色数据缺失，请打开系统语音设置下载后再试。</string>
+    <string name="speech_failure_preparation_failed">系统语音引擎未能完成准备，请检查系统语音设置后重试。</string>
     <string name="speech_failure_engine_playback">语音引擎接受了英语文本，但无法朗读，请检查系统语音设置或选择其他引擎。</string>
     <string name="speech_failure_too_long_for_system">这段文字过长，系统语音无法朗读，请选择更短的片段。</string>
     <string name="speech_failure_playback">语音播放失败，请检查系统语音设置后重试。</string>
@@ -70,7 +68,7 @@
     <string name="speech_failure_choose_accent">请选择美式或英式发音。</string>
     <string name="speech_failure_no_text">没有可朗读的文字。</string>
     <string name="speech_failure_audio_unavailable">当前无法播放音频，请重试朗读。</string>
-    <string name="speech_source_notice">短语、例句、预览和朗读只会发送给你在此选择的来源。Microsoft Read Aloud 与百度翻译均免费、无需密钥，但非官方也未获授权，无法保证一直可用；百度只有一个英语语音，无法满足美式或英式的选择。Android 系统语音使用设备的语音引擎，而不是 Microsoft 或百度服务；该引擎的语音可能通过网络合成。只有你选择朗读的文字会发送，书籍上下文不会。单个单词仍优先尝试有道词典的录音，其次尝试两个语音服务，最后使用已安装的系统语音。</string>
+    <string name="speech_source_notice">短语、例句、预览和朗读只会发送给你在此选择的来源。Microsoft Read Aloud 与百度翻译均免费、无需密钥，但非官方也未获授权，无法保证一直可用；百度只有一个英语语音，无法满足美式或英式的选择。Android 系统语音使用设备的语音引擎，而不是 Microsoft 或百度服务，该引擎的语音可能通过网络合成。连续朗读还会发送后续段落，提前准备音频，不会发送 AI 凭据。单个单词仍优先尝试有道词典的录音，其次尝试两个语音服务，最后使用已安装的系统语音。</string>
     <string name="speech_report_copy_details">复制详情</string>
     <string name="speech_report_copied">已复制</string>
     <string name="speech_report_clip_label">语音详情</string>

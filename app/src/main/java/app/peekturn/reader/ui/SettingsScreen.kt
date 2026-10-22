@@ -45,6 +45,8 @@ import app.peekturn.reader.speech.PronunciationPlayer
 import app.peekturn.reader.speech.SpeechReport
 import app.peekturn.reader.speech.SpeechState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -58,7 +60,9 @@ fun SettingsScreen(
     onClearExplanationCache: suspend () -> Unit,
     onNarrationCacheBytes: suspend () -> Long,
     onClearNarrationCache: suspend () -> Unit,
-    onDeveloperLogExport: suspend () -> String
+    onDeveloperLogExport: suspend () -> String,
+    onDeveloperLogClear: suspend () -> Unit,
+    developerLogUpdates: kotlinx.coroutines.flow.StateFlow<Long>
 ) {
     var editingProfile by remember { mutableStateOf<LlmProfile?>(null) }
     var addingProfile by remember { mutableStateOf(false) }
@@ -167,6 +171,8 @@ fun SettingsScreen(
     if (developerLogsOpen) {
         DeveloperLogDialog(
             onExport = onDeveloperLogExport,
+            onClear = onDeveloperLogClear,
+            updates = developerLogUpdates,
             onDismiss = { developerLogsOpen = false }
         )
     }
@@ -333,33 +339,43 @@ private fun NarrationCacheDialog(
 @Composable
 private fun DeveloperLogDialog(
     onExport: suspend () -> String,
+    onClear: suspend () -> Unit,
+    updates: kotlinx.coroutines.flow.StateFlow<Long>,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val clipLabel = stringResource(R.string.developer_logs_clip_label)
+    val clearButtonLabel = stringResource(R.string.developer_logs_clear)
+    val clearSuccessLabel = stringResource(R.string.developer_logs_cleared)
+    val clearErrorLabel = stringResource(R.string.developer_logs_clear_error)
     var report by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var failed by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf(false) }
     var copyFailed by remember { mutableStateOf(false) }
+    var copying by remember { mutableStateOf(false) }
     var attempt by remember { mutableStateOf(0) }
-    LaunchedEffect(attempt) {
-        loading = true
-        failed = false
-        copied = false
-        copyFailed = false
-        try {
-            val exported = onExport()
-            report = exported
-            failed = exported.isBlank()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            report = null
-            failed = true
-        } finally {
-            loading = false
+    var clearFailed by remember { mutableStateOf(false) }
+    var cleared by remember { mutableStateOf(false) }
+    var clearing by remember { mutableStateOf(false) }
+    LaunchedEffect(attempt, updates) {
+        updates.collect {
+            // StateFlow conflates writes during this delay. Continuous narration must not cancel
+            // every refresh, flash the initial spinner, or keep the copy action disabled.
+            if (report != null) delay(500L)
+            loading = report == null
+            try {
+                val exported = onExport()
+                report = exported
+                failed = exported.isBlank()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                failed = true
+            } finally {
+                loading = false
+            }
         }
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -397,8 +413,36 @@ private fun DeveloperLogDialog(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error)
                 }
+                if (cleared) {
+                    Text(clearSuccessLabel, style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary)
+                }
+                if (clearFailed) {
+                    Text(clearErrorLabel, style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error)
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        scope.launch {
+                            clearing = true
+                            cleared = false
+                            clearFailed = false
+                            try {
+                                onClear()
+                                report = onExport()
+                                cleared = true
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                clearFailed = true
+                            } finally {
+                                clearing = false
+                            }
+                        }
+                    }, enabled = !clearing, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text(clearButtonLabel)
+                    }
                     if (failed) {
                         TextButton(onClick = { attempt++ }, modifier = Modifier.heightIn(min = 48.dp)) {
                             Text(stringResource(R.string.developer_logs_retry))
@@ -410,7 +454,7 @@ private fun DeveloperLogDialog(
                     Spacer(Modifier.width(8.dp))
                     Button(onClick = {
                         scope.launch {
-                            loading = true
+                            copying = true
                             copied = false
                             copyFailed = false
                             try {
@@ -425,10 +469,10 @@ private fun DeveloperLogDialog(
                             } catch (_: Exception) {
                                 copyFailed = true
                             } finally {
-                                loading = false
+                                copying = false
                             }
                         }
-                    }, enabled = !loading && !failed && !report.isNullOrBlank(),
+                    }, enabled = !loading && !copying && !failed && !report.isNullOrBlank(),
                         modifier = Modifier.heightIn(min = 48.dp)) {
                         Text(stringResource(R.string.developer_logs_copy))
                     }
@@ -485,6 +529,21 @@ private fun PronunciationSection(
                 ) {
                     speech.stop()
                     onSave { latest -> latest.copy(sentenceSpeechProvider = provider) }
+                }
+            }
+        }
+        if (settings.sentenceSpeechProvider == SentenceSpeechProvider.ANDROID) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    stringResource(R.string.settings_source_android_system_voice),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(
+                    onClick = { speech.openSystemSettings() },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text(stringResource(R.string.settings_system_speech_settings))
                 }
             }
         }

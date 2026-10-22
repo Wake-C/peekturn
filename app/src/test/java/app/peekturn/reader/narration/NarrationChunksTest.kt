@@ -41,34 +41,4 @@ class NarrationChunksTest {
         val sentence = ("word ".repeat(NARRATION_MAX_CHUNKS * 40)).trim() + "."
         assertNull(narrationChunks(sentence))
     }
-
-    @Test fun prefetchIsBoundedByTwoSentencesAndTheWordTarget() {
-        val sentences = listOf(
-            "The current sentence.",
-            "A second sentence with several words in it.",
-            "A third sentence that is also fairly long for a sentence.",
-            "A fourth sentence."
-        )
-        assertEquals(
-            listOf("A second sentence with several words in it."),
-            nextNarrationSentences(sentences, currentIndex = 0, maxAhead = 2, wordTarget = 8)
-        )
-        assertEquals(
-            listOf("A second sentence with several words in it.", "A third sentence that is also fairly long for a sentence."),
-            nextNarrationSentences(sentences, currentIndex = 0, maxAhead = 2, wordTarget = 50)
-        )
-    }
-
-    @Test fun theFirstFollowingSentenceIsAlwaysIncludedEvenWhenItIsLong() {
-        val long = "word ".repeat(80).trim() + "."
-        assertEquals(
-            listOf(long),
-            nextNarrationSentences(listOf("Current.", long, "After."), currentIndex = 0, maxAhead = 2, wordTarget = 50)
-        )
-    }
-
-    @Test fun thereIsNothingToPrefetchAfterTheLastSentence() {
-        assertEquals(emptyList<String>(), nextNarrationSentences(listOf("Only."), currentIndex = 0))
-        assertEquals(emptyList<String>(), nextNarrationSentences(emptyList(), currentIndex = 0))
-    }
 }
