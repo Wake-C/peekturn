@@ -107,7 +107,7 @@ internal fun ReaderNarrationCard(
             }
             if (state.active) {
                 Text(
-                    stringResource(
+                    if (state.savedAudio) stringResource(R.string.reader_narration_saved_source) else stringResource(
                         R.string.reader_narration_reserve,
                         state.readyParagraphs,
                         (state.readyDurationMs / 1_000L).toInt()

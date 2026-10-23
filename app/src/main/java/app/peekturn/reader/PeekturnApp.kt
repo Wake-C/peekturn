@@ -12,6 +12,9 @@ import app.peekturn.reader.learning.ExplanationClient
 import app.peekturn.reader.reader.EpubEngine
 import app.peekturn.reader.reader.EpubImporter
 import app.peekturn.reader.narration.SentenceAudioCache
+import app.peekturn.reader.narration.PreparedAudioManager
+import app.peekturn.reader.narration.PreparedAudioStore
+import java.io.File
 import app.peekturn.reader.speech.PronunciationPlayer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,7 +64,11 @@ class AppGraph(
     val dictionary = OfflineDictionary(context.applicationContext)
     val speech = PronunciationPlayer(
         context.applicationContext,
-        onDiagnostic = developerLog::recordSystemSpeech
+        onDiagnostic = developerLog::recordSystemSpeech,
+        beforeSpeech = {
+            preparedAudio.setSpeechActive(true)
+            preparedAudio.pause()
+        }
     )
 
     /**
@@ -71,8 +78,33 @@ class AppGraph(
     internal val sentenceAudio = SentenceAudioCache(SentenceAudioCache.directory(context.applicationContext.noBackupFilesDir))
     internal val narrationProviderGate = Mutex()
     internal val systemSynthesisGate = Semaphore(2)
+    internal val preparedAudioStore = PreparedAudioStore(
+        File(context.applicationContext.noBackupFilesDir, "prepared-audio")
+    )
+    internal val preparedAudio = PreparedAudioManager(
+        context = context.applicationContext,
+        store = preparedAudioStore,
+        books = store,
+        engine = engine,
+        cache = sentenceAudio,
+        providerGate = narrationProviderGate,
+        systemSynthesisGate = systemSynthesisGate,
+        onDiagnostic = developerLog::recordNarration
+    )
 
     init {
+        scope.launch {
+            try {
+                preparedAudioStore.refresh()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                developerLog.recordFailure("narration", "saved-audio-load", failure)
+            }
+        }
+        scope.launch {
+            speech.state.collect { preparedAudio.setSpeechActive(it.playing) }
+        }
         var provider = store.settings.value.sentenceSpeechProvider
         scope.launch {
             store.settings.collect { settings ->

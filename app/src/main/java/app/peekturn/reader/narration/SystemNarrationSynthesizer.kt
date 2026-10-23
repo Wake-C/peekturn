@@ -2,6 +2,7 @@ package app.peekturn.reader.narration
 
 import android.content.Context
 import android.os.SystemClock
+import app.peekturn.reader.R
 import app.peekturn.reader.diagnostics.diagnosticMetadata
 import java.io.File
 import java.util.UUID
@@ -11,6 +12,13 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.sync.Semaphore
+
+/** A frozen system voice configuration with its actual display name. */
+internal data class SystemNarrationProfile(
+    val configuration: String,
+    val voiceLabel: String,
+    val stableIdentity: Boolean
+)
 
 /**
  * Persistent file narration for Android's system engine. Every complete render becomes one WAV in
@@ -54,12 +62,34 @@ internal class SystemNarrationSynthesizer(
         throw NarrationFailure.Unavailable()
     }
 
+    /**
+     * The frozen configuration and its actual user-facing voice name from the same bound profile.
+     * The label never contains the engine's encoded identity or a connection nonce.
+     */
+    suspend fun profileSnapshot(): SystemNarrationProfile = try {
+        val profile = profile()
+        SystemNarrationProfile(
+            configuration = profile.identity,
+            voiceLabel = profile.voice.displayLabel?.takeIf { it.isNotBlank() }
+                ?: application.getString(R.string.prepared_audio_device_voice),
+            stableIdentity = !profile.voice.engine.startsWith("android-tts:unidentified:")
+        )
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: SystemSpeechError) {
+        throw error.asNarrationFailure()
+    } catch (_: Exception) {
+        throw NarrationFailure.Unavailable()
+    }
+
     override suspend fun audioFor(sentence: String): Result<NarrationAudio> {
         if (closed) return Result.failure(NarrationFailure.Unavailable())
         val canonical = canonicalSentence(sentence)
         if (canonical.isBlank()) return Result.failure(NarrationFailure.Unavailable())
 
         var reconciliations = 0
+        var previousIdentity: String? = null
+        var retryReason = "initial"
         while (true) {
             if (closed) return Result.failure(NarrationFailure.Unavailable())
             val prepared = try {
@@ -72,6 +102,16 @@ internal class SystemNarrationSynthesizer(
                 return Result.failure(NarrationFailure.Unavailable())
             }
             val voice = prepared.voice
+            previousIdentity?.let { previous ->
+                val changed = previous != prepared.identity
+                diagnostic(
+                    "event=reconcile attempt=$reconciliations reason=$retryReason " +
+                        "result=${if (changed) "profile_changed" else "same_profile_retry"} " +
+                        "oldProfile=${previous.take(12)} newProfile=${prepared.identity.take(12)} " +
+                        "engine=${diagnosticMetadata(voice.engine)} chars=${canonical.length}"
+                )
+            }
+            previousIdentity = prepared.identity
 
             val key = sentenceAudioKey(canonical, voice)
             val cached = cache.get(key, NarrationAudioFormat.Wave)
@@ -87,21 +127,36 @@ internal class SystemNarrationSynthesizer(
                     return Result.failure(NarrationFailure.Unavailable())
                 }
                 if (current) return Result.success(cached.withProfile(prepared))
+                retryReason = "cache_stale"
             } else {
                 diagnostic("event=cache_miss key=${key.take(12)} chars=${canonical.length}")
+                var reused = false
                 val flight = synchronized(flights) {
-                    flights[key] ?: scope.async(start = CoroutineStart.LAZY) {
-                        synthesize(canonical, key, voice)
-                    }.also { started ->
-                        flights[key] = started
-                        started.invokeOnCompletion {
-                            synchronized(flights) {
-                                if (flights[key] === started) flights.remove(key)
+                    val existing = flights[key]
+                    if (existing != null) {
+                        reused = true
+                        existing
+                    } else {
+                        scope.async(start = CoroutineStart.LAZY) {
+                            synthesize(canonical, key, voice)
+                        }.also { started ->
+                            flights[key] = started
+                            started.invokeOnCompletion {
+                                synchronized(flights) {
+                                    if (flights[key] === started) flights.remove(key)
+                                }
                             }
+                            started.start()
                         }
-                        started.start()
                     }
                 }
+                // Reuse vs a fresh flight: the requesting wait is a shared consumer, never a
+                // second engine submission. Only the existing cache key and counts are reported.
+                diagnostic(
+                    "event=${if (reused) "flight_reuse" else "flight_new"} key=${key.take(12)} " +
+                        "chars=${canonical.length} profile=${prepared.identity.take(12)} " +
+                        "engine=${diagnosticMetadata(voice.engine)}"
+                )
                 val result = try {
                     flight.await()
                 } catch (cancelled: CancellationException) {
@@ -125,11 +180,18 @@ internal class SystemNarrationSynthesizer(
                         return Result.failure(NarrationFailure.Unavailable())
                     }
                     if (current) return result.map { it.withProfile(prepared) }
+                    retryReason = "flight_stale"
+                } else {
+                    retryReason = "flight_config_changed"
                 }
             }
 
             reconciliations++
             if (reconciliations >= MAX_PROFILE_RECONCILIATIONS) {
+                diagnostic(
+                    "event=reconcile_limit key=${key.take(12)} chars=${canonical.length} " +
+                        "attempts=$reconciliations engine=${diagnosticMetadata(voice.engine)}"
+                )
                 return Result.failure(NarrationFailure.Unavailable())
             }
         }
@@ -137,7 +199,7 @@ internal class SystemNarrationSynthesizer(
 
     /** A stop, seek or explicit cancellation cancels in-flight renders; complete files remain. */
     override fun cancelPending() {
-        cancelFlights()
+        cancelFlights("cancel_pending")
         renderer.cancelPending()
     }
 
@@ -145,7 +207,7 @@ internal class SystemNarrationSynthesizer(
     override fun close() {
         if (closed) return
         closed = true
-        cancelFlights()
+        cancelFlights("closed")
         renderer.close()
     }
 
@@ -203,11 +265,14 @@ internal class SystemNarrationSynthesizer(
         }
     }
 
-    private fun cancelFlights() {
+    private fun cancelFlights(reason: String) {
         val pending = synchronized(flights) {
             val copy = flights.values.toList()
             flights.clear()
             copy
+        }
+        if (pending.isNotEmpty()) {
+            diagnostic("event=flights_cancelled reason=$reason count=${pending.size}")
         }
         pending.forEach { it.cancel() }
     }

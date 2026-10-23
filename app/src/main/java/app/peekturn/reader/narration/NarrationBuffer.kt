@@ -1,6 +1,7 @@
 package app.peekturn.reader.narration
 
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -71,6 +72,12 @@ internal class BufferedNarrationResolver(
     /** Audio requests still waiting for a resolved clip; ready-map answers never increment it. */
     private val pendingDemands = AtomicInteger(0)
 
+    /** Opaque demand identity: correlative only, never derived from book text. */
+    private val demandCounter = AtomicLong(0L)
+
+    /** Reports built while [lock] is held and emitted only after it is released. */
+    private val diagnosticReports = ArrayDeque<String>()
+
     @Volatile
     private var published = NarrationBufferState()
 
@@ -97,6 +104,9 @@ internal class BufferedNarrationResolver(
     private var burst = true
     private var paused = false
 
+    // The first demand stays cold; completed playback or a user replay may reuse a ready clip.
+    private var cachedReplayPreferred = false
+
     private class Slot(
         val index: Long,
         val sentence: String,
@@ -113,6 +123,9 @@ internal class BufferedNarrationResolver(
     ) {
         /** Set only by this buffer's own intent/reset/preemption, never by a source supersession. */
         var canceledByPolicy = false
+
+        /** Diagnostic age anchor; zero until the work is actually launched. */
+        var startedAtNs = 0L
     }
 
     private class Flight(val sentence: String) {
@@ -127,7 +140,8 @@ internal class BufferedNarrationResolver(
         val owner: Session,
         val flight: Flight?,
         val ready: NarrationAudio?,
-        val startup: Boolean
+        val startup: Boolean,
+        val preferCachedReplay: Boolean
     )
 
     private class Session(
@@ -147,36 +161,64 @@ internal class BufferedNarrationResolver(
 
     override suspend fun configuration(): String = source.configuration()
 
+    /** Navigation/pause opts this playback session into immediate, identity-checked cache replay. */
+    fun preferCachedReplay() {
+        synchronized(lock) { cachedReplayPreferred = true }
+    }
+
     override suspend fun audioFor(sentence: String): Result<NarrationAudio> {
         if (sentence.isBlank()) return Result.failure(NarrationFailure.Unavailable())
+        val demandId = demandCounter.incrementAndGet()
+        val demandStartedAtNs = System.nanoTime()
         pendingDemands.incrementAndGet()
         publish()
         var succeeded = false
+        var outcome = "failure"
+        var requestedGeneration = -1L
         try {
-            val result = audioForInternal(sentence)
+            requestedGeneration = intentGeneration()
+            val result = audioForInternal(sentence, demandId, demandStartedAtNs)
             succeeded = result.isSuccess
+            if (succeeded) preferCachedReplay()
+            outcome = if (succeeded) "ready" else "failure"
             return result
         } catch (cancelled: CancellationException) {
+            outcome = "cancelled"
             throw cancelled
         } catch (failure: NarrationFailure) {
             return Result.failure(failure)
         } catch (_: Exception) {
             return Result.failure(NarrationFailure.Unavailable())
         } finally {
-            if (pendingDemands.decrementAndGet() == 0 && !succeeded) {
-                synchronized(lock) {
+            val remaining = pendingDemands.decrementAndGet()
+            synchronized(lock) {
+                if (remaining == 0 && !succeeded) {
                     session?.let {
                         it.startupInProgress = false
                         it.firstDemand = true
                     }
                 }
+                val activeSession = session
+                queueDiagnosticLocked(
+                    "event=buffer_demand_release demand=$demandId " +
+                        "bufferSession=${activeSession?.id ?: 0} " +
+                        "generation=${activeSession?.generation ?: -1} " +
+                        "requestedGeneration=$requestedGeneration result=$outcome " +
+                        "elapsedMs=${elapsedMs(demandStartedAtNs)} pendingDemands=$remaining " +
+                        "paused=$paused"
+                )
             }
             publish()
+            flushDiagnostics()
         }
     }
 
 
-    private suspend fun audioForInternal(sentence: String): Result<NarrationAudio> {
+    private suspend fun audioForInternal(
+        sentence: String,
+        demandId: Long,
+        demandStartedAtNs: Long
+    ): Result<NarrationAudio> {
         var retries = 0
 
         while (true) {
@@ -240,8 +282,20 @@ internal class BufferedNarrationResolver(
                 // the policy and speculative queue are re-evaluated on every real request.
                 refreshModeLocked(owner)
                 scheduleSpeculativeLocked(owner)
-                DemandPlan(owner, flight, alreadyReady, startup)
+                val nextPlan = DemandPlan(owner, flight, alreadyReady, startup, cachedReplayPreferred)
+                queueDiagnosticLocked(
+                    demandDiagnosticLocked(
+                        event = "buffer_demand_start",
+                        demandId = demandId,
+                        owner = owner,
+                        startup = startup,
+                        extra = "source=${if (alreadyReady != null) "ready" else "render"} " +
+                            "fromCache=${alreadyReady?.fromCache ?: false}"
+                    )
+                )
+                nextPlan
             }
+            flushDiagnostics()
 
             val owner = plan.owner
             val readyAudio = plan.ready
@@ -263,9 +317,27 @@ internal class BufferedNarrationResolver(
                     publish()
                     return Result.failure(NarrationFailure.Unavailable())
                 }
+                synchronized(lock) {
+                    queueDiagnosticLocked(
+                        demandDiagnosticLocked(
+                            event = "buffer_demand_clip_ready",
+                            demandId = demandId,
+                            owner = owner,
+                            startup = plan.startup,
+                            extra = "source=ready fromCache=${readyAudio.fromCache} " +
+                                "waitMs=${elapsedMs(demandStartedAtNs)} " +
+                                "gate=${if (!plan.startup) "none" else if (plan.preferCachedReplay) "cached-replay" else "cold-start"}"
+                        )
+                    )
+                }
+                flushDiagnostics()
                 if (plan.startup) {
-                    val startupDecision = awaitColdStartReserve(owner)
-                    reportStartupDegraded(owner, startupDecision)
+                    if (plan.preferCachedReplay) {
+                        reportCachedReplay(owner, demandId, "ready")
+                    } else {
+                        val startupDecision = awaitColdStartReserve(owner, demandId, demandStartedAtNs)
+                        reportStartupDegraded(owner, startupDecision, demandId)
+                    }
                     ensureCurrent(owner)
                     val afterSessionConfiguration = synchronized(lock) { owner.configuration }
                     if (afterSessionConfiguration != configuration) {
@@ -318,9 +390,30 @@ internal class BufferedNarrationResolver(
                 return Result.failure(NarrationFailure.Unavailable())
             }
 
+            if (result.isSuccess) {
+                val audio = result.getOrNull()
+                synchronized(lock) {
+                    queueDiagnosticLocked(
+                        demandDiagnosticLocked(
+                            event = "buffer_demand_clip_ready",
+                            demandId = demandId,
+                            owner = owner,
+                            startup = plan.startup,
+                            extra = "source=render fromCache=${audio?.fromCache ?: false} " +
+                                "waitMs=${elapsedMs(demandStartedAtNs)} " +
+                                "gate=${if (!plan.startup) "none" else if (plan.preferCachedReplay && audio?.fromCache == true) "cached-replay" else "cold-start"}"
+                        )
+                    )
+                }
+                flushDiagnostics()
+            }
             if (plan.startup && result.isSuccess) {
-                val startupDecision = awaitColdStartReserve(owner)
-                reportStartupDegraded(owner, startupDecision)
+                if (plan.preferCachedReplay && result.getOrNull()?.fromCache == true) {
+                    reportCachedReplay(owner, demandId, "disk")
+                } else {
+                    val startupDecision = awaitColdStartReserve(owner, demandId, demandStartedAtNs)
+                    reportStartupDegraded(owner, startupDecision, demandId)
+                }
                 ensureCurrent(owner)
                 val afterSessionConfiguration = synchronized(lock) { owner.configuration }
                 if (afterSessionConfiguration != configuration) {
@@ -343,6 +436,13 @@ internal class BufferedNarrationResolver(
             publish()
             return result
         }
+    }
+
+    private fun reportCachedReplay(owner: Session, demandId: Long, source: String) {
+        emitDiagnostic(
+            "event=buffer_cached_replay demand=$demandId bufferSession=${owner.id} " +
+                "generation=${owner.generation} source=$source gate=bypassed"
+        )
     }
 
     private suspend fun latestConfiguration(): String = try {
@@ -372,6 +472,10 @@ internal class BufferedNarrationResolver(
     private fun reconfigureLocked(owner: Session, configuration: String): Boolean {
         if (session !== owner) return false
         if (owner.configuration == configuration) return true
+        val readyDropped = ready.size
+        val failedDropped = failed.size
+        val queuedDropped = tasks.size
+        val activeKept = active.size
         owner.configuration = configuration
         knownConfiguration = configuration
         ready.clear()
@@ -382,6 +486,11 @@ internal class BufferedNarrationResolver(
         burst = true
         owner.targetDiagnosticEmitted = false
         owner.firstDemand = true
+        queueDiagnosticLocked(
+            "event=buffer_reconfigure reason=provider-identity bufferSession=${owner.id} " +
+                "generation=${owner.generation} seq=${owner.cursor} readyDropped=$readyDropped " +
+                "failedDropped=$failedDropped queuedDropped=$queuedDropped activeKept=$activeKept"
+        )
         scheduleSpeculativeLocked(owner)
         pumpLocked()
         bumpProgressLocked()
@@ -391,7 +500,7 @@ internal class BufferedNarrationResolver(
     override fun cancelPending() {
         synchronized(lock) {
             paused = true
-            cancelWorkLocked()
+            cancelWorkLocked("cancel-pending")
             session?.let { owner ->
                 owner.firstDemand = owner.firstDemand || owner.startupInProgress
                 owner.startupInProgress = false
@@ -399,12 +508,13 @@ internal class BufferedNarrationResolver(
         }
         source.cancelPending()
         publish()
+        flushDiagnostics()
     }
 
     override fun close() {
         synchronized(lock) {
             paused = true
-            cancelWorkLocked()
+            cancelWorkLocked("close")
             session?.followingJob?.cancel()
             session = null
             slots.clear()
@@ -414,6 +524,7 @@ internal class BufferedNarrationResolver(
         }
         source.close()
         publish()
+        flushDiagnostics()
     }
 
     private fun ensureSessionLocked(generation: Long, configuration: String): Session {
@@ -431,8 +542,13 @@ internal class BufferedNarrationResolver(
             highWaterMs = BASE_HIGH_WATER_MS
         }
         knownConfiguration = configuration
+        val slotsDropped = slots.size
+        val readyDropped = ready.size
+        val failedDropped = failed.size
+        val configurationChanged = previousConfiguration != null &&
+            previousConfiguration != configuration
         if (existing != null) {
-            cancelWorkLocked()
+            cancelWorkLocked("intent-reset")
             existing.followingJob?.cancel()
             // An explicit-intent change makes all in-flight source work obsolete.
             source.cancelPending()
@@ -441,7 +557,15 @@ internal class BufferedNarrationResolver(
         ready.clear()
         failed.clear()
         burst = true
-        return Session(++sessionCounter, generation, configuration).also { session = it }
+        val created = Session(++sessionCounter, generation, configuration).also { session = it }
+        queueDiagnosticLocked(
+            "event=buffer_session_reset reason=${if (existing == null) "first-intent" else "intent-reset"} " +
+                "bufferSession=${created.id} generation=$generation " +
+                "previousSession=${existing?.id ?: 0} previousGeneration=${existing?.generation ?: -1} " +
+                "slotsDropped=$slotsDropped readyDropped=$readyDropped failedDropped=$failedDropped " +
+                "configurationChanged=$configurationChanged"
+        )
+        return created
     }
 
     /**
@@ -462,7 +586,11 @@ internal class BufferedNarrationResolver(
     }
 
     private fun restartSequenceLocked(owner: Session, sentence: String) {
-        cancelWorkLocked()
+        val previousSeq = owner.cursor
+        val slotsDropped = slots.size
+        val readyDropped = ready.size
+        val failedDropped = failed.size
+        cancelWorkLocked("sequence-restart")
         slots.clear()
         ready.clear()
         failed.clear()
@@ -481,6 +609,12 @@ internal class BufferedNarrationResolver(
                 paragraphEnd = 1L,
                 initialParagraph = true
             )
+        )
+        queueDiagnosticLocked(
+            "event=buffer_sequence_restart reason=sentence-not-in-sequence " +
+                "bufferSession=${owner.id} generation=${owner.generation} seq=${owner.cursor} " +
+                "previousSeq=$previousSeq slotsDropped=$slotsDropped readyDropped=$readyDropped " +
+                "failedDropped=$failedDropped slots=${slots.size} mode=${if (burst) "burst" else "steady"}"
         )
         startFollowingLocked(owner, sentence)
     }
@@ -577,6 +711,13 @@ internal class BufferedNarrationResolver(
         // provider work it already owns.
         if (flights.any { (text, flight) -> flight.demand && text != sentence }) return
         if (active.values.any { it.demand }) return
+        val producers = producerSummaryLocked()
+        queueDiagnosticLocked(
+            "event=buffer_work_cancel reason=demand-preempt canceledActive=${active.size} " +
+                "canceledQueued=0 canceledFlights=0 sourceCancel=true limit=$limit " +
+                "bufferSession=${session?.id ?: 0} generation=${session?.generation ?: -1} " +
+                "seq=${session?.cursor ?: -1} $producers"
+        )
         source.cancelPending()
         active.entries.forEach { (job, work) ->
             work.canceledByPolicy = true
@@ -661,6 +802,7 @@ internal class BufferedNarrationResolver(
             // An already-running clip may finish beyond the time target; no new one starts.
             if (readyDurationLocked(owner) >= MAX_HIGH_WATER_MS && tasks.none { it.demand }) break
             val work = nextWorkLocked() ?: break
+            work.startedAtNs = System.nanoTime()
             val flight = flights.getOrPut(work.sentence) { Flight(work.sentence) }
             val job = scope.launch(start = CoroutineStart.LAZY) {
                 runWork(owner, work, flight)
@@ -771,6 +913,7 @@ internal class BufferedNarrationResolver(
                 outcomeValue
             }
             publish()
+            flushDiagnostics()
             synchronized(lock) { bumpProgressLocked() }
             if (outcome != null) {
                 flight.result.complete(outcome)
@@ -793,12 +936,29 @@ internal class BufferedNarrationResolver(
     }
 
     /** Waits for the cold runway or returns the exact honest terminal reason. */
-    private suspend fun awaitColdStartReserve(owner: Session): StartupDecision {
+    private suspend fun awaitColdStartReserve(
+        owner: Session,
+        demandId: Long,
+        startedAtNs: Long
+    ): StartupDecision {
+        var waiting = false
+        var blocked: String? = null
         while (true) {
             val seen = progress.value
+            var report: String? = null
             val decision = synchronized(lock) {
-                if (session !== owner) return StartupDecision.INVALIDATED
-                when {
+                if (session !== owner) {
+                    report = coldGateDiagnosticLocked(
+                        event = "buffer_cold_gate_exit",
+                        owner = owner,
+                        demandId = demandId,
+                        reason = "session-changed",
+                        startedAtNs = startedAtNs,
+                        blocked = blocked
+                    )
+                    return@synchronized StartupDecision.INVALIDATED
+                }
+                val candidate = when {
                     readyDurationLocked(owner) >= COLD_START_MIN_DURATION_MS &&
                         readyParagraphsLocked(owner) >= COLD_START_MIN_PARAGRAPHS ->
                         StartupDecision.READY
@@ -822,10 +982,84 @@ internal class BufferedNarrationResolver(
                         StartupDecision.WAIT
                     }
                 }
+                if (candidate != StartupDecision.WAIT) {
+                    report = coldGateDiagnosticLocked(
+                        event = "buffer_cold_gate_exit",
+                        owner = owner,
+                        demandId = demandId,
+                        reason = gateReason(candidate),
+                        startedAtNs = startedAtNs,
+                        blocked = blocked
+                    )
+                } else {
+                    val nextBlocked = coldGateBlockedLocked(owner)
+                    if (!waiting) {
+                        waiting = true
+                        blocked = nextBlocked
+                        report = coldGateDiagnosticLocked(
+                            event = "buffer_cold_gate_enter",
+                            owner = owner,
+                            demandId = demandId,
+                            reason = nextBlocked,
+                            startedAtNs = startedAtNs,
+                            blocked = nextBlocked
+                        )
+                    } else if (nextBlocked != blocked) {
+                        blocked = nextBlocked
+                        report = coldGateDiagnosticLocked(
+                            event = "buffer_cold_gate_stage",
+                            owner = owner,
+                            demandId = demandId,
+                            reason = nextBlocked,
+                            startedAtNs = startedAtNs,
+                            blocked = nextBlocked
+                        )
+                    }
+                }
+                candidate
             }
+            report?.let(::emitDiagnostic)
+            flushDiagnostics()
             if (decision != StartupDecision.WAIT) return decision
             progress.first { it != seen }
         }
+    }
+
+    private fun gateReason(decision: StartupDecision): String = when (decision) {
+        StartupDecision.READY -> "ready"
+        StartupDecision.INVALIDATED -> "session-changed"
+        else -> decision.diagnosticReason ?: decision.name.lowercase()
+    }
+
+    /**
+     * Diagnostic-only description of the next thing the cold gate needs. Sequence indexes and
+     * producer counts are safe; no sentence text is ever included.
+     */
+    private fun coldGateBlockedLocked(owner: Session): String {
+        val current = slots.firstOrNull { it.index == owner.cursor }
+            ?: return "no-current-slot"
+        if (!ready.containsKey(current.sentence)) {
+            val producing = active.values.any { it.sentence == current.sentence } ||
+                tasks.any { it.sentence == current.sentence } ||
+                flights.containsKey(current.sentence)
+            return if (producing) "current-rendering" else "current-no-producer"
+        }
+        val next = slots.firstOrNull {
+            it.index > owner.cursor && !ready.containsKey(it.sentence)
+        } ?: return when {
+            owner.followingFailed -> "lookahead-failed"
+            owner.followingComplete -> "reserve-eof"
+            else -> "awaiting-paragraph"
+        }
+        val kind = if (readyParagraphsLocked(owner) < COLD_START_MIN_PARAGRAPHS) {
+            "paragraphs"
+        } else {
+            "duration"
+        }
+        val producing = active.values.any { it.sentence == next.sentence } ||
+            tasks.any { it.sentence == next.sentence } ||
+            flights.containsKey(next.sentence)
+        return "reserve-$kind-${if (producing) "rendering" else "no-producer"}"
     }
 
     private fun availableParagraphsLocked(owner: Session): Int {
@@ -841,12 +1075,16 @@ internal class BufferedNarrationResolver(
         return count
     }
 
-    private fun reportStartupDegraded(owner: Session, decision: StartupDecision) {
+    private fun reportStartupDegraded(owner: Session, decision: StartupDecision, demandId: Long) {
         val reason = decision.diagnosticReason ?: return
         val diagnostic = synchronized(lock) {
             if (session !== owner || owner.targetDiagnosticEmitted) return
             owner.targetDiagnosticEmitted = true
-            "buffer state=degraded wait=$reason readyDurationMs=${readyDurationLocked(owner)} " +
+            "buffer state=degraded wait=$reason bufferSession=${owner.id} " +
+                "generation=${owner.generation} demand=$demandId seq=${owner.cursor} " +
+                "requiredMs=$COLD_START_MIN_DURATION_MS requiredParagraphs=$COLD_START_MIN_PARAGRAPHS " +
+                "readyDurationMs=${readyDurationLocked(owner)} " +
+                "reserveIncludesCurrent=true " +
                 "readyParagraphs=${readyParagraphsLocked(owner)} " +
                 "targetParagraphs=$TARGET_LOOKAHEAD_PARAGRAPHS pendingSynthesis=${active.size} " +
                 "mode=${if (burst) "burst" else "steady"}"
@@ -873,8 +1111,10 @@ internal class BufferedNarrationResolver(
                 else -> return@synchronized null
             }
             owner.targetDiagnosticEmitted = true
-            "buffer state=target-unavailable wait=$reason readyDurationMs=$readyMs " +
-                "readyParagraphs=$paragraphs targetParagraphs=$TARGET_LOOKAHEAD_PARAGRAPHS " +
+            "buffer state=target-unavailable wait=$reason bufferSession=${owner.id} " +
+                "generation=${owner.generation} seq=${owner.cursor} readyDurationMs=$readyMs " +
+                "reserveIncludesCurrent=true readyParagraphs=$paragraphs " +
+                "targetParagraphs=$TARGET_LOOKAHEAD_PARAGRAPHS " +
                 "pendingSynthesis=${active.size} mode=${if (burst) "burst" else "steady"}"
         } ?: return
         runCatching { onDiagnostic(diagnostic) }
@@ -884,7 +1124,121 @@ internal class BufferedNarrationResolver(
         synchronized(lock) { if (session === owner) owner.startupInProgress = false }
     }
 
-    private fun cancelWorkLocked() {
+    private fun elapsedMs(startedAtNs: Long): Long =
+        (System.nanoTime() - startedAtNs) / 1_000_000L
+
+    private fun queueDiagnosticLocked(report: String) {
+        if (diagnosticReports.size == MAX_PENDING_DIAGNOSTICS) diagnosticReports.removeFirst()
+        diagnosticReports.addLast(report)
+    }
+
+    private fun flushDiagnostics() {
+        val reports = synchronized(lock) {
+            if (diagnosticReports.isEmpty()) return
+            val copy = diagnosticReports.toList()
+            diagnosticReports.clear()
+            copy
+        }
+        reports.forEach(::emitDiagnostic)
+    }
+
+    private fun emitDiagnostic(report: String) {
+        runCatching { onDiagnostic(report) }
+    }
+
+    private fun followingStateLocked(owner: Session): String = when {
+        owner.followingFailed -> "failed"
+        owner.followingComplete -> "complete"
+        owner.followingJob?.isActive == true -> "collecting"
+        else -> "idle"
+    }
+
+    /**
+     * Where the reserve producers are, as sequence indexes plus launch age. `d` marks the demand's
+     * own render; `s` marks speculative lookahead. No sentence text or path is exposed.
+     */
+    private fun producerSummaryLocked(): String {
+        val now = System.nanoTime()
+        val activeRefs = active.values.take(MAX_DIAGNOSTIC_REFS).joinToString(",") { work ->
+            val ageMs = if (work.startedAtNs == 0L) {
+                0L
+            } else {
+                (now - work.startedAtNs) / 1_000_000L
+            }
+            "${work.sequenceIndex}${if (work.demand) "d" else "s"}@${ageMs}ms"
+        }.ifEmpty { "-" }
+        val queuedRefs = tasks.take(MAX_DIAGNOSTIC_REFS)
+            .joinToString(",") { it.sequenceIndex.toString() }
+            .ifEmpty { "-" }
+        return "active=${active.size} activeRefs=$activeRefs queued=${tasks.size} " +
+            "queuedRefs=$queuedRefs flights=${flights.size}"
+    }
+
+    private fun demandDiagnosticLocked(
+        event: String,
+        demandId: Long,
+        owner: Session,
+        startup: Boolean,
+        extra: String
+    ): String {
+        val readyMs = readyDurationLocked(owner)
+        val paragraphs = readyParagraphsLocked(owner)
+        val currentClip = slots.firstOrNull { it.index == owner.cursor }
+            ?.let { ready[it.sentence] }
+        val currentClipMs = currentClip?.durationMs ?: 0L
+        val currentMs = (currentClipMs / safeSpeed()).toLong()
+        return "event=$event demand=$demandId bufferSession=${owner.id} " +
+            "generation=${owner.generation} seq=${owner.cursor} startup=$startup " +
+            "currentClipMs=$currentClipMs currentMs=$currentMs " +
+            "reserveMs=$readyMs reserveIncludesCurrent=true " +
+            "futureReserveMs=${(readyMs - currentMs).coerceAtLeast(0L)} " +
+            "reserveParagraphs=$paragraphs slots=${slots.size} readyClips=${ready.size} " +
+            "${producerSummaryLocked()} following=${followingStateLocked(owner)} " +
+            "mode=${if (burst) "burst" else "steady"} paused=$paused $extra"
+    }
+
+    private fun coldGateDiagnosticLocked(
+        event: String,
+        owner: Session,
+        demandId: Long,
+        reason: String,
+        startedAtNs: Long,
+        blocked: String?
+    ): String {
+        val currentClip = slots.firstOrNull { it.index == owner.cursor }
+            ?.let { ready[it.sentence] }
+        val currentClipMs = currentClip?.durationMs ?: 0L
+        val currentMs = (currentClipMs / safeSpeed()).toLong()
+        val readyMs = readyDurationLocked(owner)
+        return "event=$event demand=$demandId bufferSession=${owner.id} " +
+            "generation=${owner.generation} seq=${owner.cursor} reason=$reason " +
+            "requiredMs=$COLD_START_MIN_DURATION_MS " +
+            "requiredParagraphs=$COLD_START_MIN_PARAGRAPHS " +
+            "currentCached=${currentClip?.fromCache == true} " +
+            "currentClipMs=$currentClipMs currentMs=$currentMs reserveMs=$readyMs " +
+            "reserveIncludesCurrent=true " +
+            "futureReserveMs=${(readyMs - currentMs).coerceAtLeast(0L)} " +
+            "reserveParagraphs=${readyParagraphsLocked(owner)} " +
+            "blocked=${blocked ?: "-"} waitMs=${elapsedMs(startedAtNs)} " +
+            "slots=${slots.size} readyClips=${ready.size} ${producerSummaryLocked()} " +
+            "following=${followingStateLocked(owner)} " +
+            "mode=${if (burst) "burst" else "steady"} paused=$paused"
+    }
+
+    private fun cancelWorkLocked(reason: String) {
+        val queuedCount = tasks.size
+        val activeCount = active.size
+        val pending = flights.values.toList()
+        if (queuedCount + activeCount + pending.size > 0) {
+            val owner = session
+            queueDiagnosticLocked(
+                "event=buffer_work_cancel reason=$reason canceledActive=$activeCount " +
+                    "canceledQueued=$queuedCount canceledFlights=${pending.size} " +
+                    "bufferSession=${owner?.id ?: 0} generation=${owner?.generation ?: -1} " +
+                    "seq=${owner?.cursor ?: -1} pendingDemands=${pendingDemands.get()} " +
+                    "paused=$paused ${producerSummaryLocked()}"
+            )
+        }
         tasks.clear()
         val jobs = active.entries.map { (job, work) ->
             work.canceledByPolicy = true
@@ -892,7 +1246,6 @@ internal class BufferedNarrationResolver(
         }
         active.clear()
         jobs.forEach { it.cancel() }
-        val pending = flights.values.toList()
         flights.clear()
         pending.forEach { it.result.cancel() }
         bumpProgressLocked()
@@ -905,6 +1258,7 @@ internal class BufferedNarrationResolver(
         val live = slots.mapTo(HashSet<String>()) { it.sentence }
         ready.keys.retainAll(live)
         failed.retainAll(live)
+        val queuedDropped = tasks.count { it.sequenceIndex < owner.cursor }
         tasks.removeAll { it.sequenceIndex < owner.cursor }
         val staleFlights = flights.filterKeys { it !in live }
         if (staleFlights.isNotEmpty()) {
@@ -913,16 +1267,26 @@ internal class BufferedNarrationResolver(
         }
         // Work for sentences already behind playback is not lookahead anymore. Keep work whose
         // text is still scheduled later (a repeated sentence shares the same audio flight).
-        active.entries
+        val staleActive = active.entries
             .filter {
                 it.value.sequenceIndex < owner.cursor &&
                     !it.value.demand &&
                     it.value.sentence !in live
             }
-            .forEach { (job, work) ->
+            .map { (job, work) ->
                 work.canceledByPolicy = true
                 job.cancel()
+                work
             }
+        if (queuedDropped > 0 || staleFlights.isNotEmpty() || staleActive.isNotEmpty()) {
+            queueDiagnosticLocked(
+                "event=buffer_work_cancel reason=cursor-prune canceledActive=${staleActive.size} " +
+                    "canceledQueued=$queuedDropped canceledFlights=${staleFlights.size} " +
+                    "bufferSession=${owner.id} generation=${owner.generation} seq=${owner.cursor} " +
+                    "pendingDemands=${pendingDemands.get()} paused=$paused " +
+                    producerSummaryLocked()
+            )
+        }
         bumpProgressLocked()
     }
 
@@ -974,5 +1338,7 @@ internal class BufferedNarrationResolver(
         const val LOW_WATER_DIVISOR = 4L
         const val MAX_QUEUED_TASKS = 6
         const val MAX_LOOKAHEAD_SENTENCES = 256
+        const val MAX_DIAGNOSTIC_REFS = 6
+        const val MAX_PENDING_DIAGNOSTICS = 64
     }
 }

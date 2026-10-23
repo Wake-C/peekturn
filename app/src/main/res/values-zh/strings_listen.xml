@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 朗读面板：实时朗读与整本书预存音频。 -->
+<resources>
+    <string name="reader_listen_title">朗读</string>
+    <string name="reader_listen_close">关闭</string>
+    <string name="reader_listen_tab_live">实时</string>
+    <string name="reader_listen_tab_saved">已保存</string>
+
+    <!-- 实时朗读 -->
+    <string name="reader_listen_live_body">实时朗读从你选择的那一句开始，边听边准备后面的段落。</string>
+    <string name="reader_listen_live_slow">较慢的神经网络语音：先把整本书准备好，之后无需实时合成即可收听，离线也能听。</string>
+    <string name="reader_listen_live_fast">较快的系统语音：实时朗读通常来得及准备好下一句。</string>
+    <string name="reader_listen_live_active">朗读正在使用语音。准备已保存的音频前请先停止朗读。</string>
+    <string name="reader_listen_live_busy">正在准备已保存的音频，进度可在“已保存”中查看。</string>
+    <string name="reader_listen_start">开始朗读</string>
+    <string name="reader_listen_prepare">准备整本书</string>
+    <string name="reader_listen_prepare_current_voice">准备当前音色</string>
+    <string name="reader_listen_prepare_note">使用当前声音。在线语音会把书籍文本发送给其服务商。准备期间可以关闭此面板。</string>
+
+    <!-- 已保存的音频 -->
+    <string name="reader_listen_saved_empty">这本书还没有已保存的音频。准备整本书后，无需实时合成即可收听。</string>
+    <string name="reader_listen_status_indexing">正在索引全书…</string>
+    <string name="reader_listen_status_preparing">正在准备音频…</string>
+    <string name="reader_listen_status_paused">已暂停。可从停止处继续。</string>
+    <string name="reader_listen_status_ready">可离线播放。</string>
+    <string name="reader_listen_status_failed">准备已停止。</string>
+    <string name="reader_listen_progress">%1$d/%2$d 句</string>
+    <string name="reader_listen_meta">第 %1$d/%2$d 句 · %3$s</string>
+    <string name="reader_listen_error_voice">此音频使用的声音与当前设置不一致。请选择原来的声音后继续，或删除此音频。</string>
+    <string name="reader_listen_error_incomplete">有些句子还没有保存音频。继续准备即可完成，或删除此音频。</string>
+    <string name="reader_listen_error_interrupted">准备被中断，可能是应用已关闭。继续即可接着准备。</string>
+    <string name="reader_listen_error_storage">无法保存音频。请检查可用空间后重试。</string>
+    <string name="reader_listen_error_busy">已有准备任务在运行。请等待完成，或在“已保存”中暂停。</string>
+    <string name="reader_listen_error_narration_active">朗读正在使用语音。请先停止朗读，然后重试。</string>
+    <string name="reader_listen_error_speech_active">查词发音正在使用语音。请等它结束后重试。</string>
+    <string name="reader_listen_error_in_use">已保存的播放正在使用此音频。请停止播放后再删除。</string>
+    <string name="reader_listen_error_book_missing">无法打开这本书。请关闭后重新打开，然后重试。</string>
+    <string name="reader_listen_error_book_changed">这本书在准备音频后已发生变化。请重新准备。</string>
+    <string name="reader_listen_error_voice_unsupported">所选声音无法准备音频。请在设置中选择其他声音。</string>
+    <string name="reader_listen_error_voice_unidentified">引擎尚未提供音色信息。请在引擎设置中选择音色后重试，或使用实时朗读。</string>
+    <string name="reader_listen_error_provider">语音服务无法准备音频。请检查网络后重试。</string>
+    <string name="reader_listen_error_provider_length">有句子对这个声音来说太长。请选择其他声音。</string>
+    <string name="reader_listen_error_provider_audio">服务商返回的音频不完整。请重试，或选择其他声音。</string>
+    <string name="reader_listen_error_content">无法读取用于朗读的书籍文本。请关闭并重新打开这本书。</string>
+    <string name="reader_listen_error_timeout">准备时间过长，已停止。继续即可接着准备。</string>
+    <string name="reader_listen_error_not_found">这条已保存的音频已不存在。请删除后重新准备。</string>
+    <string name="reader_listen_error_invalid">这条已保存的音频无法使用。请删除后重新准备。</string>
+    <string name="reader_listen_error_start_denied">Android 无法启动准备。请关闭这本书后重新打开，然后重试。</string>
+    <string name="reader_listen_error_other">准备已停止。请重试，或选择其他声音。</string>
+
+    <!-- 已保存音频的操作 -->
+    <string name="reader_listen_play">播放</string>
+    <string name="reader_listen_resume">继续</string>
+    <string name="reader_listen_pause">暂停</string>
+    <string name="reader_listen_delete">删除</string>
+    <string name="reader_listen_delete_title">删除已保存的音频？</string>
+    <string name="reader_listen_delete_message">为 %1$s 保存的音频将被删除。书籍、阅读位置和设置不受影响。</string>
+    <string name="reader_listen_cancel">取消</string>
+
+    <!-- 已预存音频与当前打开的书不匹配时的播放提示。 -->
+    <string name="reader_saved_audio_unavailable">已保存的音频缺失，或与这本书不再匹配。请打开“朗读”面板重新准备。</string>
+
+    <!-- 播放已保存音频时，朗读控制卡片中替代实时进度的一行。 -->
+    <string name="reader_narration_saved_source">已保存音频 · 无需实时合成</string>
+</resources>

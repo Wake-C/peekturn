@@ -100,7 +100,11 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
     fun clearMessage() { _state.update { it.copy(message = null) } }
     fun delete(book: Book) {
         viewModelScope.launch {
-            try { graph.store.deleteBook(book.id) }
+            try {
+                check(graph.preparedAudio.deleteBook(book.id)) {
+                    "Saved audio is still in use."
+                }
+            }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 Log.w("PeekturnLibrary", "Delete failed: ${e.javaClass.simpleName}")

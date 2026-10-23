@@ -19,8 +19,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.TimeoutCancellationException
@@ -188,6 +190,9 @@ internal class SystemSpeechRenderer(
     private var binding: Binding? = null
     private var serviceRecoveryKey: SpeechConfigurationKey? = null
 
+    /** Diagnostics only: the last key this process bound, for rebind evidence. */
+    private var lastBoundKey: SpeechConfigurationKey? = null
+
     @Volatile
     private var closed = false
 
@@ -219,9 +224,10 @@ internal class SystemSpeechRenderer(
                     if (serviceRecoveryKey == recoveryKey) serviceRecoveryKey = null
                 }
             }
-            resetFor(latest)
+            val rebindReason = rebindReasonFor(latest, attempt)
+            resetFor(latest, rebindReason)
             try {
-                val created = createBindingLocked(latest)
+                val created = createBindingLocked(latest, rebindReason)
                 val profile = awaitReady(created)
                 return@withLock profile
             } catch (cancelled: CancellationException) {
@@ -270,6 +276,7 @@ internal class SystemSpeechRenderer(
                 if (!claimServiceRecovery()) throw error
                 diagnostic(
                     "Android narration TTS: engine=" + engineLabel(connection) +
+                        " connection=" + connection.nonce.take(8) +
                         " service failure (code " + error.code +
                         "); reinitializing once for the same system choice"
                 )
@@ -309,8 +316,8 @@ internal class SystemSpeechRenderer(
         lifecycle.withLock {
             if (closed) throw SystemSpeechError.Unavailable("Narration speech is closed.")
             val latest = systemSpeechConfigurationKey(application)
-            resetFor(latest)
-            val created = createBindingLocked(latest)
+            resetFor(latest, "service_recovery")
+            val created = createBindingLocked(latest, "service_recovery")
             val profile = awaitReady(created)
             if (profile != expected) throw SystemSpeechError.ConfigurationChanged()
             synchronized(lock) { binding } ?: throw SystemSpeechError.Unavailable()
@@ -324,6 +331,7 @@ internal class SystemSpeechRenderer(
             copy
         }
         pending.forEach { active ->
+            logActiveTerminal(active, "cancel_pending", "cancelled")
             runCatching { active.binding.speech?.stop() }
             active.continuation.cancel(
                 CancellationException("System speech rendering was cancelled.")
@@ -333,26 +341,38 @@ internal class SystemSpeechRenderer(
 
     /** Releases the one connection; every waiter is woken with a typed close failure. */
     fun close() {
-        val previous = synchronized(lock) {
+        val state: Pair<Binding?, Int>? = synchronized(lock) {
             if (closed) return@synchronized null
             closed = true
             val old = binding
             binding = null
             old?.isClosed = true
-            old
+            old to actives.size
         }
         preparation.cancel()
-        failActives(SystemSpeechError.Unavailable("Narration speech is closed."))
-        previous?.let { release(it, SystemSpeechError.Unavailable("Narration speech is closed.")) }
+        failActives(SystemSpeechError.Unavailable("Narration speech is closed."), "closed")
+        state?.let { (previous, activeCount) ->
+            if (previous != null) {
+                logConnectionRelease(previous, "closed", activeCount, null)
+                release(previous, SystemSpeechError.Unavailable("Narration speech is closed."))
+            }
+        }
     }
 
-    private fun failActives(failure: SystemSpeechError) {
+    private fun failActives(failure: SystemSpeechError, reason: String) {
+        val cause = when (failure) {
+            is SystemSpeechError.ConfigurationChanged -> "configuration_changed"
+            else -> "closed"
+        }
         val pending = synchronized(lock) {
             val copy = actives.values.toList()
             actives.clear()
             copy
         }
         pending.forEach { active ->
+            // The map is already cleared here: record the terminal state before the callback
+            // path can lose it, so a request never disappears without a fixed reason.
+            logActiveTerminal(active, reason, cause)
             runCatching { active.binding.speech?.stop() }
             if (active.continuation.isActive) {
                 active.continuation.resumeWith(Result.failure(failure))
@@ -390,10 +410,12 @@ internal class SystemSpeechRenderer(
         expected: NarrationVoiceSpec
     ) {
         val utteranceId = UUID.randomUUID().toString()
+        val queuedAtMs = SystemClock.elapsedRealtime()
+        var pendingWatch: Job? = null
         try {
             withTimeout(synthesisTimeoutMs.coerceAtLeast(1)) {
                 suspendCancellableCoroutine<Unit> { continuation ->
-                    val active = Active(connection, continuation, sentence.length)
+                    val active = Active(connection, continuation, sentence.length, utteranceId)
                     synchronized(lock) {
                         if (closed) throw SystemSpeechError.Unavailable("Narration speech is closed.")
                         if (connection.isClosed || connection.profile != expected) {
@@ -402,10 +424,13 @@ internal class SystemSpeechRenderer(
                         actives[utteranceId] = active
                     }
                     diagnostic(
-                        "event=synthesis_queued request=${utteranceId.take(8)} chars=${sentence.length} " +
+                        "event=synthesis_queued request=${utteranceId.take(8)} " +
+                            "connection=${connection.nonce.take(8)} chars=${sentence.length} " +
                             "profile=${sentenceAudioKey("", expected).take(12)} engine=${engineLabel(connection)}"
                     )
+                    pendingWatch = startPendingWatch(connection, utteranceId, active)
                     continuation.invokeOnCancellation {
+                        pendingWatch?.cancel()
                         val owned = synchronized(lock) {
                             if (actives[utteranceId] === active) {
                                 actives.remove(utteranceId)
@@ -417,7 +442,14 @@ internal class SystemSpeechRenderer(
                         // A late cancellation after onDone no longer owns the utterance; stopping
                         // then would flush a newer request queued on the same connection.
                         if (owned) {
-                            diagnostic("event=synthesis_cancelled request=${utteranceId.take(8)}")
+                            val now = SystemClock.elapsedRealtime()
+                            diagnostic(
+                                "event=synthesis_cancelled request=${utteranceId.take(8)} " +
+                                    "connection=${connection.nonce.take(8)} reason=continuation_cancelled " +
+                                    "stopFlush=true elapsedMs=${now - active.enqueuedAtMs} " +
+                                    "queueMs=${if (active.startedAtMs > 0L) active.startedAtMs - active.enqueuedAtMs else now - active.enqueuedAtMs} " +
+                                    "serviceMs=${if (active.startedAtMs > 0L) now - active.startedAtMs else -1L}"
+                            )
                             runCatching { connection.speech?.stop() }
                         }
                     }
@@ -431,7 +463,9 @@ internal class SystemSpeechRenderer(
                     if (accepted != TextToSpeech.SUCCESS) {
                         val removed = synchronized(lock) { actives.remove(utteranceId) }
                         diagnostic(
-                            "event=synthesis_rejected request=${utteranceId.take(8)} code=$accepted " +
+                            "event=synthesis_rejected request=${utteranceId.take(8)} " +
+                                "connection=${connection.nonce.take(8)} code=$accepted " +
+                                "elapsedMs=${SystemClock.elapsedRealtime() - active.enqueuedAtMs} " +
                                 "engine=${engineLabel(connection)}"
                         )
                         if (removed != null && continuation.isActive) {
@@ -443,9 +477,39 @@ internal class SystemSpeechRenderer(
                 }
             }
         } catch (timeout: TimeoutCancellationException) {
-            diagnostic("event=synthesis_timeout request=${utteranceId.take(8)} timeoutMs=$synthesisTimeoutMs")
+            diagnostic(
+                "event=synthesis_timeout request=${utteranceId.take(8)} " +
+                    "connection=${connection.nonce.take(8)} timeoutMs=$synthesisTimeoutMs " +
+                    "elapsedMs=${SystemClock.elapsedRealtime() - queuedAtMs}"
+            )
             throw SystemSpeechError.Timeout(synthesisTimeoutMs, "synthesis")
+        } finally {
+            pendingWatch?.cancel()
         }
+    }
+
+    /**
+     * One bounded, read-only diagnostic: reports a request still registered after
+     * [PENDING_WARNING_MS] with no terminal callback. It fires at most once per request, reads the
+     * active map under the state lock, never cancels/releases/retries or touches synthesis, and is
+     * cancelled when the request completes.
+     */
+    private fun startPendingWatch(
+        connection: Binding,
+        utteranceId: String,
+        active: Active
+    ): Job? = preparation.launch {
+        delay(PENDING_WARNING_MS)
+        val stillPending = synchronized(lock) { actives[utteranceId] === active }
+        if (!stillPending) return@launch
+        val now = SystemClock.elapsedRealtime()
+        val started = active.startedAtMs
+        diagnostic(
+            "event=synthesis_pending request=${utteranceId.take(8)} " +
+                "connection=${connection.nonce.take(8)} elapsedMs=${now - active.enqueuedAtMs} " +
+                "queueMs=${if (started > 0L) started - active.enqueuedAtMs else now - active.enqueuedAtMs} " +
+                "started=${started > 0L} chars=${active.characters} engine=${configuredEngineLabel(connection)}"
+        )
     }
 
     private fun publish(part: File, target: File) {
@@ -470,7 +534,8 @@ internal class SystemSpeechRenderer(
             val now = SystemClock.elapsedRealtime()
             active.startedAtMs = now
             diagnostic(
-                "event=synthesis_started request=${id.take(8)} queueMs=${now - active.enqueuedAtMs} " +
+                "event=synthesis_started request=${id.take(8)} connection=${connection.nonce.take(8)} " +
+                    "queueMs=${now - active.enqueuedAtMs} " +
                     "chars=${active.characters} engine=${engineLabel(connection)}"
             )
         }
@@ -479,7 +544,8 @@ internal class SystemSpeechRenderer(
             val active = takeActive(connection, utteranceId ?: return) ?: return
             val now = SystemClock.elapsedRealtime()
             diagnostic(
-                "event=synthesis_done request=${utteranceId.take(8)} totalMs=${now - active.enqueuedAtMs} " +
+                "event=synthesis_done request=${utteranceId.take(8)} connection=${connection.nonce.take(8)} " +
+                    "totalMs=${now - active.enqueuedAtMs} " +
                     "serviceMs=${if (active.startedAtMs > 0L) now - active.startedAtMs else -1L} " +
                     "chars=${active.characters} engine=${engineLabel(connection)}"
             )
@@ -496,7 +562,8 @@ internal class SystemSpeechRenderer(
         override fun onError(utteranceId: String?, errorCode: Int) {
             val active = takeActive(connection, utteranceId ?: return) ?: return
             diagnostic(
-                "event=synthesis_error request=${utteranceId.take(8)} code=$errorCode " +
+                "event=synthesis_error request=${utteranceId.take(8)} connection=${connection.nonce.take(8)} " +
+                    "code=$errorCode " +
                     "totalMs=${SystemClock.elapsedRealtime() - active.enqueuedAtMs} engine=${engineLabel(connection)}"
             )
             if (active.continuation.isActive) {
@@ -509,7 +576,8 @@ internal class SystemSpeechRenderer(
         override fun onStop(utteranceId: String?, interrupted: Boolean) {
             val active = takeActive(connection, utteranceId ?: return) ?: return
             diagnostic(
-                "event=synthesis_stopped request=${utteranceId.take(8)} interrupted=$interrupted " +
+                "event=synthesis_stopped request=${utteranceId.take(8)} connection=${connection.nonce.take(8)} " +
+                    "interrupted=$interrupted " +
                     "totalMs=${SystemClock.elapsedRealtime() - active.enqueuedAtMs}"
             )
             if (active.continuation.isActive) {
@@ -531,7 +599,10 @@ internal class SystemSpeechRenderer(
             actives.remove(utteranceId)
         }
 
-    private suspend fun createBindingLocked(key: SpeechConfigurationKey): Binding {
+    private suspend fun createBindingLocked(
+        key: SpeechConfigurationKey,
+        reason: String
+    ): Binding {
         val slot = InitSlot()
         val speech = try {
             platformFactory.create(application, key.enginePackage) { status ->
@@ -550,18 +621,24 @@ internal class SystemSpeechRenderer(
             diagnostic(
                 "Android narration TTS: engine=" +
                     diagnosticMetadata(key.enginePackage ?: "system default") +
-                    " could not be created"
+                    " could not be created (reason=$reason revision=${key.revision})"
             )
             throw SystemSpeechError.Unavailable("The system speech engine could not be created.")
         }
 
         val created = Binding(key)
+        var previousKey: SpeechConfigurationKey? = null
+        var activeCount = 0
         val early = synchronized(lock) {
             created.speech = speech
             slot.binding = created
             binding = created
+            previousKey = lastBoundKey
+            lastBoundKey = key
+            activeCount = actives.size
             slot.status
         }
+        logConnectionBind(created, reason, previousKey, activeCount)
         if (early != null) completeInit(created, early)
         return created
     }
@@ -637,24 +714,45 @@ internal class SystemSpeechRenderer(
         return connection.profile ?: throw SystemSpeechError.Unavailable()
     }
 
-    private fun resetFor(newKey: SpeechConfigurationKey) {
-        val previous = synchronized(lock) {
+    /**
+     * A reason only when this branch proves it. A revision delta alone never names an Activity
+     * cause: the foreground refresh and an unchanged-provider settings refresh look identical here.
+     */
+    private fun rebindReasonFor(latest: SpeechConfigurationKey, attempt: Int): String {
+        val (previous, previousBound) = synchronized(lock) { binding to lastBoundKey }
+        return when {
+            previous == null && previousBound == null -> "initial"
+            previous == null -> "no_live_binding"
+            previous.key.enginePackage != latest.enginePackage -> "engine_changed"
+            previous.key.revision != latest.revision -> "config_revision_changed"
+            attempt > 0 -> "same_key_retry"
+            else -> "same_key_rebind"
+        }
+    }
+
+    private fun resetFor(newKey: SpeechConfigurationKey, reason: String) {
+        val (previous, activeCount) = synchronized(lock) {
             val old = binding
             binding = null
             old?.isClosed = true
-            old
+            old to actives.size
         }
         // A configuration change is not caller cancellation: every wait gets a terminal
         // ConfigurationChanged it can reconcile, never a bare CancellationException.
-        failActives(SystemSpeechError.ConfigurationChanged())
-        previous?.let { release(it, SystemSpeechError.ConfigurationChanged()) }
+        failActives(SystemSpeechError.ConfigurationChanged(), reason)
+        previous?.let {
+            logConnectionRelease(it, reason, activeCount, newKey)
+            release(it, SystemSpeechError.ConfigurationChanged())
+        }
     }
 
     private fun invalidate(connection: Binding, cause: Throwable) {
-        synchronized(lock) {
+        val activeCount = synchronized(lock) {
             connection.isClosed = true
             if (binding === connection) binding = null
+            actives.size
         }
+        logConnectionInvalidated(connection, cause, activeCount)
         release(connection, cause)
     }
 
@@ -701,11 +799,16 @@ internal class SystemSpeechRenderer(
                 " locale=" + diagnosticMetadata(reported.locale.toLanguageTag()) +
                 " (system default; no voice selection)"
         )
+        val engineName = runCatching {
+            val info = application.packageManager.getApplicationInfo(bound, 0)
+            application.packageManager.getApplicationLabel(info).toString()
+        }.getOrDefault(bound)
         return NarrationVoiceSpec(
             engine = engine,
             voice = voice,
             prosody = "pitch=${systemPitch()};rate=1.0",
-            format = WAVE_FORMAT
+            format = WAVE_FORMAT,
+            displayLabel = "$engineName · $voiceName"
         )
     }
 
@@ -754,6 +857,75 @@ internal class SystemSpeechRenderer(
             ?: "unidentified"
     )
 
+    /**
+     * Release-safe engine label. It reports only the engine package the configuration key asked
+     * for, never the actually bound identity (which needs a Binder query and may be hidden).
+     */
+    private fun configuredEngineLabel(connection: Binding): String = diagnosticMetadata(
+        connection.key.enginePackage ?: "unidentified"
+    )
+
+    private fun logConnectionBind(
+        connection: Binding,
+        reason: String,
+        previousKey: SpeechConfigurationKey?,
+        activeCount: Int
+    ) {
+        diagnostic(
+            "event=connection_bind connection=${connection.nonce.take(8)} " +
+                "revision=${connection.key.revision} " +
+                "previousRevision=${previousKey?.revision ?: -1L} " +
+                "engineChanged=${previousKey != null && previousKey.enginePackage != connection.key.enginePackage} " +
+                "initial=${previousKey == null} reason=$reason activeCount=$activeCount " +
+                "engine=${configuredEngineLabel(connection)}"
+        )
+    }
+
+    private fun logConnectionRelease(
+        connection: Binding,
+        reason: String,
+        activeCount: Int,
+        nextKey: SpeechConfigurationKey?
+    ) {
+        diagnostic(
+            "event=connection_release connection=${connection.nonce.take(8)} " +
+                "revision=${connection.key.revision} " +
+                "nextRevision=${nextKey?.revision ?: -1L} " +
+                "engineChanged=${nextKey != null && nextKey.enginePackage != connection.key.enginePackage} " +
+                "reason=$reason activeCount=$activeCount engine=${configuredEngineLabel(connection)}"
+        )
+    }
+
+    private fun logConnectionInvalidated(connection: Binding, cause: Throwable, activeCount: Int) {
+        val reason = when (cause) {
+            is SystemSpeechError.Timeout -> "initialization_timeout"
+            is SystemSpeechError.ConfigurationChanged -> "configuration_changed"
+            else -> "initialization_failure"
+        }
+        diagnostic(
+            "event=connection_invalidated connection=${connection.nonce.take(8)} " +
+                "revision=${connection.key.revision} reason=$reason " +
+                "activeCount=$activeCount engine=${configuredEngineLabel(connection)}"
+        )
+    }
+
+    /**
+     * One terminal record for a queued request whose wait ended without an engine callback, or
+     * whose cancellation/rebind path cleared the active map before the callback could land.
+     */
+    private fun logActiveTerminal(active: Active, reason: String, cause: String) {
+        val now = SystemClock.elapsedRealtime()
+        val started = active.startedAtMs
+        diagnostic(
+            "event=synthesis_terminal request=${active.requestId.take(8)} " +
+                "connection=${active.binding.nonce.take(8)} reason=$reason cause=$cause " +
+                "elapsedMs=${now - active.enqueuedAtMs} " +
+                "queueMs=${if (started > 0L) started - active.enqueuedAtMs else now - active.enqueuedAtMs} " +
+                "serviceMs=${if (started > 0L) now - started else -1L} " +
+                "chars=${active.characters} engine=${configuredEngineLabel(active.binding)}"
+        )
+    }
+
     private fun diagnostic(report: String) {
         runCatching { onDiagnostic(report) }
     }
@@ -784,6 +956,7 @@ internal class SystemSpeechRenderer(
         val binding: Binding,
         val continuation: CancellableContinuation<Unit>,
         val characters: Int,
+        val requestId: String,
         val enqueuedAtMs: Long = SystemClock.elapsedRealtime()
     ) {
         @Volatile var startedAtMs: Long = 0L
@@ -792,6 +965,9 @@ internal class SystemSpeechRenderer(
     private companion object {
         const val FIXED_SPEECH_RATE = 1.0f
         const val WAVE_FORMAT = "wav-pcm-v1"
+
+        /** One bounded diagnostic per request; never a recurring heartbeat. */
+        const val PENDING_WARNING_MS = 15_000L
 
         val SPEECH_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)

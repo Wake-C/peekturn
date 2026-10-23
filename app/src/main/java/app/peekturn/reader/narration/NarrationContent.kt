@@ -14,6 +14,12 @@ import org.readium.r2.shared.publication.services.content.TextContentTokenizer
 import org.readium.r2.shared.publication.html.cssSelector
 import org.readium.r2.shared.util.Url
 
+/** One completed sentence from an independent publication, with its exact Readium locator. */
+internal data class NarrationBookSentence(val text: String, val locator: Locator)
+
+/** A bounded, source-free reason the whole-book sentence iterator could not continue. */
+internal class NarrationBookContentError(val code: String) : Exception(code)
+
 /**
  * Uses Readium's content service and the same sentence tokenizer as the TTS navigator. Anchors
  * include the locator's selector, quote, and preceding context, so repeated text is never resolved
@@ -30,6 +36,87 @@ internal class NarrationContent(
     private val publication: Publication,
     private val onDiagnostic: (String) -> Unit = {}
 ) {
+
+    /**
+     * Every sentence of the whole publication in reading order, tokenized exactly as the TTS
+     * navigator tokenizes it, with each sentence's own locator. The caller owns the publication
+     * independently of any reader or playback session. A chapter that cannot be read fails the
+     * flow with a fixed code instead of silently producing a partial book.
+     */
+    fun allSentences(): Flow<NarrationBookSentence> = flow {
+        val contentService = publication.findService(ContentService::class)
+            ?: throw NarrationBookContentError("content_unavailable")
+        // A single PublicationContentIterator walks the whole reading order from its start and
+        // crosses resource boundaries itself. Iterating one content() per reading-order link would
+        // traverse every later chapter again and duplicate the book.
+        val first = publication.readingOrder.firstOrNull()
+            ?: throw NarrationBookContentError("content_unavailable")
+        verifyReadingOrderReadable()
+        val locator = (try {
+            publication.locatorFromLink(first)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            throw NarrationBookContentError("content_read_failed")
+        }) ?: throw NarrationBookContentError("content_read_failed")
+        val iterator = try {
+            contentService.content(locator).iterator()
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            throw NarrationBookContentError("content_read_failed")
+        }
+        while (true) {
+            val element = nextElement(iterator) ?: break
+            for (sentence in tokenizedSentences(element)) {
+                emit(NarrationBookSentence(sentence.text, sentence.locator))
+            }
+        }
+    }.flowOn(Dispatchers.Default).buffer(0)
+
+    private suspend fun nextElement(iterator: Content.Iterator): Content.Element? = try {
+        iterator.nextOrNull()
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        throw NarrationBookContentError("content_read_failed")
+    }
+
+    private fun tokenizedSentences(element: Content.Element): List<Sentence> = try {
+        sentencesOf(element)
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        throw NarrationBookContentError("content_read_failed")
+    }
+
+    /**
+     * Readium's HTML content iterator logs an unreadable resource and yields no elements for it, so
+     * the content iterator alone would silently produce a partial book. Read every textual
+     * reading-order resource once before iterating; a failure fails the whole preparation.
+     */
+    private suspend fun verifyReadingOrderReadable() {
+        for (link in publication.readingOrder) {
+            if (link.mediaType?.isHtml == false) continue
+            val resource = publication.get(link)
+                ?: throw NarrationBookContentError("content_unavailable")
+            val length = try {
+                resource.length().getOrNull()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            } ?: throw NarrationBookContentError("content_read_failed")
+            if (length <= 0L) continue
+            try {
+                resource.read(0L..(length - 1)).getOrNull()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            } ?: throw NarrationBookContentError("content_read_failed")
+        }
+    }
 
     suspend fun nextParagraph(locator: Locator, currentText: String): Locator? =
         kotlinx.coroutines.withContext(Dispatchers.Default) {

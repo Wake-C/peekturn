@@ -146,7 +146,7 @@ class ReaderActivity : AppCompatActivity() {
             narrationBinder = binder
             pendingNarration?.let {
                 pendingNarration = null
-                binder.start(it.bookId, it.locatorJson, it.speed, it.startSentence)
+                binder.start(it.bookId, it.locatorJson, it.speed, it.startSentence, it.preparedVersionId)
             }
             observeNarration(binder)
         }
@@ -207,6 +207,9 @@ class ReaderActivity : AppCompatActivity() {
         })
         setContent {
             val settings by graph.store.settings.collectAsState()
+            val savedAudio by graph.preparedAudioStore.versions.collectAsState()
+            val preparingAudio by graph.preparedAudio.busy.collectAsState()
+            val preparationError by graph.preparedAudio.error.collectAsState()
             PeekturnTheme(theme = settings.appTheme) {
                 LaunchedEffect(settings.reading, settings.appTheme) {
                     refreshPreferences(settings)
@@ -260,7 +263,10 @@ class ReaderActivity : AppCompatActivity() {
                                             refreshNarrationCacheSize()
                                             panel = "options"
                                         },
-                                        onReadAloud = { if (!narrationUi.active) startNarration() },
+                                        onReadAloud = {
+                                            dismissLookup(true, "listen")
+                                            panel = "listen"
+                                        },
                                         onPlayPause = {
                                             if (narrationUi.playing) narrationPlayback?.pause() else narrationPlayback?.play()
                                         },
@@ -287,6 +293,26 @@ class ReaderActivity : AppCompatActivity() {
                         }
                     }
                     when (panel) {
+                        "listen" -> ReaderListenSheet(
+                            versions = savedAudio.filter { it.bookId == book?.id },
+                            busy = preparingAudio,
+                            narrationActive = narrationUi.active,
+                            error = preparationError,
+                            onLive = {
+                                graph.preparedAudio.clearError()
+                                panel = null
+                                startNarration()
+                            },
+                            onPrepare = { book?.id?.let(graph.preparedAudio::prepare) },
+                            onResume = graph.preparedAudio::resume,
+                            onPlay = { id -> panel = null; startNarration(id) },
+                            onPause = { graph.scope.launch { graph.preparedAudio.pause() } },
+                            onDelete = { id -> graph.scope.launch { graph.preparedAudio.delete(id) } },
+                            onDismiss = {
+                                graph.preparedAudio.clearError()
+                                panel = null
+                            }
+                        )
                         "contents" -> ReaderContentsSheet(
                             chapters = remember(publication) {
                                 flattenContents(publication?.tableOfContents.orEmpty())
@@ -588,7 +614,7 @@ class ReaderActivity : AppCompatActivity() {
      * Options starts at the first visible word of the current page. A stale search match or an
      * earlier selection is never substituted for the page the reader is actually looking at.
      */
-    private fun startNarration() {
+    private fun startNarration(preparedVersionId: String? = null) {
         val nav = navigator ?: return
         val id = book?.id ?: return
         lifecycleScope.launch {
@@ -621,19 +647,25 @@ class ReaderActivity : AppCompatActivity() {
                 base
             }
             requestChromeVisibility(true)
-            beginNarration(id, locator, startSentence, "read aloud")
+            beginNarration(id, locator, startSentence, "read aloud", preparedVersionId)
         }
     }
 
-    private fun beginNarration(id: Long, locator: Locator, startSentence: String?, reason: String) {
+    private fun beginNarration(
+        id: Long,
+        locator: Locator,
+        startSentence: String?,
+        reason: String,
+        preparedVersionId: String? = null
+    ) {
         dismissLookup(true, reason)
         graph.speech.stop()
         val locatorJson = locator.toJSON().toString()
         val binder = narrationBinder
         if (binder != null) {
-            binder.start(id, locatorJson, narrationUi.speed, startSentence)
+            binder.start(id, locatorJson, narrationUi.speed, startSentence, preparedVersionId)
         } else {
-            pendingNarration = PendingNarration(id, locatorJson, narrationUi.speed, startSentence)
+            pendingNarration = PendingNarration(id, locatorJson, narrationUi.speed, startSentence, preparedVersionId)
             bindNarration()
         }
     }
@@ -700,6 +732,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun clearNarrationCache() {
         stopNarration()
         lifecycleScope.launch {
+            graph.preparedAudio.pause()
             graph.narrationProviderGate.withLock { graph.sentenceAudio.clear() }
             narrationCacheBytes = graph.sentenceAudio.sizeBytes()
         }
@@ -1279,7 +1312,8 @@ class ReaderActivity : AppCompatActivity() {
         val bookId: Long,
         val locatorJson: String,
         val speed: Float,
-        val startSentence: String?
+        val startSentence: String?,
+        val preparedVersionId: String? = null
     )
     companion object {
         private const val EXTRA_BOOK = "book_id"

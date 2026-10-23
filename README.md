@@ -48,9 +48,17 @@ System narration caches are separated by engine version, reported voice and synt
 
 Cold narration prepares the current clip, two complete following paragraphs and at least 15 seconds of playable audio before starting. It then builds toward eight following paragraphs and an adaptive time reserve. End-of-book, unavailable content and resource bounds can leave a smaller reserve; the reader shows what is actually ready. Preparation allows at most two active synthesis requests while building reserve and one when healthy; the engine may still serialize its own model inference. Pause retains completed clips without continuing preparation.
 
+After a narration session has started, previous/next and pause/resume can replay a completed clip that matches the current voice without waiting for future paragraphs. Background preparation continues; a later uncached sentence can still cause a gap. Initial cold startup and uncached restart preparation retain the reserve policy above.
+
+For slow neural voices, open **Listen → Saved → Prepare whole book**. Peekturn saves each sentence for the current book and voice, with progress you can pause and resume. Preparation can continue with the screen off; after the app is stopped, resume it from Saved. Starting live narration or pronunciation pauses preparation. Stop narration before preparing more audio.
+
+Once the whole book is ready, **Play** uses the same reading position and sentence controls, including the compact controls with reading tools hidden. Saved playback needs no live synthesis or network. Saved versions are separate from the temporary sentence cache and survive clearing it. To save another voice, change the voice in Settings and choose **Prepare current voice**. To rebuild a version, delete it first. Stop its playback before deleting it.
+
+Saved preparation requires the engine to identify its voice. If that information is not ready, select a voice in the engine's settings and try again, or use Live. Missing or damaged saved clips stop playback with an error; the app does not silently switch to live synthesis.
+
 In **Reading features**, enable **Volume keys for narration** to use volume up for the previous sentence and volume down for the next sentence during a narration session in the reader; this is off by default.
 
-Settings includes a live developer report with recent diagnostics, a 16 KiB copy limit and a Clear action. Clearing the report does not remove books, preferences or sentence audio.
+Settings includes a live developer report with a 256 KiB disk limit, a 16 KiB copy limit and a Clear action; older records are discarded first. Narration logs connect playback actions, cache readiness, buffer waits and synthesis requests, including rebind and cancellation reasons and one pending-request notice after 15 seconds. They exclude reading text and credentials. Clearing the report does not remove books, preferences or sentence audio.
 
 ## Read from the web
 
@@ -91,7 +99,7 @@ For a signed release, see the [release process](RELEASE.md).
 
 Books, progress, preferences and reading statistics stay on the device. There are no accounts and no cloud library.
 
-When you ask for an explanation, only the selected text, a short surrounding snippet and the available book or chapter title are sent to the provider you configured. Your API key is encrypted on the device. Online pronunciation sends the requested word or sentence. Continuous narration also sends bounded upcoming paragraphs to the selected provider; Android system engines may themselves use network voices. The offline dictionary does not contact a provider. See the [third-party notices](THIRD_PARTY_NOTICES.md) for the exact audio routes and attribution.
+When you ask for an explanation, only the selected text, a short surrounding snippet and the available book or chapter title are sent to the provider you configured. Your API key is encrypted on the device. Online pronunciation sends the requested word or sentence. Continuous narration also sends bounded upcoming paragraphs to the selected provider. Preparing a whole book with an online voice sends its text sentence by sentence to that provider; Android system engines may themselves use network voices. The offline dictionary does not contact a provider. See the [third-party notices](THIRD_PARTY_NOTICES.md) for the exact audio routes and attribution.
 
 ## More
 

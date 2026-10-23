@@ -95,7 +95,9 @@ class PronunciationPlayer(
      * outcomes, the engine's answers and terminal or playback failures. It never receives the text
      * being spoken, an endpoint or a credential, and a missing owner simply has no log to write.
      */
-    private val onDiagnostic: (String) -> Unit = {}
+    private val onDiagnostic: (String) -> Unit = {},
+    /** Preparation must release its engine before interactive speech can submit a request. */
+    private val beforeSpeech: suspend () -> Unit = {}
 ) {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -111,6 +113,7 @@ class PronunciationPlayer(
     private var pending: Request? = null
     private var path = Path.Speech
     private var lookup: Job? = null
+    private var admission: Job? = null
     private var speechNotice: String? = null
     private var media: MediaPlayer? = null
     private var mediaPrepared = false
@@ -253,14 +256,17 @@ class PronunciationPlayer(
         path = Path.Speech
         utteranceAccepted = false
         mutableState.value = SpeechState(text, playing = true)
-        if (strictProvider == SentenceSpeechProvider.ANDROID) {
-            // The explicitly chosen device route never makes an online request.
-            requestSpeech(request, null)
-            return
+        admission = scope.launch {
+            beforeSpeech()
+            if (!isCurrent(request)) return@launch
+            if (strictProvider == SentenceSpeechProvider.ANDROID) {
+                // The explicitly chosen device route never makes an online request.
+                requestSpeech(request, null)
+            } else {
+                // A selected word alone may try the dictionary recording before speech.
+                lookupOnline(request, accent, if (word) wordLookupTerm(text) else null)
+            }
         }
-        // Only the text asked to be heard may leave the device, and only a single plain word may try
-        // the dictionary's own recording before the speech service.
-        lookupOnline(request, accent, if (word) wordLookupTerm(text) else null)
     }
 
     /**
@@ -810,6 +816,8 @@ class PronunciationPlayer(
         generation++
         pending = null
         path = Path.Speech
+        admission?.cancel()
+        admission = null
         lookup?.cancel()
         lookup = null
         speechNotice = null
@@ -879,6 +887,8 @@ class PronunciationPlayer(
         generation++
         pending = null
         path = Path.Speech
+        admission?.cancel()
+        admission = null
         lookup?.cancel()
         lookup = null
         speechNotice = null

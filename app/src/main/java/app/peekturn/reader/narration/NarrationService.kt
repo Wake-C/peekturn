@@ -65,10 +65,16 @@ class NarrationService : MediaSessionService() {
         private val mutableFailure = MutableStateFlow<String?>(null)
         val failure: StateFlow<String?> = mutableFailure.asStateFlow()
 
-        fun start(bookId: Long, locatorJson: String?, speed: Float, startSentence: String?) {
+        fun start(
+            bookId: Long,
+            locatorJson: String?,
+            speed: Float,
+            startSentence: String?,
+            preparedVersionId: String? = null
+        ) {
             ensureCaller()
             this@NarrationService.startSelf()
-            this@NarrationService.begin(bookId, locatorJson, speed, startSentence)
+            this@NarrationService.begin(bookId, locatorJson, speed, startSentence, preparedVersionId)
         }
 
         fun play() { ensureCaller(); playback.value?.play() }
@@ -128,7 +134,8 @@ class NarrationService : MediaSessionService() {
                 .map { it.sentenceSpeechProvider }
                 .distinctUntilChanged()
                 .collect { selected ->
-                    playback?.takeIf { it.provider != selected }?.let { stopNarration() }
+                    playback?.takeIf { it.preparedVersionId == null && it.provider != selected }
+                        ?.let { stopNarration() }
                 }
         }
     }
@@ -167,6 +174,7 @@ class NarrationService : MediaSessionService() {
         publication?.close()
         publication = null
         binder.detach()
+        graph.preparedAudio.setNarrationActive(false)
         scope.cancel()
         super.onDestroy()
     }
@@ -175,7 +183,13 @@ class NarrationService : MediaSessionService() {
         startService(Intent(this, NarrationService::class.java))
     }
 
-    private fun begin(requestedBook: Long, locatorJson: String?, speed: Float, startSentence: String?) {
+    private fun begin(
+        requestedBook: Long,
+        locatorJson: String?,
+        speed: Float,
+        startSentence: String?,
+        preparedVersionId: String?
+    ) {
         if (requestedBook < 0L) return
         val locator = locatorJson?.let(::locator)
         val settings = graph.store.settings.value
@@ -183,7 +197,10 @@ class NarrationService : MediaSessionService() {
         val requestedAccent = settings.accent
 
         val current = playback
-        if (current != null && bookId == requestedBook && current.provider == requestedProvider) {
+        if (current != null && bookId == requestedBook &&
+            current.preparedVersionId == preparedVersionId &&
+            (preparedVersionId != null || current.provider == requestedProvider)
+        ) {
             if (locator != null) current.go(locator, startSentence)
             else current.play()
             return
@@ -191,11 +208,26 @@ class NarrationService : MediaSessionService() {
 
         releasePlayback(stopService = false)
         opening?.cancel()
+        graph.preparedAudio.setNarrationActive(true)
         opening = scope.launch {
             graph.developerLog.recordEvent("narration", "opening")
+            var unopenedResolver: NarrationAudioResolver? = null
             try {
+                graph.preparedAudio.pause()
                 val book = graph.store.findBook(requestedBook)
                     ?: error("The book is no longer in the library.")
+                val saved = if (preparedVersionId == null) null else {
+                    graph.preparedAudioStore.refresh()
+                    graph.preparedAudioStore.versions.value.firstOrNull {
+                        it.id == preparedVersionId && it.bookId == requestedBook
+                    } ?: error("Saved audio is unavailable.")
+                }
+                if (saved != null) {
+                    unopenedResolver = graph.preparedAudioStore.open(
+                        saved.id,
+                        PreparedAudioStore.fingerprint(File(book.filePath))
+                    )
+                }
                 val opened = graph.engine.open(File(book.filePath))
                 publication = opened
                 bookId = requestedBook
@@ -204,17 +236,20 @@ class NarrationService : MediaSessionService() {
                     bookId = requestedBook,
                     publication = opened,
                     cache = graph.sentenceAudio,
-                    accent = requestedAccent,
-                    provider = requestedProvider,
+                    accent = saved?.accent ?: requestedAccent,
+                    provider = saved?.provider ?: requestedProvider,
                     initialSpeed = speed,
                     providerGate = graph.narrationProviderGate,
                     systemSynthesisGate = graph.systemSynthesisGate,
                     onEnded = { scope.launch { stopNarration() } },
                     onLocator = { position -> persist(requestedBook, position) },
-                    onDiagnostic = graph.developerLog::recordNarration
+                    onDiagnostic = graph.developerLog::recordNarration,
+                    preparedVersionId = saved?.id,
+                    preparedResolver = unopenedResolver
                 )
+                unopenedResolver = null
                 playback = created
-                if (graph.store.settings.value.sentenceSpeechProvider != requestedProvider) {
+                if (saved == null && graph.store.settings.value.sentenceSpeechProvider != requestedProvider) {
                     // Settings changed while the publication was opening; never start the wrong source.
                     stopNarration()
                     return@launch
@@ -233,8 +268,13 @@ class NarrationService : MediaSessionService() {
                 throw cancelled
             } catch (failure: Exception) {
                 graph.developerLog.recordFailure("narration", "open", failure)
-                binder.fail(getString(R.string.reader_narration_error_open))
+                binder.fail(getString(
+                    if (preparedVersionId == null) R.string.reader_narration_error_open
+                    else R.string.reader_saved_audio_unavailable
+                ))
                 scope.launch { stopNarration() }
+            } finally {
+                unopenedResolver?.close()
             }
         }
     }
@@ -275,6 +315,7 @@ class NarrationService : MediaSessionService() {
         publication?.close()
         publication = null
         bookId = -1L
+        graph.preparedAudio.setNarrationActive(false)
         if (stopService) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -311,6 +352,7 @@ class NarrationService : MediaSessionService() {
         suspend fun clearCache(context: Context) {
             val app = context.applicationContext as PeekturnApp
             var connection: ServiceConnection? = null
+            app.graph.preparedAudio.pause()
             try {
                 val binder = suspendCancellableCoroutine { continuation ->
                     val created = object : ServiceConnection {

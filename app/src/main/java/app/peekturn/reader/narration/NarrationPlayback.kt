@@ -6,8 +6,6 @@ import android.speech.tts.TextToSpeech
 import androidx.media3.common.Player
 import app.peekturn.reader.R
 import app.peekturn.reader.model.SentenceSpeechProvider
-import app.peekturn.reader.speech.BaiduSpeechClient
-import app.peekturn.reader.speech.BingSpeechClient
 import app.peekturn.reader.speech.SentenceAudioSource
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
@@ -58,7 +56,8 @@ data class NarrationState(
     val lastPlaybackCompletedAtMs: Long = 0L,
     val maxGapMs: Long = 0L,
     val lastAudioKey: String? = null,
-    val lastAudioConfiguration: String? = null
+    val lastAudioConfiguration: String? = null,
+    val savedAudio: Boolean = false
 )
 
 /**
@@ -89,7 +88,9 @@ internal class NarrationPlayback(
     systemSynthesisGate: Semaphore,
     private val onEnded: () -> Unit,
     private val onLocator: (Locator) -> Unit,
-    private val onDiagnostic: (String) -> Unit = {}
+    private val onDiagnostic: (String) -> Unit = {},
+    val preparedVersionId: String? = null,
+    private val preparedResolver: NarrationAudioResolver? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val paragraphJumps = Mutex()
@@ -99,6 +100,7 @@ internal class NarrationPlayback(
     private var cachedStarts = 0L
     private var lastPlaybackIdentity = "provider=${provider.name}"
     private var currentSpokenText: String? = null
+    private var lastStartedClipMs = 0L
     private var lastBufferReportAtMs = 0L
     private var lastBuffering = false
     private var lastBurst = false
@@ -106,6 +108,7 @@ internal class NarrationPlayback(
         NarrationState(
             active = true,
             sessionId = sessionId,
+            savedAudio = preparedVersionId != null,
             speed = initialSpeed.coerceIn(0.5f, 2f),
             notice = if (provider == SentenceSpeechProvider.BAIDU) {
                 application.getString(R.string.speech_notice_baidu_accent)
@@ -119,11 +122,8 @@ internal class NarrationPlayback(
     private val locationMutable = MutableStateFlow<Locator?>(null)
     val location: StateFlow<Locator?> = locationMutable.asStateFlow()
 
-    private val onlineSource: SentenceAudioSource? = when (provider) {
-        SentenceSpeechProvider.MICROSOFT -> BingSpeechClient()
-        SentenceSpeechProvider.BAIDU -> BaiduSpeechClient()
-        SentenceSpeechProvider.ANDROID -> null
-    }
+    private val onlineSource: SentenceAudioSource? =
+        if (preparedResolver != null) null else onlineNarrationSource(provider)
     private val content = NarrationContent(publication, onDiagnostic = ::diagnostic)
     private var speed: Float = initialSpeed.coerceIn(0.5f, 2f)
     private val resumePolicy = NarrationResumePolicy()
@@ -133,7 +133,7 @@ internal class NarrationPlayback(
      * synthesizer and gate. The buffered wrapper owns current-sentence priority and lookahead, so
      * playback never starts its own prefetch queue.
      */
-    private val source: NarrationAudioResolver? = when (provider) {
+    private val source: NarrationAudioResolver? = if (preparedResolver != null) null else when (provider) {
         SentenceSpeechProvider.ANDROID -> SystemNarrationSynthesizer(
             context = application,
             cache = cache,
@@ -171,6 +171,8 @@ internal class NarrationPlayback(
             onState = ::onBufferState
         )
     }
+    // Saved audio is already complete. It must never enter the live reserve gate or create a TTS client.
+    private val audioResolver: NarrationAudioResolver? = preparedResolver ?: resolver
 
     private var navigator: TtsNavigator<
         NarrationSettings,
@@ -191,8 +193,12 @@ internal class NarrationPlayback(
 
     /** Starts at [initialLocator], then at [startSentence] when the visible offset identifies one. */
     suspend fun start(initialLocator: Locator?, startSentence: String? = null): Boolean {
-        val buffered = resolver
-        diagnostic("event=session_start provider=${provider.name} speed=$speed")
+        val buffered = audioResolver
+        diagnostic(
+            "event=session_start provider=${provider.name} speed=$speed " +
+                "source=${if (preparedVersionId == null) "live" else "saved"} " +
+                "version=${preparedVersionId?.take(8) ?: "none"}"
+        )
         if (buffered == null) {
             stateMutable.update {
                 it.copy(active = true, error = application.getString(R.string.reader_narration_error_voice))
@@ -266,8 +272,9 @@ internal class NarrationPlayback(
         val current = state.value
         if (!resumePolicy.beginLookupPause(current.active, current.playing)) return false
         action("lookup_pause")
+        resolver?.preferCachedReplay()
         lookupLocator = currentUtteranceLocator() ?: locationMutable.value
-        cancelLookahead()
+        cancelLookahead("lookup-pause")
         nav.pause()
         return true
     }
@@ -291,21 +298,22 @@ internal class NarrationPlayback(
      * the lookahead anchor until `navigator.location` actually changes.
      */
     fun go(locator: Locator, startSentence: String? = null) {
-        seekTo(locator, startSentence, playWhenReady = true)
+        seekTo(locator, startSentence, playWhenReady = true, cancelCause = "go")
     }
 
     private fun seekTo(
         locator: Locator,
         startSentence: String?,
         playWhenReady: Boolean,
-        preserveQueuedParagraphRequests: Boolean = false
+        preserveQueuedParagraphRequests: Boolean = false,
+        cancelCause: String
     ) {
         if (!preserveQueuedParagraphRequests) paragraphRequestEpoch++
         action("seek_requested")
         currentSpokenText = null
         resumePolicy.invalidateCheckpoint()
         stateMutable.update { it.copy(error = null) }
-        cancelLookahead()
+        cancelLookahead(cancelCause)
         staleLocator = navigator?.location?.value?.utteranceLocator ?: locationMutable.value
         pendingLocator = locator
         if (startSentence.isNullOrBlank()) {
@@ -328,18 +336,20 @@ internal class NarrationPlayback(
     }
 
     private fun pauseClip() {
-        cancelLookahead()
+        resolver?.preferCachedReplay()
+        cancelLookahead("pause")
         navigator?.pause()
     }
 
     fun next() {
         action("next_sentence")
+        resolver?.preferCachedReplay()
         resumePolicy.invalidateCheckpoint()
         paragraphRequestEpoch++
         currentSpokenText = null
         pendingLocator = null
         staleLocator = null
-        cancelLookahead()
+        cancelLookahead("next-sentence")
         navigator?.skipToNextUtterance()
     }
     fun nextParagraph() {
@@ -369,7 +379,13 @@ internal class NarrationPlayback(
                 }
                 action("next_paragraph")
                 stateMutable.update { it.copy(paragraphJumps = it.paragraphJumps + 1L) }
-                seekTo(target, null, playWhenReady = state.value.playing, preserveQueuedParagraphRequests = true)
+                seekTo(
+                    target,
+                    null,
+                    playWhenReady = state.value.playing,
+                    preserveQueuedParagraphRequests = true,
+                    cancelCause = "next-paragraph"
+                )
             }
         }
     }
@@ -377,12 +393,13 @@ internal class NarrationPlayback(
 
     fun previous() {
         action("previous_sentence")
+        resolver?.preferCachedReplay()
         resumePolicy.invalidateCheckpoint()
         paragraphRequestEpoch++
         currentSpokenText = null
         pendingLocator = null
         staleLocator = null
-        cancelLookahead()
+        cancelLookahead("previous-sentence")
         navigator?.skipToPreviousUtterance()
     }
 
@@ -390,7 +407,7 @@ internal class NarrationPlayback(
         action("retry_requested")
         resumePolicy.invalidateCheckpoint()
         paragraphRequestEpoch++
-        cancelLookahead()
+        cancelLookahead("retry")
         stateMutable.update { it.copy(error = null, playing = true) }
         navigator?.play()
     }
@@ -411,7 +428,7 @@ internal class NarrationPlayback(
         lookupLocator = null
         pendingLocator = null
         staleLocator = null
-        cancelLookahead()
+        cancelLookahead("stop")
         val nav = navigator
         navigator = null
         if (nav != null) {
@@ -419,7 +436,7 @@ internal class NarrationPlayback(
             nav.close()
         } else {
             // A start that failed before creating the navigator still owns system TTS clients.
-            resolver?.close()
+            audioResolver?.close()
         }
         stateMutable.update {
             it.copy(active = false, playing = false, cached = false, buffering = false)
@@ -428,8 +445,12 @@ internal class NarrationPlayback(
         scope.cancel()
     }
 
-    private fun cancelLookahead() {
-        resolver?.cancelPending()
+    private fun cancelLookahead(cause: String) {
+        diagnostic(
+            "event=cancel_lookahead cause=$cause resolver=${if (resolver != null) "present" else "none"} " +
+                bufferSnapshot()
+        )
+        audioResolver?.cancelPending()
     }
 
     /** The locator of the utterance being requested, fresh even before Readium publishes a seek. */
@@ -488,6 +509,7 @@ internal class NarrationPlayback(
         val gapMs = if (gapBaselineAtMs > 0L) (now - gapBaselineAtMs).coerceAtLeast(0L) else 0L
         gapBaselineAtMs = 0L
         currentSpokenText = text
+        lastStartedClipMs = audio.durationMs
         lastPlaybackIdentity = audio.diagnosticIdentity ?: "provider=${provider.name}"
         if (audio.fromCache) cachedStarts++
         stateMutable.update {
@@ -505,7 +527,10 @@ internal class NarrationPlayback(
         diagnostic(
             "event=play_start number=${current.startedUtterances} cached=${audio.fromCache} " +
                 "audioMs=${audio.durationMs} key=${current.lastAudioKey} " +
-                "profile=${current.lastAudioConfiguration ?: "unreported"} gapMs=$gapMs $lastPlaybackIdentity"
+                "profile=${current.lastAudioConfiguration ?: "unreported"} gapMs=$gapMs " +
+                "buffering=${current.buffering} reserveMs=${current.readyDurationMs} " +
+                "reserveIncludesCurrent=true reserveParagraphs=${current.readyParagraphs} " +
+                "active=${current.pendingSynthesis} $lastPlaybackIdentity"
         )
     }
 
@@ -519,10 +544,15 @@ internal class NarrationPlayback(
             )
         }
         val current = state.value
+        val currentClipPlaybackMs = (lastStartedClipMs / speed).toLong()
         diagnostic(
             "event=play_complete completed=${current.completedUtterances} cachedStarts=$cachedStarts " +
-                "maxGapMs=${current.maxGapMs} readyParagraphs=${current.readyParagraphs} " +
-                "readyMs=${current.readyDurationMs} active=${current.pendingSynthesis} $lastPlaybackIdentity"
+                "maxGapMs=${current.maxGapMs} currentClipMs=$lastStartedClipMs " +
+                "currentClipPlaybackMs=$currentClipPlaybackMs " +
+                "readyParagraphs=${current.readyParagraphs} readyMs=${current.readyDurationMs} " +
+                "reserveIncludesCurrent=true " +
+                "futureReserveMs=${(current.readyDurationMs - currentClipPlaybackMs).coerceAtLeast(0L)} " +
+                "active=${current.pendingSynthesis} $lastPlaybackIdentity"
         )
     }
 
@@ -546,6 +576,7 @@ internal class NarrationPlayback(
             lastBurst = buffer.burst
             diagnostic(
                 "event=reserve buffering=${buffer.buffering} readyMs=${buffer.readyDurationMs} " +
+                    "reserveIncludesCurrent=true " +
                     "readyParagraphs=${buffer.readyParagraphs} target=${buffer.targetParagraphs} " +
                     "active=${buffer.pendingSynthesis} mode=${if (buffer.burst) "burst" else "steady"}"
             )
@@ -554,7 +585,20 @@ internal class NarrationPlayback(
 
     private fun action(event: String) {
         gapBaselineAtMs = 0L
-        diagnostic("event=$event")
+        diagnostic("event=$event ${bufferSnapshot()}")
+    }
+
+    /**
+     * Safe pre-action buffer state. [reserveMs] is the buffer's contiguous ready time including
+     * the current clip; it is not purely future playback.
+     */
+    private fun bufferSnapshot(): String {
+        val current = state.value
+        return "sessionActive=${current.active} playing=${current.playing} " +
+            "buffering=${current.buffering} cached=${current.cached} " +
+            "reserveMs=${current.readyDurationMs} reserveIncludesCurrent=true " +
+            "reserveParagraphs=${current.readyParagraphs} active=${current.pendingSynthesis} " +
+            "mode=${if (current.burst) "burst" else "steady"}"
     }
 
     private fun diagnostic(report: String) {
@@ -575,7 +619,9 @@ internal class NarrationPlayback(
         return content.following(locator, text)
     }
 
-    private fun message(error: TtsNavigator.Error): String = when (error) {
+    private fun message(error: TtsNavigator.Error): String = if (preparedVersionId != null) {
+        application.getString(R.string.reader_saved_audio_unavailable)
+    } else when (error) {
         is TtsNavigator.Error.EngineError<*> -> when (val cause = error.cause) {
             is NarrationError.TooLong -> application.getString(R.string.reader_narration_error_too_long)
             is NarrationError.Storage, is NarrationError.TooLarge ->

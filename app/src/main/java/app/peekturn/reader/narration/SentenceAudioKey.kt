@@ -12,7 +12,9 @@ internal data class NarrationVoiceSpec(
     val engine: String,
     val voice: String,
     val prosody: String,
-    val format: String
+    val format: String,
+    /** Actual user-facing voice name when the engine reports one; never part of the cache key. */
+    val displayLabel: String? = null
 )
 
 /** The US and UK voices the Microsoft route narrates with, plus its fixed format and prosody. */
