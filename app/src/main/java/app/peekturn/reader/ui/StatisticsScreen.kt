@@ -120,8 +120,6 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
     val totals = remember(stats.books) { stats.books.groupBy { it.bookId }.mapValues { (_, records) -> records.sumOf { it.seconds.coerceAtLeast(0L) } } }
     val recent = remember(books, totals) { books.filter { (totals[it.id] ?: 0L) > 0 }.sortedByDescending { it.lastReadAt } }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 24.dp)) {
-        item { PeekturnScreenHeader(stringResource(R.string.shell_statistics_title)) }
-        item { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant) }
         item {
             BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
                 val horizontal = maxWidth / LocalDensity.current.fontScale >= 300.dp

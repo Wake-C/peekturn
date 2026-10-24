@@ -30,3 +30,15 @@ Independent Android EPUB reader for people learning English through sustained re
 - Build and run commands: [README](README.md#build).
 - Dependency, dictionary and audio attribution: [third-party notices](THIRD_PARTY_NOTICES.md).
 - Documentation changes: [ownership conventions](agent-doc/essential/doc-conventions.md).
+
+## Current development context
+
+- Whole-book audio preparation has been removed: slow synthesis does not justify a separate whole-book job, saved-audio library or keep-alive service. Preserve live narration's Readium lookahead, upcoming-sentence synthesis, sentence cache and cached replay.
+- The reader starts live narration directly. A centre tap toggles the bottom reading tools; there is no top "Reading tools" title or close bar. Preserve the expanded transport and the hidden-tools previous, play/pause and next controls.
+- Library, Statistics and Settings use bottom navigation to identify the current section, without repeating the app name or page title above the content. Keep content-section headings and actions such as book import.
+
+## Development handoff
+
+After each development task, update this Agent context with what changed and any lasting decisions. Keep it concise and current; replace superseded context instead of appending a chronological diary.
+
+After each substantial feature or refactor, produce a local signed, non-debuggable production APK using the existing release key. Verify the package, signature and installation, and report its local path, version, checks and unverified limits. A debug APK is not a substitute. Commit, push, tag and publish still require explicit authorization.

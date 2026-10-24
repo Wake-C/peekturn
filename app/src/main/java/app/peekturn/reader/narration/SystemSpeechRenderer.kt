@@ -799,16 +799,11 @@ internal class SystemSpeechRenderer(
                 " locale=" + diagnosticMetadata(reported.locale.toLanguageTag()) +
                 " (system default; no voice selection)"
         )
-        val engineName = runCatching {
-            val info = application.packageManager.getApplicationInfo(bound, 0)
-            application.packageManager.getApplicationLabel(info).toString()
-        }.getOrDefault(bound)
         return NarrationVoiceSpec(
             engine = engine,
             voice = voice,
             prosody = "pitch=${systemPitch()};rate=1.0",
-            format = WAVE_FORMAT,
-            displayLabel = "$engineName · $voiceName"
+            format = WAVE_FORMAT
         )
     }
 

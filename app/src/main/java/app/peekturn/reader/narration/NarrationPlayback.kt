@@ -6,6 +6,8 @@ import android.speech.tts.TextToSpeech
 import androidx.media3.common.Player
 import app.peekturn.reader.R
 import app.peekturn.reader.model.SentenceSpeechProvider
+import app.peekturn.reader.speech.BaiduSpeechClient
+import app.peekturn.reader.speech.BingSpeechClient
 import app.peekturn.reader.speech.SentenceAudioSource
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
@@ -56,8 +58,7 @@ data class NarrationState(
     val lastPlaybackCompletedAtMs: Long = 0L,
     val maxGapMs: Long = 0L,
     val lastAudioKey: String? = null,
-    val lastAudioConfiguration: String? = null,
-    val savedAudio: Boolean = false
+    val lastAudioConfiguration: String? = null
 )
 
 /**
@@ -88,9 +89,7 @@ internal class NarrationPlayback(
     systemSynthesisGate: Semaphore,
     private val onEnded: () -> Unit,
     private val onLocator: (Locator) -> Unit,
-    private val onDiagnostic: (String) -> Unit = {},
-    val preparedVersionId: String? = null,
-    private val preparedResolver: NarrationAudioResolver? = null
+    private val onDiagnostic: (String) -> Unit = {}
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val paragraphJumps = Mutex()
@@ -108,7 +107,6 @@ internal class NarrationPlayback(
         NarrationState(
             active = true,
             sessionId = sessionId,
-            savedAudio = preparedVersionId != null,
             speed = initialSpeed.coerceIn(0.5f, 2f),
             notice = if (provider == SentenceSpeechProvider.BAIDU) {
                 application.getString(R.string.speech_notice_baidu_accent)
@@ -122,8 +120,11 @@ internal class NarrationPlayback(
     private val locationMutable = MutableStateFlow<Locator?>(null)
     val location: StateFlow<Locator?> = locationMutable.asStateFlow()
 
-    private val onlineSource: SentenceAudioSource? =
-        if (preparedResolver != null) null else onlineNarrationSource(provider)
+    private val onlineSource: SentenceAudioSource? = when (provider) {
+        SentenceSpeechProvider.MICROSOFT -> BingSpeechClient()
+        SentenceSpeechProvider.BAIDU -> BaiduSpeechClient()
+        SentenceSpeechProvider.ANDROID -> null
+    }
     private val content = NarrationContent(publication, onDiagnostic = ::diagnostic)
     private var speed: Float = initialSpeed.coerceIn(0.5f, 2f)
     private val resumePolicy = NarrationResumePolicy()
@@ -133,7 +134,7 @@ internal class NarrationPlayback(
      * synthesizer and gate. The buffered wrapper owns current-sentence priority and lookahead, so
      * playback never starts its own prefetch queue.
      */
-    private val source: NarrationAudioResolver? = if (preparedResolver != null) null else when (provider) {
+    private val source: NarrationAudioResolver? = when (provider) {
         SentenceSpeechProvider.ANDROID -> SystemNarrationSynthesizer(
             context = application,
             cache = cache,
@@ -171,8 +172,6 @@ internal class NarrationPlayback(
             onState = ::onBufferState
         )
     }
-    // Saved audio is already complete. It must never enter the live reserve gate or create a TTS client.
-    private val audioResolver: NarrationAudioResolver? = preparedResolver ?: resolver
 
     private var navigator: TtsNavigator<
         NarrationSettings,
@@ -193,12 +192,8 @@ internal class NarrationPlayback(
 
     /** Starts at [initialLocator], then at [startSentence] when the visible offset identifies one. */
     suspend fun start(initialLocator: Locator?, startSentence: String? = null): Boolean {
-        val buffered = audioResolver
-        diagnostic(
-            "event=session_start provider=${provider.name} speed=$speed " +
-                "source=${if (preparedVersionId == null) "live" else "saved"} " +
-                "version=${preparedVersionId?.take(8) ?: "none"}"
-        )
+        val buffered = resolver
+        diagnostic("event=session_start provider=${provider.name} speed=$speed")
         if (buffered == null) {
             stateMutable.update {
                 it.copy(active = true, error = application.getString(R.string.reader_narration_error_voice))
@@ -436,7 +431,7 @@ internal class NarrationPlayback(
             nav.close()
         } else {
             // A start that failed before creating the navigator still owns system TTS clients.
-            audioResolver?.close()
+            resolver?.close()
         }
         stateMutable.update {
             it.copy(active = false, playing = false, cached = false, buffering = false)
@@ -450,7 +445,7 @@ internal class NarrationPlayback(
             "event=cancel_lookahead cause=$cause resolver=${if (resolver != null) "present" else "none"} " +
                 bufferSnapshot()
         )
-        audioResolver?.cancelPending()
+        resolver?.cancelPending()
     }
 
     /** The locator of the utterance being requested, fresh even before Readium publishes a seek. */
@@ -619,9 +614,7 @@ internal class NarrationPlayback(
         return content.following(locator, text)
     }
 
-    private fun message(error: TtsNavigator.Error): String = if (preparedVersionId != null) {
-        application.getString(R.string.reader_saved_audio_unavailable)
-    } else when (error) {
+    private fun message(error: TtsNavigator.Error): String = when (error) {
         is TtsNavigator.Error.EngineError<*> -> when (val cause = error.cause) {
             is NarrationError.TooLong -> application.getString(R.string.reader_narration_error_too_long)
             is NarrationError.Storage, is NarrationError.TooLarge ->

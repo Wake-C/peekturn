@@ -74,15 +74,6 @@ fun LibraryScreen(
         // last row keeps it, and the row's own options button, off that boundary at the end of the scroll.
         contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 48.dp)
     ) {
-        item {
-            PeekturnScreenHeader(stringResource(R.string.shell_library_title)) {
-                ImportSourceMenu(onImportFile, onImportUrl) { openMenu ->
-                    IconButton(onClick = openMenu, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.shell_add_book))
-                    }
-                }
-            }
-        }
         if (books.isEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(top = 40.dp, bottom = 48.dp), horizontalAlignment = Alignment.CenterHorizontally,
@@ -137,8 +128,17 @@ fun LibraryScreen(
             }
             item {
                 if (focus != null) HorizontalDivider(Modifier.padding(bottom = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                Text(stringResource(R.string.shell_shelf_heading), style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(bottom = 2.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.shell_shelf_heading),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f))
+                    ImportSourceMenu(onImportFile, onImportUrl) { openMenu ->
+                        IconButton(onClick = openMenu, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Outlined.Add,
+                                contentDescription = stringResource(R.string.shell_add_book))
+                        }
+                    }
+                }
             }
             item {
                 TextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 14.dp),
@@ -251,17 +251,6 @@ private fun ImportSourceMenu(
     }
 }
 
-@Composable
-internal fun PeekturnScreenHeader(title: String, action: @Composable () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(stringResource(R.string.shell_app_name), style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(title, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurface)
-        }
-        action()
-    }
-}
 
 @Composable
 private fun BookActions(book: Book, onRemove: () -> Unit, modifier: Modifier = Modifier) {

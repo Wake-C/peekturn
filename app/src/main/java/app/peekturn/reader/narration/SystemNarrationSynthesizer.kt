@@ -2,7 +2,6 @@ package app.peekturn.reader.narration
 
 import android.content.Context
 import android.os.SystemClock
-import app.peekturn.reader.R
 import app.peekturn.reader.diagnostics.diagnosticMetadata
 import java.io.File
 import java.util.UUID
@@ -12,13 +11,6 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.sync.Semaphore
-
-/** A frozen system voice configuration with its actual display name. */
-internal data class SystemNarrationProfile(
-    val configuration: String,
-    val voiceLabel: String,
-    val stableIdentity: Boolean
-)
 
 /**
  * Persistent file narration for Android's system engine. Every complete render becomes one WAV in
@@ -54,26 +46,6 @@ internal class SystemNarrationSynthesizer(
 
     override suspend fun configuration(): String = try {
         profile().identity
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (error: SystemSpeechError) {
-        throw error.asNarrationFailure()
-    } catch (_: Exception) {
-        throw NarrationFailure.Unavailable()
-    }
-
-    /**
-     * The frozen configuration and its actual user-facing voice name from the same bound profile.
-     * The label never contains the engine's encoded identity or a connection nonce.
-     */
-    suspend fun profileSnapshot(): SystemNarrationProfile = try {
-        val profile = profile()
-        SystemNarrationProfile(
-            configuration = profile.identity,
-            voiceLabel = profile.voice.displayLabel?.takeIf { it.isNotBlank() }
-                ?: application.getString(R.string.prepared_audio_device_voice),
-            stableIdentity = !profile.voice.engine.startsWith("android-tts:unidentified:")
-        )
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (error: SystemSpeechError) {

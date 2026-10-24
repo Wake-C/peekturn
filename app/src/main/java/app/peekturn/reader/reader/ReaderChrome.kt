@@ -95,16 +95,14 @@ private const val SELECTION_ALPHA = 0.32f
 }
 
 /**
- * The expanded reading tools. Every surface is an overlay over a stable publication viewport:
- * the top bar, the four-entry menu and the floating narration card never take or return book
- * space. The menu keeps the same four entries while narration runs, so the speaker becomes an
- * active state instead of being replaced by a second toolbar.
+ * The expanded reading menu and floating narration card overlay a stable publication viewport;
+ * they never take or return book space. The menu keeps the same four entries while narration runs,
+ * so the speaker becomes an active state instead of being replaced by a second toolbar.
  */
 @Composable internal fun ReaderChrome(
     theme: String,
     immersive: Boolean,
     narration: NarrationState?,
-    onHide: () -> Unit,
     onContents: () -> Unit,
     onTypography: () -> Unit,
     onOptions: () -> Unit,
@@ -118,20 +116,10 @@ private const val SELECTION_ALPHA = 0.32f
     onRetry: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val scheme = peekturnColorScheme(theme)
     val systemInsets = WindowInsets.displayCutout.union(
         if (immersive) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBarsIgnoringVisibility
     )
     Box(modifier.fillMaxSize()) {
-        ReaderTopBar(
-            title = stringResource(R.string.reader_tools_title),
-            closeLabel = stringResource(R.string.reader_tools_close),
-            onClose = onHide,
-            color = scheme.surface,
-            contentColor = scheme.onSurface,
-            insets = systemInsets.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
-            modifier = Modifier.align(Alignment.TopCenter)
-        )
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
             if (narration != null) {
                 ReaderNarrationCard(
@@ -224,50 +212,6 @@ private const val SELECTION_ALPHA = 0.32f
     }
 }
 
-@Composable private fun ReaderTopBar(
-    title: String,
-    closeLabel: String,
-    onClose: () -> Unit,
-    color: Color,
-    contentColor: Color,
-    insets: WindowInsets,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        color = color,
-        contentColor = contentColor,
-        modifier = modifier.fillMaxWidth().pointerInput(Unit) { detectTapGestures { } }
-    ) {
-        Column {
-            Row(
-                Modifier.fillMaxWidth().windowInsetsPadding(insets).heightIn(min = 56.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier.padding(start = 4.dp).size(48.dp)
-                ) {
-                    Icon(
-                        toolbarClose,
-                        contentDescription = closeLabel,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleSmall,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
-                )
-                // A matching invisible slot keeps the title optically centred under the close mark.
-                Spacer(Modifier.width(52.dp))
-            }
-            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
-        }
-    }
-}
 
 @Composable private fun ReaderMenuBar(
     theme: String,

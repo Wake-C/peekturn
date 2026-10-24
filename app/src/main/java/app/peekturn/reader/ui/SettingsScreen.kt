@@ -87,8 +87,6 @@ fun SettingsScreen(
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
         .widthIn(max = 640.dp).padding(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineLarge)
-        Spacer(Modifier.height(16.dp))
         Text(stringResource(R.string.settings_interface_section), style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         SettingsGroup {

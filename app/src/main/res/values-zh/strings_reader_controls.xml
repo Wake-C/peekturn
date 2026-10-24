@@ -8,8 +8,6 @@
     <string name="reader_control_read_aloud">朗读</string>
 
     <!-- 展开后的阅读工具 -->
-    <string name="reader_tools_title">阅读工具</string>
-    <string name="reader_tools_close">收起阅读工具</string>
     <string name="reader_contents_search">在整本书中搜索</string>
     <string name="reader_contents_back">返回目录</string>
 

@@ -1,6 +1,7 @@
 package app.peekturn.reader
 
 import android.app.Application
+import android.app.NotificationManager
 import app.peekturn.reader.speech.SystemSpeechLifecycle
 import android.content.Context
 import app.peekturn.reader.data.PeekturnStore
@@ -12,16 +13,16 @@ import app.peekturn.reader.learning.ExplanationClient
 import app.peekturn.reader.reader.EpubEngine
 import app.peekturn.reader.reader.EpubImporter
 import app.peekturn.reader.narration.SentenceAudioCache
-import app.peekturn.reader.narration.PreparedAudioManager
-import app.peekturn.reader.narration.PreparedAudioStore
 import java.io.File
 import app.peekturn.reader.speech.PronunciationPlayer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.withContext
 
 class PeekturnApp : Application() {
     /**
@@ -64,11 +65,7 @@ class AppGraph(
     val dictionary = OfflineDictionary(context.applicationContext)
     val speech = PronunciationPlayer(
         context.applicationContext,
-        onDiagnostic = developerLog::recordSystemSpeech,
-        beforeSpeech = {
-            preparedAudio.setSpeechActive(true)
-            preparedAudio.pause()
-        }
+        onDiagnostic = developerLog::recordSystemSpeech
     )
 
     /**
@@ -78,32 +75,35 @@ class AppGraph(
     internal val sentenceAudio = SentenceAudioCache(SentenceAudioCache.directory(context.applicationContext.noBackupFilesDir))
     internal val narrationProviderGate = Mutex()
     internal val systemSynthesisGate = Semaphore(2)
-    internal val preparedAudioStore = PreparedAudioStore(
-        File(context.applicationContext.noBackupFilesDir, "prepared-audio")
-    )
-    internal val preparedAudio = PreparedAudioManager(
-        context = context.applicationContext,
-        store = preparedAudioStore,
-        books = store,
-        engine = engine,
-        cache = sentenceAudio,
-        providerGate = narrationProviderGate,
-        systemSynthesisGate = systemSynthesisGate,
-        onDiagnostic = developerLog::recordNarration
-    )
 
     init {
+        // Whole-book prepared audio shipped in 1.3.0 and was removed. Its private directory and
+        // notification channel are obsolete; delete only that directory, never books or the shared
+        // sentence cache. A failure is logged without paths and retried on the next start.
         scope.launch {
-            try {
-                preparedAudioStore.refresh()
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                developerLog.recordFailure("narration", "saved-audio-load", failure)
+            withContext(Dispatchers.IO) {
+                val legacy = File(context.applicationContext.noBackupFilesDir, "prepared-audio")
+                try {
+                    if (legacy.exists() && !legacy.deleteRecursively()) {
+                        developerLog.recordFailure("narration", "saved-audio-cleanup")
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    developerLog.recordFailure("narration", "saved-audio-cleanup")
+                }
             }
-        }
-        scope.launch {
-            speech.state.collect { preparedAudio.setSpeechActive(it.playing) }
+            try {
+                context.applicationContext.getSystemService(NotificationManager::class.java)?.apply {
+                    // The removed foreground service used id 0x5041 and channel "prepared_audio".
+                    cancel(0x5041)
+                    deleteNotificationChannel("prepared_audio")
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                developerLog.recordFailure("narration", "saved-audio-notification-cleanup")
+            }
         }
         var provider = store.settings.value.sentenceSpeechProvider
         scope.launch {

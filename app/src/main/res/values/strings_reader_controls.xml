@@ -8,8 +8,6 @@
     <string name="reader_control_read_aloud">Listen</string>
 
     <!-- Expanded reading tools -->
-    <string name="reader_tools_title">Reading tools</string>
-    <string name="reader_tools_close">Hide reading tools</string>
     <string name="reader_contents_search">Search the whole book</string>
     <string name="reader_contents_back">Back to contents</string>
 
