@@ -77,6 +77,26 @@ class MainViewModelTest {
         assertEquals(book.id, graph.store.lastBookId())
     }
 
+    @Test fun explicitVideoEntryDoesNotReopenTheLastEpub() = runBlocking {
+        val book = addLastBook()
+        val vm = viewModel("video entry")
+        vm.showVideos()
+        initialize(vm, reopen = true)
+        assertTrue(vm.state.value.ready)
+        assertNull(vm.state.value.pendingBookId)
+        assertEquals(book.id, graph.store.lastBookId())
+    }
+
+    @Test fun returningFromSharedVideoClearsPendingEpubNavigation() = runBlocking {
+        val book = addLastBook()
+        val vm = viewModel("pending book")
+        initialize(vm, reopen = true)
+        assertEquals(book.id, vm.state.value.pendingBookId)
+        vm.showVideos()
+        assertNull(vm.state.value.pendingBookId)
+        assertEquals(book.id, graph.store.lastBookId())
+    }
+
     @Test fun missingLastBookFileFallsBackToLibraryAndClearsTheLaunchLoop() = runBlocking {
         val book = addLastBook()
         assertTrue(File(book.filePath).delete())

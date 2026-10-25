@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="video_merge_switch">合并字幕为整句</string>
+    <string name="video_merge_status_off">原始字幕</string>
+    <string name="video_merge_status_cached">已读取合并字幕</string>
+    <string name="video_merge_status_generating">正在合并字幕…</string>
+    <string name="video_merge_status_available">正在显示合并字幕</string>
+    <string name="video_merge_status_failed">字幕合并失败，已显示原始字幕。</string>
+    <string name="video_merge_retry">重试合并</string>
+    <string name="video_merge_regenerate">重新生成合并字幕</string>
+    <string name="video_merge_clear_cache">清除合并字幕缓存</string>
+    <string name="video_merge_no_captions">需要字幕轨才能合并。</string>
+    <string name="video_merge_cache_size">合并字幕缓存：%1$s</string>
+</resources>

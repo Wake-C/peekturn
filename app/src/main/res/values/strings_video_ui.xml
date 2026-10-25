@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Video library -->
+    <string name="video_ui_title">Video</string>
+    <string name="video_ui_empty_title">No videos yet</string>
+    <string name="video_ui_empty_detail">Videos you add from YouTube appear here.</string>
+    <string name="video_ui_import_video">Import video</string>
+    <string name="video_ui_import_link">Import a link</string>
+    <string name="video_ui_continue_watching">Continue watching</string>
+    <string name="video_ui_continue">Continue</string>
+    <string name="video_ui_all_videos">All videos</string>
+    <string name="video_ui_video_count">%1$d videos</string>
+    <string name="video_ui_unknown_channel">Unknown channel</string>
+    <string name="video_ui_duration_unknown">Duration unknown</string>
+    <string name="video_ui_watched_position">%1$s / %2$s</string>
+    <string name="video_ui_not_started">Not started</string>
+    <string name="video_ui_open_video">Open %1$s</string>
+    <string name="video_ui_video_options">Options for %1$s</string>
+    <string name="video_ui_remove_video_title">Remove video?</string>
+    <string name="video_ui_remove_video_message">Remove “%1$s”, its saved subtitles, position and viewing time? The original video is not downloaded.</string>
+    <string name="video_ui_remove">Remove</string>
+    <string name="video_ui_keep">Keep</string>
+    <string name="video_ui_thumbnail">Video thumbnail</string>
+
+    <!-- Player shell -->
+    <string name="video_ui_back">Back</string>
+    <string name="video_ui_settings">Playback settings</string>
+    <string name="video_ui_fullscreen">Full screen</string>
+    <string name="video_ui_exit_fullscreen">Exit full screen</string>
+    <string name="video_ui_toggle_controls">Show or hide controls</string>
+
+    <!-- Load and failure states -->
+    <string name="video_ui_loading">Opening video…</string>
+    <string name="video_ui_retry">Try again</string>
+    <string name="video_ui_error_invalid_link">This is not a valid YouTube video link.</string>
+    <string name="video_ui_error_network">Check the network connection and try again.</string>
+    <string name="video_ui_error_unavailable">This video is unavailable.</string>
+    <string name="video_ui_error_restricted">This video is restricted and cannot be played here.</string>
+    <string name="video_ui_error_unsupported">This video format is not supported on this device.</string>
+    <string name="video_ui_error_captions">Subtitles could not be loaded.</string>
+    <string name="video_ui_error_provider">The request failed. Try again.</string>
+    <string name="video_ui_error_storage">The video could not be saved. Try again.</string>
+    <string name="video_ui_error_generic">Something went wrong. Try again.</string>
+
+    <!-- Captions -->
+    <string name="video_ui_cached_captions_notice">The video cannot play now. Saved subtitles are shown.</string>
+    <string name="video_ui_captions">Subtitles</string>
+    <string name="video_ui_follow">Follow</string>
+    <string name="video_ui_follow_description">Follow the current subtitle</string>
+    <string name="video_ui_no_captions">No subtitles are available for this video.</string>
+    <string name="video_ui_no_english_captions">No English subtitles are available. Choose another subtitle track in playback settings.</string>
+    <string name="video_ui_caption_loading">Preparing subtitles…</string>
+    <string name="video_ui_caption_failed">Playback continues without subtitles.</string>
+    <string name="video_ui_retry_captions">Retry subtitles</string>
+
+    <!-- Transport -->
+    <string name="video_ui_play">Play</string>
+    <string name="video_ui_pause">Pause</string>
+    <string name="video_ui_replay">Replay</string>
+    <string name="video_ui_previous_subtitle">Previous subtitle</string>
+    <string name="video_ui_next_subtitle">Next subtitle</string>
+    <string name="video_ui_speed">Playback speed</string>
+    <string name="video_ui_hide_controls">Hide controls</string>
+    <string name="video_ui_seek">Play from here</string>
+    <string name="video_ui_change_subtitles">Change subtitles: %1$s</string>
+    <string name="video_ui_audio_only">Audio only</string>
+    <string name="video_ui_audio_detail">Only sound, no video data. Remembered for this video.</string>
+    <string name="video_ui_audio_saving">Saving playback mode…</string>
+    <string name="video_ui_audio_save_failed">Could not save playback mode. Please try again.</string>
+    <string name="video_ui_watch_video">Switch to video</string>
+    <string name="video_ui_audio_unavailable">No separate audio stream is available.</string>
+    <string name="video_ui_default_quality">Default quality: %1$dp</string>
+    <string name="video_ui_quality_remembered">Your choice also applies to other videos. Unavailable qualities use the nearest lower option.</string>
+    <string name="video_ui_approximate_time">Approximate source time</string>
+    <string name="video_ui_time_position">%1$s / %2$s</string>
+
+    <!-- Playback settings -->
+    <string name="video_ui_merge_title">Organize by sentence</string>
+    <string name="video_ui_merge_detail">Local punctuation and speaker rules, without AI requests. Words stay unchanged. ~ marks a nearby source time when exact word timing is missing.</string>
+    <string name="video_ui_merge_reading">Organizing sentences…</string>
+    <string name="video_ui_merge_generating">Generating merged subtitles… %1$d/%2$d</string>
+    <string name="video_ui_merge_available">Sentence view in use</string>
+    <string name="video_ui_merge_unchanged">No boundary changes. Original subtitles are shown.</string>
+    <string name="video_ui_merge_failed">Could not organize sentences. Original subtitles are shown.</string>
+    <string name="video_ui_merge_regenerate">Rebuild sentences</string>
+    <string name="video_ui_merge_stale">Showing original subtitles.</string>
+    <string name="video_ui_merge_unavailable">Add subtitles first.</string>
+    <string name="video_ui_subtitle_track">Subtitle track</string>
+    <string name="video_ui_track_auto">Auto-generated</string>
+    <string name="video_ui_track_manual">Manual</string>
+    <string name="video_ui_track_translated">Translated from %1$s</string>
+    <string name="video_ui_track_label">%1$s · %2$s</string>
+    <string name="video_ui_unknown_language">Unknown language</string>
+    <string name="video_ui_no_tracks">No subtitle tracks</string>
+    <string name="video_ui_quality_title">Video quality</string>
+    <string name="video_ui_quality_label">%1$dp</string>
+    <string name="video_ui_quality_switching">Switching quality…</string>
+    <string name="video_ui_cache_title">Subtitle cache</string>
+    <string name="video_ui_cache_merged">Merged subtitles: %1$s</string>
+    <string name="video_ui_cache_all">All subtitles: %1$s</string>
+    <string name="video_ui_clear_merged">Clear merged</string>
+    <string name="video_ui_clear_all">Clear all subtitles</string>
+    <string name="video_ui_clear_all_title">Clear all subtitle cache?</string>
+    <string name="video_ui_clear_all_message">The video, its position and its viewing time stay. Subtitles are downloaded again when needed.</string>
+    <string name="video_ui_clear">Clear</string>
+    <string name="video_ui_cancel">Cancel</string>
+    <string name="video_ui_close">Close</string>
+    <string name="video_ui_done">Done</string>
+    <string name="video_ui_cache_merged_cleared">Merged subtitle cache cleared.</string>
+    <string name="video_ui_cache_all_cleared">Subtitle cache cleared.</string>
+    <string name="video_ui_cache_clear_failed">The subtitle cache could not be cleared.</string>
+</resources>

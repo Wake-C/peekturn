@@ -9,3 +9,5 @@ local.properties
 .DS_Store
 verification-local/
 **/node_modules/
+__pycache__/
+*.py[cod]

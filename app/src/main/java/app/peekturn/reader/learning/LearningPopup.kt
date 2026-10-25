@@ -49,7 +49,16 @@ import app.peekturn.reader.speech.SpeechReport
 import kotlinx.coroutines.CancellationException
 import kotlin.math.roundToInt
 
-/** Bottom-docked native ink-and-paper answer; content and lookup ownership are unchanged. */
+/**
+ * Where the answer layer sits. [Bottom] is the reader's docked sheet above the text edge; [Center]
+ * is a screen-centered overlay for video, independent of the video and caption containers.
+ */
+enum class LearningPopupPlacement { Bottom, Center }
+
+/**
+ * Native ink-and-paper answer; content and lookup ownership are unchanged. The caller decides the
+ * placement and whether adjusting the source selection is a meaningful action at all.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LearningPopup(
@@ -64,9 +73,24 @@ fun LearningPopup(
     language: ExplanationLanguage = ExplanationLanguage.forLocale(LocalConfiguration.current.locales[0]),
     onClose: () -> Unit,
     onCancel: () -> Unit,
-    onAdjust: () -> Unit,
+    /** Null hides the adjust action: video has no source selection to re-open. */
+    onAdjust: (() -> Unit)? = null,
+    /** Null hides replay: only a source with a real sentence start can offer it. */
+    onReplay: (() -> Unit)? = null,
+    /**
+     * The one explicit action that resumes playback the answer paused. Null keeps the ordinary
+     * close action, so a reader dismissal never changes playback state.
+     */
+    onResume: (() -> Unit)? = null,
     /** The thrown failure behind the visible dictionary error; the caller records it safely. */
-    onDictionaryFailure: (Throwable) -> Unit = {}
+    onDictionaryFailure: (Throwable) -> Unit = {},
+    placement: LearningPopupPlacement = LearningPopupPlacement.Bottom,
+    /**
+     * Reports whether the visible tab currently shows real reading content: a validated answer with
+     * meaning, context or examples, or a real dictionary entry. Loading, empty and failed tabs report
+     * false, as does disposal. Null keeps every existing caller unchanged.
+     */
+    onReadableContent: ((Boolean) -> Unit)? = null
 ) {
     var dictionaryTab by remember(context) { mutableStateOf(initialDictionary) }
     var dictionaryRetry by remember(context) { mutableIntStateOf(0) }
@@ -75,6 +99,9 @@ fun LearningPopup(
     var dictionaryError by remember(context) { mutableStateOf<String?>(null) }
     // Once Explain has been opened, changing tabs never interrupts its request.
     var explanationRequested by remember(context) { mutableStateOf(!initialDictionary) }
+    // The session is shared, so its state can still describe the previous selection until this
+    // context actually opens its request. Only then may the answer count as this popup's content.
+    var explanationOwned by remember(context) { mutableStateOf(false) }
     val explanation by session.state.collectAsState()
     val answer = explanation.answer
     val latestSettings by rememberUpdatedState(settings)
@@ -100,7 +127,10 @@ fun LearningPopup(
         }
     }
     LaunchedEffect(context, explanationRequested, settings.activeProfileId, settings.model, language) {
-        if (explanationRequested) session.open(context, settings.activeProfileId, settings.model, language)
+        if (explanationRequested) {
+            session.open(context, settings.activeProfileId, settings.model, language)
+            explanationOwned = true
+        }
     }
     // Resolved in composition: reading a resource from inside the coroutine would need a Context
     // and would not follow a language or configuration change.
@@ -126,15 +156,35 @@ fun LearningPopup(
             }
         } finally { dictionaryLoading = false }
     }
+    // Playback learning time may only accrue while the visible tab really shows content. The
+    // dictionary resets per selection, and an explanation counts only after this context opened its
+    // own request, so a previous selection's answer can never report readable here.
+    val latestReadableContent = rememberUpdatedState(onReadableContent)
+    val dictionaryReadable = entry != null && !dictionaryLoading && dictionaryError == null
+    val explanationReadable = explanationOwned && !explanation.loading && explanation.failure == null &&
+        (answer.meaning.isNotBlank() || answer.context.isNotBlank() || answer.examples.any { it.text.isNotBlank() })
+    val readableContent = if (dictionaryTab) dictionaryReadable else explanationReadable
+    LaunchedEffect(readableContent, onReadableContent != null) {
+        latestReadableContent.value?.invoke(readableContent)
+    }
+    DisposableEffect(Unit) {
+        // Leaving the answer layer ends explanation time even when no recomposition follows.
+        onDispose { latestReadableContent.value?.invoke(false) }
+    }
     val density = LocalDensity.current
     val inset = with(density) { 12.dp.roundToPx() }
     val bottomInset = WindowInsets.navigationBarsIgnoringVisibility
         .union(WindowInsets.displayCutout).getBottom(density)
-    val position = remember(inset, bottomInset) {
+    val position = remember(inset, bottomInset, placement) {
         object : PopupPositionProvider {
             override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
-                val geometry = learningPopupGeometry(windowSize.width, windowSize.height,
-                    popupContentSize.width, popupContentSize.height, inset, bottomInset)
+                val geometry = if (placement == LearningPopupPlacement.Center) {
+                    centeredLearningPopupGeometry(windowSize.width, windowSize.height,
+                        popupContentSize.width, popupContentSize.height, inset, bottomInset)
+                } else {
+                    learningPopupGeometry(windowSize.width, windowSize.height,
+                        popupContentSize.width, popupContentSize.height, inset, bottomInset)
+                }
                 return IntOffset(geometry.x, geometry.y)
             }
         }
@@ -144,8 +194,15 @@ fun LearningPopup(
     val geometry = with(density) {
         val windowWidth = windowSize.width.takeIf { it > 0 } ?: configuration.screenWidthDp.dp.roundToPx()
         val windowHeight = windowSize.height.takeIf { it > 0 } ?: configuration.screenHeightDp.dp.roundToPx()
-        learningPopupGeometry(windowWidth, windowHeight, 440.dp.roundToPx(), (windowHeight * .82f).roundToInt(),
-            inset, bottomInset)
+        if (placement == LearningPopupPlacement.Center) {
+            // A screen-owned layer: fixed maximum width and available height, never the video's
+            // remaining width, so the picture and caption geometry cannot change under the answer.
+            centeredLearningPopupGeometry(windowWidth, windowHeight, 480.dp.roundToPx(), windowHeight,
+                inset, bottomInset)
+        } else {
+            learningPopupGeometry(windowWidth, windowHeight, 440.dp.roundToPx(), (windowHeight * .82f).roundToInt(),
+                inset, bottomInset)
+        }
     }
     val width = with(density) { geometry.width.toDp() }
     val height = with(density) { geometry.height.toDp() }
@@ -265,11 +322,28 @@ fun LearningPopup(
                 }
                 HorizontalDivider()
                 Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { speech.stop(); onAdjust() }, modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.reader_lookup_adjust), fontSize = 13.sp, maxLines = 1)
+                    val replay = onReplay
+                    val adjust = onAdjust
+                    when {
+                        replay != null -> TextButton(onClick = { speech.stop(); replay() }, modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.learning_popup_replay_sentence), fontSize = 13.sp, maxLines = 1)
+                        }
+                        adjust != null -> TextButton(onClick = { speech.stop(); adjust() }, modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.reader_lookup_adjust), fontSize = 13.sp, maxLines = 1)
+                        }
                     }
-                    TextButton(onClick = { close() }, modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.reader_lookup_close), fontSize = 13.sp, maxLines = 1)
+                    // X and outside/Back stay cancellations: only this explicit action resumes.
+                    val resume = onResume
+                    if (resume != null) {
+                        TextButton(onClick = { speech.stop(); resume() }, modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.learning_popup_continue_watching), fontSize = 13.sp,
+                                maxLines = 1, fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary)
+                        }
+                    } else {
+                        TextButton(onClick = { close() }, modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.reader_lookup_close), fontSize = 13.sp, maxLines = 1)
+                        }
                     }
                 }
             }
@@ -284,8 +358,11 @@ fun LearningPopup(
 internal fun explanationFailureMessage(category: ExplanationFailureCategory): Int = when (category) {
     ExplanationFailureCategory.Configuration -> R.string.reader_lookup_explanation_failure_configuration
     ExplanationFailureCategory.Authentication -> R.string.reader_lookup_explanation_failure_authentication
+    ExplanationFailureCategory.Balance -> R.string.reader_lookup_explanation_failure_balance
     ExplanationFailureCategory.Quota -> R.string.reader_lookup_explanation_failure_quota
+    ExplanationFailureCategory.InvalidRequest -> R.string.reader_lookup_explanation_failure_invalid_request
     ExplanationFailureCategory.Connectivity -> R.string.reader_lookup_explanation_failure_connectivity
+    ExplanationFailureCategory.Protocol -> R.string.reader_lookup_explanation_failure_protocol
     ExplanationFailureCategory.MalformedResponse -> R.string.reader_lookup_explanation_failure_malformed
     ExplanationFailureCategory.IncompleteResponse -> R.string.reader_lookup_explanation_failure_incomplete
     ExplanationFailureCategory.Refusal -> R.string.reader_lookup_explanation_failure_refusal

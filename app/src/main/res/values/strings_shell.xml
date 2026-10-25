@@ -35,12 +35,8 @@
     <string name="shell_metric_week">This week</string>
     <string name="shell_metric_total">Total</string>
     <string name="shell_metric_week_description">This week, Monday onward</string>
-    <string name="shell_metric_total_description">All reading time</string>
     <string name="shell_metric_description">%1$s: %2$s</string>
-    <string name="shell_reading_time">Reading time</string>
     <string name="shell_days">%1$d days</string>
-    <string name="shell_reading_time_last_days">%1$s in the last %2$d days</string>
-    <string name="shell_no_reading_time">No reading time yet</string>
     <string name="shell_recent_books">Recent books</string>
     <string name="shell_read_book">Read %1$s</string>
     <string name="shell_peak_day">Peak day: %1$s</string>

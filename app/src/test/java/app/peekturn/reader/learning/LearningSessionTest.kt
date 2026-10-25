@@ -94,7 +94,7 @@ class LearningSessionTest {
         val source = ControlledSource()
         val session = LearningSession(source, StandardTestDispatcher(testScheduler))
         val variants = listOf(context, context.copy(selection = "Bank"), context.copy(before = "another "),
-            context.copy(after = " elsewhere"), context.copy(bookTitle = "Other"), context.copy(chapterTitle = "Next"))
+            context.copy(after = " elsewhere"), context.copy(sourceTitle = "Other"), context.copy(sectionTitle = "Next"))
         variants.forEach { lookup ->
             session.open(lookup, "first", config); runCurrent()
             source.calls.last().events.send(ExplanationEvent.Complete(answer)); runCurrent()
@@ -199,8 +199,11 @@ class LearningSessionTest {
         val categories = listOf(
             ExplanationFailureCategory.Configuration,
             ExplanationFailureCategory.Authentication,
+            ExplanationFailureCategory.Balance,
             ExplanationFailureCategory.Quota,
+            ExplanationFailureCategory.InvalidRequest,
             ExplanationFailureCategory.Connectivity,
+            ExplanationFailureCategory.Protocol,
             ExplanationFailureCategory.MalformedResponse,
             ExplanationFailureCategory.IncompleteResponse,
             ExplanationFailureCategory.Refusal,
@@ -276,8 +279,8 @@ class LearningSessionTest {
         val variants = listOf(
             context.copy(before = "another "),
             context.copy(after = " elsewhere"),
-            context.copy(bookId = 99L),
-            context.copy(chapterKey = "chapter-2.xhtml")
+            context.copy(sourceId = "epub:99"),
+            context.copy(sectionKey = "chapter-2.xhtml")
         )
         variants.forEach { lookup ->
             winner.open(lookup, "first", config); runCurrent()
@@ -342,7 +345,7 @@ class LearningSessionTest {
         val source = ControlledSource()
         val cache = persistentCache()
         val session = LearningSession(source, StandardTestDispatcher(testScheduler), cache = cache, now = { now })
-        val unknown = LookupContext("bank", bookId = 7L, chapterKey = "chapter-1.xhtml")
+        val unknown = LookupContext("bank", sourceId = "epub:7", sectionKey = "chapter-1.xhtml")
 
         session.open(unknown, "first", config); runCurrent()
         source.calls.last().events.send(ExplanationEvent.Complete(completeAnswer)); runCurrent()

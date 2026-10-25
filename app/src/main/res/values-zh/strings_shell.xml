@@ -35,12 +35,8 @@
     <string name="shell_metric_week">本周</string>
     <string name="shell_metric_total">总计</string>
     <string name="shell_metric_week_description">本周，从周一起</string>
-    <string name="shell_metric_total_description">总阅读时长</string>
     <string name="shell_metric_description">%1$s：%2$s</string>
-    <string name="shell_reading_time">阅读时长</string>
     <string name="shell_days">近 %1$d 天</string>
-    <string name="shell_reading_time_last_days">最近 %2$d 天共阅读 %1$s</string>
-    <string name="shell_no_reading_time">还没有阅读记录</string>
     <string name="shell_recent_books">最近阅读</string>
     <string name="shell_read_book">阅读《%1$s》</string>
     <string name="shell_peak_day">单日最高：%1$s</string>

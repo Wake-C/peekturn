@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 视频列表 -->
+    <string name="video_ui_title">视频</string>
+    <string name="video_ui_empty_title">还没有视频</string>
+    <string name="video_ui_empty_detail">从 YouTube 添加的视频会出现在这里。</string>
+    <string name="video_ui_import_video">导入视频</string>
+    <string name="video_ui_import_link">导入链接</string>
+    <string name="video_ui_continue_watching">继续观看</string>
+    <string name="video_ui_continue">继续</string>
+    <string name="video_ui_all_videos">全部视频</string>
+    <string name="video_ui_video_count">%1$d 个视频</string>
+    <string name="video_ui_unknown_channel">未知频道</string>
+    <string name="video_ui_duration_unknown">时长未知</string>
+    <string name="video_ui_watched_position">%1$s / %2$s</string>
+    <string name="video_ui_not_started">未观看</string>
+    <string name="video_ui_open_video">打开 %1$s</string>
+    <string name="video_ui_video_options">%1$s 的选项</string>
+    <string name="video_ui_remove_video_title">移除这个视频？</string>
+    <string name="video_ui_remove_video_message">要移除“%1$s”、已保存的字幕、观看位置和观看时长吗？原视频不会下载到本机。</string>
+    <string name="video_ui_remove">移除</string>
+    <string name="video_ui_keep">保留</string>
+    <string name="video_ui_thumbnail">视频缩略图</string>
+
+    <!-- 播放器外壳 -->
+    <string name="video_ui_back">返回</string>
+    <string name="video_ui_settings">播放设置</string>
+    <string name="video_ui_fullscreen">全屏</string>
+    <string name="video_ui_exit_fullscreen">退出全屏</string>
+    <string name="video_ui_toggle_controls">显示或隐藏播放工具</string>
+
+    <!-- 加载与失败状态 -->
+    <string name="video_ui_loading">正在打开视频…</string>
+    <string name="video_ui_retry">重试</string>
+    <string name="video_ui_error_invalid_link">这不是有效的 YouTube 视频链接。</string>
+    <string name="video_ui_error_network">请检查网络连接后重试。</string>
+    <string name="video_ui_error_unavailable">这个视频不可用。</string>
+    <string name="video_ui_error_restricted">这个视频受限，无法在此播放。</string>
+    <string name="video_ui_error_unsupported">此设备不支持这个视频格式。</string>
+    <string name="video_ui_error_captions">字幕加载失败。</string>
+    <string name="video_ui_error_provider">请求失败，请重试。</string>
+    <string name="video_ui_error_storage">视频无法保存，请重试。</string>
+    <string name="video_ui_error_generic">出了问题，请重试。</string>
+
+    <!-- 字幕 -->
+    <string name="video_ui_cached_captions_notice">视频暂时无法播放，以下是已保存的字幕。</string>
+    <string name="video_ui_captions">字幕</string>
+    <string name="video_ui_follow">跟随</string>
+    <string name="video_ui_follow_description">跟随当前字幕</string>
+    <string name="video_ui_no_captions">此视频没有可用字幕。</string>
+    <string name="video_ui_no_english_captions">没有可用的英文字幕。请在播放设置中选择其他字幕轨。</string>
+    <string name="video_ui_caption_loading">正在准备字幕…</string>
+    <string name="video_ui_caption_failed">视频可继续播放，但没有字幕。</string>
+    <string name="video_ui_retry_captions">重试字幕</string>
+
+    <!-- 播放控制 -->
+    <string name="video_ui_play">播放</string>
+    <string name="video_ui_pause">暂停</string>
+    <string name="video_ui_replay">重新播放</string>
+    <string name="video_ui_previous_subtitle">上一句</string>
+    <string name="video_ui_next_subtitle">下一句</string>
+    <string name="video_ui_speed">倍速</string>
+    <string name="video_ui_hide_controls">收起工具</string>
+    <string name="video_ui_seek">从这里播放</string>
+    <string name="video_ui_change_subtitles">切换字幕：%1$s</string>
+    <string name="video_ui_audio_only">仅音频</string>
+    <string name="video_ui_audio_detail">只加载声音，不加载画面；为此视频单独记忆。</string>
+    <string name="video_ui_audio_saving">正在保存播放模式…</string>
+    <string name="video_ui_audio_save_failed">未能保存播放模式，请重试。</string>
+    <string name="video_ui_watch_video">切换为视频</string>
+    <string name="video_ui_audio_unavailable">此视频没有可用的独立音频流。</string>
+    <string name="video_ui_default_quality">默认清晰度：%1$dp</string>
+    <string name="video_ui_quality_remembered">选择会沿用到其他视频；缺少对应档位时优先使用较低档位。</string>
+    <string name="video_ui_approximate_time">接近的原字幕时间</string>
+    <string name="video_ui_time_position">%1$s / %2$s</string>
+
+    <!-- 播放设置 -->
+    <string name="video_ui_merge_title">按句组织字幕</string>
+    <string name="video_ui_merge_detail">本地根据标点和说话人组织，不调用 AI，不改原文。缺少精确词级时间时，~ 表示接近的原字幕时间。</string>
+    <string name="video_ui_merge_reading">正在按句组织字幕…</string>
+    <string name="video_ui_merge_generating">正在生成合并字幕… %1$d/%2$d</string>
+    <string name="video_ui_merge_available">正在按句显示字幕</string>
+    <string name="video_ui_merge_unchanged">当前规则未调整边界，仍显示原字幕。</string>
+    <string name="video_ui_merge_failed">按句组织失败，当前显示原字幕。</string>
+    <string name="video_ui_merge_regenerate">重新分句</string>
+    <string name="video_ui_merge_stale">当前显示原字幕。</string>
+    <string name="video_ui_merge_unavailable">需要先有字幕才能合并。</string>
+    <string name="video_ui_subtitle_track">字幕轨</string>
+    <string name="video_ui_track_auto">自动生成</string>
+    <string name="video_ui_track_manual">人工</string>
+    <string name="video_ui_track_translated">译自%1$s</string>
+    <string name="video_ui_track_label">%1$s · %2$s</string>
+    <string name="video_ui_unknown_language">未知语言</string>
+    <string name="video_ui_no_tracks">没有字幕轨</string>
+    <string name="video_ui_quality_title">画质</string>
+    <string name="video_ui_quality_label">%1$dp</string>
+    <string name="video_ui_quality_switching">正在切换画质…</string>
+    <string name="video_ui_cache_title">字幕缓存</string>
+    <string name="video_ui_cache_merged">合并字幕：%1$s</string>
+    <string name="video_ui_cache_all">全部字幕：%1$s</string>
+    <string name="video_ui_clear_merged">清除合并字幕</string>
+    <string name="video_ui_clear_all">清除全部字幕</string>
+    <string name="video_ui_clear_all_title">清除全部字幕缓存？</string>
+    <string name="video_ui_clear_all_message">视频、观看位置和观看时长都会保留。需要时会重新下载字幕。</string>
+    <string name="video_ui_clear">清除</string>
+    <string name="video_ui_cancel">取消</string>
+    <string name="video_ui_close">关闭</string>
+    <string name="video_ui_done">完成</string>
+    <string name="video_ui_cache_merged_cleared">已清除合并字幕缓存。</string>
+    <string name="video_ui_cache_all_cleared">已清除字幕缓存。</string>
+    <string name="video_ui_cache_clear_failed">无法清除字幕缓存。</string>
+</resources>

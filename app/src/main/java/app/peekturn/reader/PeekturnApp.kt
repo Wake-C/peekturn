@@ -15,6 +15,12 @@ import app.peekturn.reader.reader.EpubImporter
 import app.peekturn.reader.narration.SentenceAudioCache
 import java.io.File
 import app.peekturn.reader.speech.PronunciationPlayer
+import app.peekturn.reader.video.CaptionMergeClient
+import app.peekturn.reader.video.VideoCaptionCache
+import app.peekturn.reader.video.VideoMediaCache
+import app.peekturn.reader.video.VideoRepository
+import app.peekturn.reader.video.YouTubeSource
+import app.peekturn.reader.video.defaultVideoHttpClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -63,6 +69,17 @@ class AppGraph(
         ExplanationCache.directory(context.applicationContext.noBackupFilesDir)
     )
     val dictionary = OfflineDictionary(context.applicationContext)
+    val videoSource = YouTubeSource(defaultVideoHttpClient { event ->
+        developerLog.recordEvent("video-http", event)
+    })
+    val videoCaptions = VideoCaptionCache(File(context.applicationContext.noBackupFilesDir, "video-captions"))
+    internal val videoMediaCache by lazy {
+        VideoMediaCache(context.applicationContext,
+            onFailure = { failure -> developerLog.recordFailure("video", "media-cache", failure) },
+            onEvent = { event -> developerLog.recordEvent("video", event) })
+    }
+    val captionMerger = CaptionMergeClient()
+    val videos = VideoRepository(store, videoSource, videoCaptions, captionMerger)
     val speech = PronunciationPlayer(
         context.applicationContext,
         onDiagnostic = developerLog::recordSystemSpeech

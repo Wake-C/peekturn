@@ -58,7 +58,14 @@ The complete upstream license is bundled in the APK at `assets/LICENSE-Readium.t
 
 AndroidX/Jetpack Compose, Kotlin/coroutines, OkHttp, Gson and the Gradle wrapper are independently obtained dependencies. Their exact versions belong to Gradle manifests. The Apache-2.0 license text is bundled at `assets/LICENSE-Apache-2.0.txt`. Jsoup uses the MIT license; its code is supplied transitively or through the build dependency, not copied from another app.
 
-The new Peekturn implementation is licensed under Apache-2.0; dependency and dictionary licenses remain their own.
+Peekturn-authored source remains Apache-2.0 where so marked. The combined application containing NewPipeExtractor is conveyed under GPL-3.0-or-later; an Apache-only description does not apply to that combined APK. Dependency and dictionary licenses remain their own. Matching project source is available in this repository, and the matching NewPipeExtractor source is linked below. Redistribution of the combined APK must provide corresponding source under the dependency terms.
+
+## YouTube video integration
+
+Public YouTube metadata, stream descriptors and subtitle tracks are extracted with the unmodified [NewPipeExtractor v0.26.5](https://github.com/TeamNewPipe/NewPipeExtractor/tree/v0.26.5), distributed as `com.github.TeamNewPipe:NewPipeExtractor:v0.26.5`. Its GPL-3.0-or-later license is retained at [app/src/main/assets/LICENSE-NewPipeExtractor.txt](app/src/main/assets/LICENSE-NewPipeExtractor.txt) and bundled in the APK. NewPipeExtractor is an unofficial integration, not a YouTube-supported API or a grant of rights over video content.
+
+Playback uses AndroidX Media3 under Apache-2.0. Peekturn stores video metadata, viewing positions and bounded private subtitle/media-fragment caches, not a saved offline-video library. Video and caption availability can change; inaccessible or restricted content is reported rather than replaced with fabricated content. Subtitle sentence organization runs locally without rewriting source words. Explanation requests use the user's configured model.
+
 
 ## Online word audio
 
@@ -66,7 +73,7 @@ Word-audio actions request pronunciation audio for one word from the public [You
 
 Downloaded audio is decoded from a bounded in-memory response for playback only. It is not persisted, not cached as a local library and not bundled in the APK, so no provider audio is distributed under Peekturn's code license. A request carries only the requested word — never a sentence, chapter title, book text or credential — and a redirect is refused rather than followed, so that word is never resent to a different host. Because the service states no creator and no license, the app credits it by name and address only ("Youdao Dictionary", <https://dict.youdao.com>), shown in Settings → Pronunciation rather than in the lookup popup, and claims nothing more; the endpoint is unofficial and unendorsed, and its availability may change at any time. A word for which this endpoint has no audio is voiced by the [Microsoft read-aloud service](#online-sentence-speech) and, when that also answers nothing, by [Baidu Translate](#online-sentence-speech), and whichever of the two supplied the audio is credited in its place.
 
-Earlier builds queried the [Wikimedia Commons Action API](https://commons.wikimedia.org/w/api.php) for accredited recordings with per-file creator, source and license credits; that history remains in the [verification record](agent-doc/reference/verification/VERIFICATION.md) and is not the current source. No Cambridge, Oxford or Eudic content is copied or claimed as licensed.
+Earlier builds queried the [Wikimedia Commons Action API](https://commons.wikimedia.org/w/api.php) for accredited recordings with per-file creator, source and license credits; it is not the current source. No Cambridge, Oxford or Eudic content is copied or claimed as licensed.
 
 ## Online sentence speech
 

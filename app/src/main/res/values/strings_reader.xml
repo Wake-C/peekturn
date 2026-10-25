@@ -19,12 +19,15 @@
     <string name="reader_lookup_dictionary_error">The offline dictionary could not be opened. Try again.</string>
     <string name="reader_lookup_explanation_failure_configuration">Check the model configuration in Settings: add an API key, choose a model, and verify the provider URL and temperature.</string>
     <string name="reader_lookup_explanation_failure_authentication">The provider rejected the API key or access permissions. Check this model profile in Settings.</string>
+    <string name="reader_lookup_explanation_failure_balance">The provider reports an insufficient account balance. Add credit with the provider or switch model profiles.</string>
     <string name="reader_lookup_explanation_failure_quota">The provider\'s rate or quota limit was reached. Retry later or switch profiles.</string>
+    <string name="reader_lookup_explanation_failure_invalid_request">The provider rejected the request parameters. Check the model, temperature and JSON output support in Settings.</string>
     <string name="reader_lookup_explanation_failure_connectivity">The provider could not be reached or the connection ended. Check your network and provider URL, then retry.</string>
+    <string name="reader_lookup_explanation_failure_protocol">The provider did not follow the chat-completions streaming protocol. Check the provider URL and compatibility in Settings.</string>
     <string name="reader_lookup_explanation_failure_malformed">The provider returned an answer this app could not read. Retry, or choose a provider and model that support structured or JSON output.</string>
     <string name="reader_lookup_explanation_failure_incomplete">The provider stopped before the answer was complete. Retry, or choose a model with a larger output limit.</string>
     <string name="reader_lookup_explanation_failure_refusal">The provider refused to explain this selection. Try another selection or model profile.</string>
-    <string name="reader_lookup_explanation_failure_rejected">The provider rejected the request, model, or JSON output mode. Check compatibility in Settings, or retry later.</string>
+    <string name="reader_lookup_explanation_failure_rejected">The provider rejected the request. Check this model profile in Settings, or retry later.</string>
     <string name="reader_lookup_explanation_failure_unknown">The explanation could not be loaded. Try again.</string>
 
     <!-- Native selection actions -->

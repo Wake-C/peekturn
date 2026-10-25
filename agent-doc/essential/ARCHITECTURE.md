@@ -1,71 +1,41 @@
-# Architecture
+# Integration constraints
 
-## Actors and flow
+## Readium and Android WebView
 
-The reader imports an original EPUB into the local library, or converts a web page into an EPUB in an in-app browser and imports that, resumes a stable book location, and selects language for optional assistance. Readium presents the publication. The app supplies nearby selected-text context to the configured model, or queries the offline dictionary. Single words retain public dictionary audio and the existing speech fallbacks. Phrases, examples and continuous read-aloud share a Settings-owned speech provider choice: Microsoft by default, Android system TTS or Baidu English, with no silent provider switching. Continuous narration keeps its foreground service and private online-audio cache. Local statistics aggregate actual reading activity.
+- A Readium locator identifies a reading position; page indexes do not. Fragment snapshot restoration and publication lifetime interact: the app reopens from its stored locator and closes publication resources after view teardown.
+- Chrome is an overlay. Changing the navigator's measured bounds or insets repaginates the EPUB and can move the visible text. Readium has no public vertical-padding preference; the viewport adapter replaces container padding instead of adding another layer.
+- Chromium creates and recreates selection ActionMode during dragging. It is not finger release. Finishing it can destroy selection; an empty menu hides the toolbar while preserving the native mode. Automatic lookup depends on observed release and agreeing asynchronous native reads, not elapsed time or menu creation.
+- WebView selection reads and Readium location callbacks can arrive after a new gesture. A location callback during a held selection is not permission to clear it. Native selection geometry, resource identity and lifecycle belong together.
+- EPUB content is untrusted even when local. Sanitization/CSP and safe locator identifiers protect the navigator's JavaScript boundary; missing optional images or styles are not fatal book failures.
 
-```mermaid
-flowchart LR
-    Reader --> Library
-    WebPage[Web page or shared link] --> ImportBrowser[In-app import browser]
-    ImportBrowser --> Converter[Vendored converter]
-    Converter --> WebEPUB[Web EPUB]
-    WebEPUB --> Library
-    Library --> EPUB[Original private EPUB]
-    EPUB --> Readium
-    Readium --> Location[Saved locator]
-    Readium --> Selection[Selection and nearby snippets]
-    Selection --> AI[Configured model]
-    AI --> ExplanationCache[(Private explanation cache)]
-    Selection --> Dictionary[Offline dictionary]
-    AI --> Popup[Learning popup]
-    Dictionary --> Popup
-    Popup --> TTS[Android system speech]
-    Popup --> WordAudio[Public dictionary word audio]
-    Popup --> SentenceAudio[Public sentence speech]
-    Reader --> Narration[Narration service]
-    Narration --> SentenceAudio
-    Narration --> AudioCache[(Private sentence audio cache)]
-    Reader --> Time[Local reading time]
-```
+Owners: [ReaderActivity](../../app/src/main/java/app/peekturn/reader/reader/ReaderActivity.kt), [SelectionSession](../../app/src/main/java/app/peekturn/reader/reader/SelectionSession.kt), [ReaderViewport](../../app/src/main/java/app/peekturn/reader/reader/ReaderViewport.kt), [PublicationContentPolicy](../../app/src/main/java/app/peekturn/reader/reader/PublicationContentPolicy.kt).
 
-## Ownership
+## Speech providers and device engines
 
-Code paths below are relative to `app/src/main/java/app/peekturn/reader/` unless they name a repository-level file.
+- Popup pronunciation and foreground narration have different lifetimes. Readium's narration session adapter already owns audio focus and notification transport; adding another focus owner causes competing playback decisions. A lookup may resume only the narration pause it owns, never a prior manual pause.
+- Android TTS availability, voice metadata and actual synthesis are different evidence. OEM engines can accept English while reporting another voice locale; ISO3 language/country codes also occur. An accepted request does not prove installed assets or correct pronunciation. Actual callbacks, engine version and voice facts distinguish these failures; the shared policy and diagnostics live in code.
+- System speech leaves voice and language selection to Android's preferred engine. Android clients cache both their connection and default voice; reconcile the system preference before each request and after initialization, and refresh on foreground return even if the package did not change. Internal activity navigation must not masquerade as an external settings return. Superseded initialization failures/timeouts must not fail the current system choice.
+- Refreshing a connection and changing audio identity are separate events. Known system voices keep a stable cache namespace based on the bound engine version, reported voice and render settings. Missing identity metadata permits synthesis but limits reuse to one connection. Android exposes no universal private model revision; a provider that replaces a model without changing its reported voice information needs an explicit cache clear.
+- Some device speech services disconnect after pause/background. Callbacks from a released engine must not affect its replacement. Service recovery stays with the same system engine and is bounded across unknown-voice nonce changes. System narration uses complete cached WAV files, so a paused offset is reusable only for the same resolved file and reading intent.
+- Android TTS may serialize synthesis even when two file requests are queued. Bounded application concurrency cannot guarantee parallel model inference or uninterrupted playback when sustained synthesis is slower than playback. Avoid Binder metadata polling on cache hits: an engine may serialize those calls behind inference. Paragraph lookahead must stay on Readium's content iterator and preserve its locators, not flatten the chapter.
+- Readium's derived narration locator can lag the actual started utterance by one sentence. Bridge only that immediate sentence using the original locator context; never guess farther ahead. The current block's remainder is playable reserve, not a complete following paragraph. Iterator traversal also goes backward for transport history, so a forward start-sentence filter must not consume unrelated earlier blocks.
+- Microsoft read-aloud, Baidu `gettts` and Youdao `dictvoice` are unofficial public protocols, not licensed stable APIs. Endpoint/token details belong in their clients; provider promises cannot be inferred from a successful sample. [Notices](../../THIRD_PARTY_NOTICES.md#online-sentence-speech) own attribution.
 
-- `model/`: stable application data contracts. Readium locator JSON stays opaque outside reader integration.
-- `data/`: SQLite library and time records, settings and encrypted credentials, independently sourced dictionary.
-- `reader/`: Readium opening/import/navigation, original EPUB file lifecycle, selection integration and reader controls.
-- `webimport/`: in-app import browser, link policy, JavaScript bridge and page-to-EPUB handoff; the converter itself is vendored under `app/src/main/assets/webimport/`.
-- `learning/`: provider request/stream/structured response handling, the learning popup and the app-scoped persistent explanation cache.
-- `speech/`: online word and sentence audio lookup, system speech, playback ownership and cancellation.
-- `narration/`: continuous sentence read-aloud, its foreground MediaSession service, bounded prefetch, Readium TTS engine and persistent sentence-audio cache.
-- `diagnostics/`: bounded private developer logs, safe device/engine snapshots, exception sanitization and crash-handler delegation.
-- `ui/`: Focus app shell, library, statistics, settings and design tokens.
-- `PeekturnApp.kt`: application-scoped `AppGraph` composition; Activities own screen lifecycles.
+Owners: [SystemSpeech](../../app/src/main/java/app/peekturn/reader/speech/SystemSpeech.kt), [SpeechDiagnosis](../../app/src/main/java/app/peekturn/reader/speech/SpeechDiagnosis.kt), [SystemSpeechRenderer](../../app/src/main/java/app/peekturn/reader/narration/SystemSpeechRenderer.kt), [NarrationBuffer](../../app/src/main/java/app/peekturn/reader/narration/NarrationBuffer.kt), [NarrationPlayback](../../app/src/main/java/app/peekturn/reader/narration/NarrationPlayback.kt).
 
-## Technical decisions
+## Media3 streaming cache
 
-Native Kotlin/Compose app shell with the unmodified Readium Fragment navigator. Build manifests own the exact toolchain and dependency versions. Readium changes must preserve compatibility with publication-content transforms, selection geometry, the navigator factory and saved-locator restoration; an alpha navigator is not an implicit prerequisite.
+- A custom cache key does not by itself keep a signed media URL off disk: `CacheDataSource` also writes the redirected URI into content metadata. Strip `ContentMetadata.KEY_REDIRECTED_URI` before committing cache metadata. Persist only opaque content identities, not temporary stream addresses.
+- A custom `CacheDataSink.Factory` needs the same cache instance as `CacheDataSource.Factory`; the source factory does not inject it. Unidentified streams and cache initialization failures must still be able to stream normally.
+- Source resolution, forward buffering, retained samples and disk fragments are separate layers. A subtitle seek reuses the player, but an uncached target still needs network bytes. Disk caching is not an offline-download promise.
 
-Original EPUBs remain in app-private storage. SQLite persists library metadata, locator JSON and daily reading time. Settings are local; API credentials are encrypted with Android Keystore and excluded from backup. The UI observes repository state, not direct database queries.
+Owners: [VideoMediaCache](../../app/src/main/java/app/peekturn/reader/video/VideoMediaCache.kt), [VideoViewModel](../../app/src/main/java/app/peekturn/reader/video/VideoViewModel.kt).
 
-LLM network access belongs to model actions; publication content is local-only. A word-audio action sends only a single selected word to a public dictionary audio service and retains its existing Microsoft, Baidu and system-speech fallbacks. Phrases and examples use only the selected sentence provider and send only their exact requested text to an online service, never source context, book or chapter titles or model credentials; their audio is memory-only. Book reading and dictionary lookup remain offline. Android system speech prefers offline English voices but may use engine-provided network English voices.
+## Web capture and model responses
 
-Continuous narration is separate from lookup pronunciation. It runs in a MediaSessionService so screen-off playback does not depend on the reader Activity and uses Readium's own TTS navigator with the shared selected provider. Microsoft and Baidu request the current sentence plus at most two following sentences without cross-provider retry. Each complete sentence is one cache and playback unit; long online sentences are assembled from bounded transport chunks and oversized sentences fail explicitly instead of being truncated. Online cache keys separate provider and voice. The cache lives in no-backup app-private storage with opaque SHA-256 names, complete MPEG-frame validation, a 16 MiB per-sentence ceiling and a 4 GiB least-recently-used total bound. Byte usage is initialized once and maintained under the cache lock; the directory is enumerated only when a write crosses the bound, then trimmed in one batch to a low-water mark. Android system narration bypasses the audio cache. It is not Android backup data and contains no book file or text. Popup word and example audio remains memory-only, and setting up or clearing narration does not alter model credentials.
+- A direct HTTP fetch and a real logged-in WebView can receive different pages because of bot protection or account walls. A rendered shell is not evidence of a complete article. Conversion stays local; the vendored extractor/EPUB writer remains unmodified, with app glue outside it.
+- The web bridge token distinguishes import attempts, not frames. It is not an origin trust boundary.
+- OpenAI-compatible transport does not guarantee strict-schema support. Provider output still needs local validation. Prompt changes also change cached-answer identity; otherwise old answers can hide the new instructions.
+- Cache clearing must cancel producers or advance a generation before deletion. Removing files alone lets in-flight work recreate them.
 
-Successful model explanations are also reusable across reader sessions and process restarts in an app-scoped, no-backup cache. An entry is keyed by the exact provider-clipped selection and surrounding context, book and chapter identity, book/chapter titles, explanation language and provider configuration; changing any of them is a new request. Only complete validated answers are stored, for an absolute fifteen days from completion; reads do not extend that lifetime. The 1 GiB budget evicts least-recently-used records only when exceeded, and a 512 KiB per-record ceiling keeps one malformed answer from dominating it. Settings shows usage and a manual clear. Clear advances a generation before deleting, so an in-flight answer cannot repopulate the cache; clearing cache never deletes books, reading positions, statistics or model configuration.
-
-Web import stays on the device. The page is rendered by the app's WebView with the reader's own network and login state, because bot protection answers plain HTTP clients and headless browsers with a challenge while a real browser session passes. A direct fetch is attempted first and falls back to that browser. The converter is a vendored, unmodified open-source pipeline (Mozilla Readability plus the save-as-ebook extractor and EPUB writer); the app adds only a host shim and a bridge, so there are no per-site adapters and one upstream upgrade path. The produced EPUB enters the same importer, which is why reading, dictionary, speech and statistics need no web-specific branch.
-
-Toolchain setup, wrapper behavior and Android build/install commands belong to [README: Build](../../README.md#build).
-
-## Shared settings and persistence
-
-`ui/Theme.kt` owns application color roles. `AppSettings.appTheme` is the single appearance source for shell, reader, dialogs and learning popups. Screens consume semantic roles, not dark-only constants or a second reading theme.
-
-Preferences are field transformations applied inside the persistence lock, not stale whole-settings snapshots. `AppSettings.profiles` and `activeProfileId` own model configuration; `model` is the computed active configuration, not a second stored object. API-key material is encrypted per profile and stored separately from generic settings JSON. Existing single-model/key data migrates once. Android cloud backup and device transfer exclude private app data.
-
-`AppLanguage` applies the persisted locale at application startup and on language changes. Activities use AppCompat so cold shares and reading screens receive the same locale on Android versions before per-app system locale support. Global Settings owns appearance, interface language, provider profiles and pronunciation setup; reading behavior lives in the reader's Options sheet and typography has its own sheet.
-
-Developer diagnostics are local support data, not telemetry. `PeekturnApp` installs the crash handler before feature composition and delegates to the original handler after a synchronous best-effort crash record. Normal events use one background writer; Settings exports and copies a fresh snapshot after draining pending writes. Storage rotates at 256 KiB under no-backup app-private storage. Reports omit credentials, provider URLs, book titles/paths/text, selections, prompts, model output and exception messages. Exception records retain validated class/method identities and line numbers only; Android 11+ exit history includes own-app reason/status summaries, not descriptions or trace streams.
+Owners: [WebImportActivity](../../app/src/main/java/app/peekturn/reader/webimport/WebImportActivity.kt), [WebEpubBridge](../../app/src/main/java/app/peekturn/reader/webimport/WebEpubBridge.kt), [ExplanationClient](../../app/src/main/java/app/peekturn/reader/learning/ExplanationClient.kt), [ExplanationCache](../../app/src/main/java/app/peekturn/reader/learning/ExplanationCache.kt). Converter sources and licences: [third-party notices](../../THIRD_PARTY_NOTICES.md#web-page-import).

@@ -4,6 +4,7 @@ package app.peekturn.reader.reader
 
 import android.graphics.Typeface
 import android.text.format.Formatter
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,27 +29,33 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.unit.dp
 import app.peekturn.reader.R
 import app.peekturn.reader.model.AppSettings
 import app.peekturn.reader.model.ReaderPreferences
 import app.peekturn.reader.ui.SettingsDisclosure
+import app.peekturn.reader.ui.ThemeChoices
 import org.readium.r2.shared.publication.Link
 
 /** A's sheets lift on a 24dp top radius over the reading surface. */
 private val readerSheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
 
 /**
- * A compact sheet: bundled fonts first, then size and spacing controls. Content scrolls inside a
- * bounded sheet, labels wrap instead of shrinking, and every control keeps a 48dp touch target.
- * The draft is only typography; behaviour lives in the options sheet.
+ * Theme previews and a few named type/layout presets, with less-used controls folded away.
+ * Only Apply commits the draft. The fixed footer stays reachable while the body scrolls;
+ * opening or cancelling never rounds an existing custom preference to a preset.
  */
 @Composable internal fun ReaderTypographySheet(
     settings: AppSettings,
-    onApply: (ReaderPreferences) -> Unit,
+    onApply: (ReaderPreferences, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var draft by remember(settings.reading) { mutableStateOf(settings.reading) }
+    var draftTheme by remember(settings.appTheme) { mutableStateOf(settings.appTheme) }
+    var more by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val selected = readerFontFor(draft.fontFamily)
     var choosingFont by remember { mutableStateOf(false) }
@@ -59,74 +66,37 @@ private val readerSheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.
         shape = readerSheetShape,
         containerColor = MaterialTheme.colorScheme.surface
     ) {
-        Column(
-            Modifier.fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 12.dp)
-        ) {
-            Text(stringResource(R.string.reader_typography_title), style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(14.dp))
-            SettingsDisclosure(stringResource(R.string.reader_typography_font), readerFontLabel(selected)) {
-                choosingFont = true
+        Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+            Text(stringResource(R.string.reader_typography_title),
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp))
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+                Text(stringResource(R.string.reader_typography_theme), style = MaterialTheme.typography.titleSmall)
+                ThemeChoices(draftTheme, { draftTheme = it }, Modifier.padding(top = 8.dp, bottom = 12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsDisclosure(stringResource(R.string.reader_typography_font), readerFontLabel(selected)) {
+                    choosingFont = true
+                }
+                TypographyPresetRow(stringResource(R.string.reader_typography_size), ReaderTypographyPreset.FONT_SIZE, draft) { draft = it }
+                TypographyPresetRow(stringResource(R.string.reader_typography_line_height), ReaderTypographyPreset.LINE_HEIGHT, draft) { draft = it }
+                TypographyPresetRow(stringResource(R.string.reader_typography_side_margins), ReaderTypographyPreset.SIDE_MARGINS, draft) { draft = it }
+                TextButton(onClick = { more = !more }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(stringResource(if (more) R.string.reader_typography_less else R.string.reader_typography_more))
+                }
+                if (more) {
+                    TypographyPresetRow(stringResource(R.string.reader_typography_paragraph_spacing), ReaderTypographyPreset.PARAGRAPH_SPACING, draft) { draft = it }
+                    TypographyPresetRow(stringResource(R.string.reader_typography_letter_spacing), ReaderTypographyPreset.LETTER_SPACING, draft) { draft = it }
+                    TypographyPresetRow(stringResource(R.string.reader_typography_vertical_padding), ReaderTypographyPreset.VERTICAL_PADDING, draft) { draft = it }
+                }
             }
-
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Spacer(Modifier.height(4.dp))
-            PreferenceSlider(
-                title = stringResource(R.string.reader_typography_size),
-                value = stringResource(R.string.reader_typography_size_value, draft.fontSize.toInt()),
-                valueNow = draft.fontSize,
-                range = 100f..180f
-            ) { draft = draft.copy(fontSize = it) }
-            PreferenceSlider(
-                title = stringResource(R.string.reader_typography_letter_spacing),
-                value = stringResource(R.string.reader_typography_letter_spacing_value, draft.letterSpacing),
-                valueNow = draft.letterSpacing,
-                range = 0f..0.4f
-            ) { draft = draft.copy(letterSpacing = it) }
-            PreferenceSlider(
-                title = stringResource(R.string.reader_typography_line_height),
-                value = stringResource(R.string.reader_typography_line_height_value, draft.lineHeight),
-                valueNow = draft.lineHeight,
-                range = 1f..2.4f
-            ) { draft = draft.copy(lineHeight = it) }
-            PreferenceSlider(
-                title = stringResource(R.string.reader_typography_paragraph_spacing),
-                value = stringResource(R.string.reader_typography_paragraph_spacing_value, draft.paragraphSpacing),
-                valueNow = draft.paragraphSpacing,
-                range = 0f..2f
-            ) { draft = draft.copy(paragraphSpacing = it) }
-            PreferenceSlider(
-                title = stringResource(R.string.reader_typography_side_margins),
-                value = stringResource(R.string.reader_typography_side_margins_value, draft.pageMargins),
-                valueNow = draft.pageMargins,
-                range = 0.3f..2.5f
-            ) { draft = draft.copy(pageMargins = it) }
-            PreferenceSlider(
-                title = stringResource(R.string.reader_typography_top_distance),
-                value = stringResource(R.string.reader_typography_distance_value, draft.topPaddingDp.toInt()),
-                valueNow = draft.topPaddingDp,
-                range = 16f..120f
-            ) { draft = draft.copy(topPaddingDp = it) }
-            PreferenceSlider(
-                title = stringResource(R.string.reader_typography_bottom_distance),
-                value = stringResource(R.string.reader_typography_distance_value, draft.bottomPaddingDp.toInt()),
-                valueNow = draft.bottomPaddingDp,
-                range = 24f..140f
-            ) { draft = draft.copy(bottomPaddingDp = it) }
-
-            Row(
-                Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.reader_typography_cancel))
                 }
-                Spacer(Modifier.width(8.dp))
-                Button(onClick = { onApply(draft) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Spacer(Modifier.weight(1f))
+                Button(onClick = { onApply(draft, draftTheme) }, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.reader_typography_apply))
                 }
             }
@@ -192,38 +162,42 @@ private val readerSheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.
 @Composable private fun readerFontLabel(font: ReaderFont): String =
     if (font.id == "system") stringResource(R.string.reader_typography_system_font) else font.familyName
 
-@Composable private fun PreferenceSlider(
+@Composable internal fun TypographyPresetRow(
     title: String,
-    value: String,
-    valueNow: Double,
-    range: ClosedFloatingPointRange<Float>,
-    onChange: (Double) -> Unit
+    preset: ReaderTypographyPreset,
+    preferences: ReaderPreferences,
+    onChange: (ReaderPreferences) -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.weight(1f).padding(end = 12.dp)
-            )
-            Text(
-                value,
-                style = MaterialTheme.typography.labelMedium.copy(
-                    fontFeatureSettings = "tnum"
-                ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+    val selected = preset.selected(preferences)
+    val labels = if (preset == ReaderTypographyPreset.FONT_SIZE) listOf(
+        R.string.reader_size_small, R.string.reader_size_medium, R.string.reader_size_large, R.string.reader_size_extra_large
+    ) else listOf(R.string.reader_preset_small, R.string.reader_preset_medium, R.string.reader_preset_large)
+    Column(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp)) {
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            if (selected == null) Text(stringResource(R.string.reader_typography_custom),
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Slider(
-            value = valueNow.toFloat().coerceIn(range),
-            onValueChange = { onChange(it.toDouble()) },
-            valueRange = range,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-        )
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).selectableGroup().semantics { contentDescription = title },
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            labels.forEachIndexed { index, label ->
+                val active = selected == index
+                Surface(
+                    selected = active,
+                    onClick = { onChange(preset.apply(preferences, index)) },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    border = BorderStroke(1.dp, if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.weight(1f).fillMaxHeight().semantics { role = Role.RadioButton }
+                ) {
+                    Box(Modifier.heightIn(min = 48.dp).padding(horizontal = 4.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(stringResource(label), modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.labelMedium, maxLines = 2,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
+                }
+            }
+        }
     }
 }
 

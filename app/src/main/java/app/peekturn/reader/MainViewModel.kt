@@ -43,11 +43,13 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
                     graph.developerLog.recordFailure("library", "seed", e)
                 }
                 _state.update { it.copy(ready = true) }
-                if (reopen) {
+                if (reopen && _state.value.tab == 0) {
                     val id = graph.store.lastBookId()
                     if (id != null) {
                         val book = graph.store.findBook(id)
-                        if (book != null && File(book.filePath).isFile) open(book)
+                        if (book != null && File(book.filePath).isFile) {
+                            _state.update { if (it.tab == 0) it.copy(pendingBookId = book.id) else it }
+                        }
                         else {
                             graph.store.clearLastBook()
                             message("Your last book is no longer available. Choose another book from the library.")
@@ -96,6 +98,7 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
     fun open(book: Book) { _state.update { it.copy(pendingBookId = book.id) } }
     fun consumeOpen(id: Long) { _state.update { if (it.pendingBookId == id) it.copy(pendingBookId = null) else it } }
     fun tab(index: Int) { _state.update { it.copy(tab = index) } }
+    fun showVideos() { _state.update { it.copy(tab = 1, pendingBookId = null) } }
     fun message(value: String) { _state.update { it.copy(message = value) } }
     fun clearMessage() { _state.update { it.copy(message = null) } }
     fun delete(book: Book) {

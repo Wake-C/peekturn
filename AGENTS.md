@@ -1,44 +1,46 @@
 # Peekturn
 
-Independent Android EPUB reader for people learning English through sustained reading.
+An Android English-learning reader for books and YouTube videos. Help should be brief, useful and easy to leave; the book or video remains the main experience.
 
-## Work boundaries
+## Engineering taste
 
-- Keep the unmodified Readium navigator; do not replace it with a custom paginator or flattened chapter text.
-- VibeReading is a separate codebase, not a source or edit target. Reuse lessons, not its code or assets.
-- Production surfaces show actual local data and actual provider results. No demo answers, placeholder books or fabricated reading statistics.
-- Keep credentials, private book text and temporary verification data out of tracked files and logs.
-- Behavior changes require verification on Android, not only unit tests.
+- Readium owns the book layout and navigation. Preserve the original EPUB and its reading position; no custom paginator or flattened chapter text.
+- Small policy functions, thin controllers, quiet surfaces. Parsing and persistence belong below the UI. One rule has one owner.
+- Prefer the platform and existing modules over another framework or abstraction. Keep orchestration explicit and local.
+- Show real books, real provider answers and real reading activity. Honest empty and failure states are better than invented content.
+- Credentials and reading content stay private. Support logs explain what failed without exposing keys, passages, provider answers or private paths.
+- VibeReading is a separate product, not a source of code or assets.
 
-## Code structure
+## Where things live
 
-- Build in layers, a sandwich rather than spaghetti: pure decision/policy functions, a thin bridge or controller that only moves data between boundaries, and a surface layer that only renders or hosts. Each layer has one responsibility and its own tests.
-- A single change should land in one layer. Never let a UI class own parsing, persistence or conversion, and never repeat a rule in two places.
-- Prefer composing small, named units over one class that does everything; keep orchestration explicit and local.
+Application wiring is in `PeekturnApp.kt`; feature packages under `app/src/main/java/app/peekturn/reader/` are named for their work: `reader`, `video`, `learning`, `speech`, `narration`, `webimport`, `data`, `ui` and `diagnostics`. Tests mirror those packages. The implementation and its inline comments explain the behavior.
 
-## Verification scope
+- [Integration constraints](agent-doc/essential/ARCHITECTURE.md): Readium, WebView and system-speech traps that are expensive to rediscover.
+- [Delivery](agent-doc/essential/DELIVERY.md): building, signing, installing and publishing.
+- [Terms](CONTEXT.md) and [third-party notices](THIRD_PARTY_NOTICES.md): vocabulary and provenance, not feature specifications.
 
-- Default to targeted tests for the current change's affected behavior, callers and shared contracts. Do not run the full suite for ordinary features, bug fixes or small refactors.
-- Run the full suite only for a large refactor. Choose the affected test scope before running checks, and report exactly what ran; targeted checks must not be described as full-suite verification.
-- Keep Android smoke verification for behavior changes, scoped to the changed interaction. Build or collect the APK separately when needed; do not use packaging as an indirect reason to run the full suite.
+## Evidence and context
 
-## Task context
+A behavior change needs an Android smoke check and the smallest useful target tests for the affected behavior and callers. Do not run a full suite for a small edit or merely to produce a signed local APK. Broader suites belong to cross-cutting refactors or explicitly requested public-release gates. Local packaging is separate: default to `tools/local-release.sh`, which builds/signs/verifies the APK without tests, lint or an AAB. Run chosen target tests independently and report what actually ran and what remains unverified.
 
-- For code changes, shared actors, boundaries and state ownership: [architecture](agent-doc/essential/ARCHITECTURE.md).
-- For feature work, design or verification: follow the [task routes](agent-doc/reference/AGENTS.md) to the affected owner.
-- Domain terminology: [glossary](CONTEXT.md).
-- Build and run commands: [README](README.md#build).
-- Dependency, dictionary and audio attribution: [third-party notices](THIRD_PARTY_NOTICES.md).
-- Documentation changes: [ownership conventions](agent-doc/essential/doc-conventions.md).
+Context should earn its place. Keep operational knowledge and hard-won external constraints in `agent-doc/essential/`; keep implementation detail beside the code. No parallel feature specs, rolling verification diary or routine documentation update for every feature. Temporary evidence belongs in ignored `verification-local/` or delivery artifacts; history belongs in Git.
+
+Commit, push, tag and publish only on explicit request. A version-tag push can publish a release automatically.
 
 ## Current development context
 
 - Whole-book audio preparation has been removed: slow synthesis does not justify a separate whole-book job, saved-audio library or keep-alive service. Preserve live narration's Readium lookahead, upcoming-sentence synthesis, sentence cache and cached replay.
 - The reader starts live narration directly. A centre tap toggles the bottom reading tools; there is no top "Reading tools" title or close bar. Preserve the expanded transport and the hidden-tools previous, play/pause and next controls.
-- Library, Statistics and Settings use bottom navigation to identify the current section, without repeating the app name or page title above the content. Keep content-section headings and actions such as book import.
+- Reader typography uses four size presets (small/medium/large/extra large), three spacing levels and a folded More section, not continuous sliders. Keep legacy custom values until their field is explicitly changed. Apply commits the appearance draft together, Cancel changes nothing, and Readium's visible-word anchor still owns reflow. Reader and Settings share direct previews of the same five existing themes; do not add themes or change palette values as part of control styling.
+- Library, Video, Statistics and Settings use bottom navigation to identify the current section, without repeating the app name or page title above the content. Keep content-section headings and actions such as book import.
+- Video A uses NewPipeExtractor and Media3, separate from EPUB and sharing model profiles/statistics. Media preparation must not wait for network captions. Only explicit subtitle choices survive as user intent; no English track means an honest notice, not silent foreign-language fallback. DB v4 preserves this distinction and per-video audio-only choices without deleting positions or time.
+- Preserve A's independent layers: portrait tools are a fixed 96dp two-row footer (plus system inset), hidden by default and toggled by a picture tap. Elapsed time/seek/total time share the first row; compact previous/play-pause/next stay screen-centred, with speed at the far right, and no close X. Reserve the same footer height in caption scrolling. Fullscreen previous/play-pause/next remain centered, with time/progress below. Chrome visibility never moves subtitles. Explanations are centered overlays in fullscreen, never side rails. No in-picture portrait transport or instructional "tap to explain" copy. Audio-only mode stays in Video, removes the picture and always shows bottom transport; timestamp taps seek and play, word taps only look up.
+- Sentence organization stays in player settings and runs locally with punctuation, abbreviation and speaker rules, not paid model calls. It can split inside source cues and join across them without changing words or punctuation. Preserve source word starts; missing exact starts use a marked (~) source anchor, never evenly estimated timing. No arbitrary 12-second/30-word cut through a sentence. Old model-group caches must not substitute for local results; keep original caption caches independent.
+- Video HTTP diagnostics report bounded status codes, domain categories and redirect counts through the existing developer log. Never log raw URLs, Location values, cookies, authorization, response bodies or exception messages. Diagnostics must not change redirects, cookies, TLS or proxy behavior, and a writer failure must not interrupt playback.
+- Playback settings remember the chosen height globally (initially 1080p), using the nearest lower real MP4 rendition or lowest higher one without changing the preference. VideoPlaybackService owns one player/session beyond Activity exit, including lock-screen controls and background listening time. Audio-only must use a real independent stream, never a hidden video download. Save each video's mode before switching; the old global flag is only a fallback for unset rows, and save failures must be visible. Mode/quality switches preserve clock, speed and pause ownership. Media3 keeps a short back buffer plus one app-wide 1 GiB private LRU fragment cache, shared across video and audio streams. It is not a per-video quota, a symmetric progress window, a full download library or a guaranteed 15-minute preload. Cache only identified renditions; signed URLs and redirect addresses must never enter cache keys or metadata. No account login or Premium entitlement is implied. Model HTTP 402 means balance/payment failure, not JSON incompatibility.
 
 ## Development handoff
 
 After each development task, update this Agent context with what changed and any lasting decisions. Keep it concise and current; replace superseded context instead of appending a chronological diary.
 
-After each substantial feature or refactor, produce a local signed, non-debuggable production APK using the existing release key. Verify the package, signature and installation, and report its local path, version, checks and unverified limits. A debug APK is not a substitute. Commit, push, tag and publish still require explicit authorization.
+After each substantial feature or refactor, produce a local signed, non-debuggable production APK using the existing release key and the fast local packaging script; packaging must not expand the test scope. Verify the package, signature and installation, and report its local path, version, checks and unverified limits. A debug APK is not a substitute. Commit, push, tag and publish still require explicit authorization.

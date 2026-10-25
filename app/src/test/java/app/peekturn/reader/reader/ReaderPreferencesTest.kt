@@ -17,6 +17,18 @@ class ReaderPreferencesTest {
         assertEquals(1.0, ReaderPreferences().toEpub("light").fontSize!!, 0.0001)
     }
 
+    @Test fun `all four font presets reach Readium without changing the selected family`() {
+        val initial = ReaderPreferences(fontFamily = "literata")
+        val field = ReaderTypographyPreset.FONT_SIZE
+        val multipliers = (0 until field.count).map { index ->
+            val preferences = field.apply(initial, index)
+            val epub = preferences.toEpub("warm")
+            assertEquals("Literata", epub.fontFamily!!.name)
+            epub.fontSize!!
+        }
+        assertEquals(listOf(0.9, 1.0, 1.2, 1.5), multipliers)
+    }
+
     @Test fun `top and bottom text distances are independent and leave passive labels clear`() {
         assertEquals(ReaderTextInsets(16.0, 24.0), readerTextInsets(ReaderPreferences()))
         val custom = ReaderPreferences(topPaddingDp = 80.0, bottomPaddingDp = 100.0)

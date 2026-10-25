@@ -27,10 +27,10 @@ class ExplanationCacheTest {
         selection = "bank",
         before = "the river ",
         after = " was muddy",
-        bookTitle = "Book",
-        chapterTitle = "Chapter",
-        bookId = 7L,
-        chapterKey = "chapter-1.xhtml"
+        sourceTitle = "Book",
+        sectionTitle = "Chapter",
+        sourceId = "epub:7",
+        sectionKey = "chapter-1.xhtml"
     )
     private val config = ModelConfig(
         name = "Local provider",
@@ -89,10 +89,10 @@ class ExplanationCacheTest {
             selection = "bank",
             before = "",
             after = "",
-            bookTitle = "Book",
-            chapterTitle = "Chapter",
-            bookId = 7L,
-            chapterKey = "chapter-1.xhtml"
+            sourceTitle = "Book",
+            sectionTitle = "Chapter",
+            sourceId = "epub:7",
+            sectionKey = "chapter-1.xhtml"
         )
         val request = request(context = unknown)
         assertFalse(request.hasContextEvidence)
@@ -121,13 +121,13 @@ class ExplanationCacheTest {
         assertEquals(0L, cache.sizeBytes())
     }
 
-    @Test fun sameTermDifferentContextBookLanguageOrModelNeverSharesAKey() = runTest {
+    @Test fun sameTermDifferentContextSourceLanguageOrModelNeverSharesAKey() = runTest {
         val variants = listOf(
             request(),
             request(context = context.copy(before = "another ")),
             request(context = context.copy(after = " elsewhere")),
-            request(context = context.copy(bookId = 8L)),
-            request(context = context.copy(chapterKey = "chapter-2.xhtml")),
+            request(context = context.copy(sourceId = "epub:8")),
+            request(context = context.copy(sectionKey = "chapter-2.xhtml")),
             request(profileId = "profile-b"),
             request(config = config.copy(endpoint = "https://other.test/v1")),
             request(config = config.copy(model = "other-model")),
@@ -156,7 +156,7 @@ class ExplanationCacheTest {
         assertEquals(fresh, cache().get(request, cache.epoch())?.answer)
     }
 
-    @Test fun unchangedChinesePromptKeepsItsLegacyGenerationReusable() = runTest {
+    @Test fun previousChinesePromptGenerationCannotBeReused() = runTest {
         val cache = cache()
         val request = request(language = ExplanationLanguage.Chinese)
         val chinese = answer.copy(
@@ -171,8 +171,8 @@ class ExplanationCacheTest {
         }
         file.writeText(legacy.toString())
 
-        assertEquals("Unchanged Chinese instructions must not discard the old Chinese answer", chinese, cache.get(request, cache.epoch())?.answer)
-        assertTrue(file.exists())
+        assertNull("A former Chinese prompt must not answer the current instructions", cache.get(request, cache.epoch()))
+        assertFalse(file.exists())
     }
 
     @Test fun corruptOversizedAndWrongLanguageEntriesMissAndAreDeleted() = runTest {
@@ -258,12 +258,12 @@ class ExplanationCacheTest {
         assertEquals(0L, cache.sizeBytes())
     }
 
-    @Test fun selectedContextBookTitlesAndSecretsStayOutOfNamesAndStoredBytes() = runTest {
+    @Test fun selectedContextSourceTitlesAndSecretsStayOutOfNamesAndStoredBytes() = runTest {
         val secretContext = "PRIVATE_CONTEXT_SENTINEL"
         val privateContext = context.copy(
             before = "$secretContext before the river ",
-            bookTitle = "Private Book Title",
-            chapterTitle = "Private Chapter Title"
+            sourceTitle = "Private Source Title",
+            sectionTitle = "Private Section Title"
         )
         val cache = cache()
         assertNotNull(cache.put(request(context = privateContext), answer, cache.epoch()))
@@ -273,8 +273,8 @@ class ExplanationCacheTest {
         assertFalse(file.name.contains(secretContext))
         val stored = file.readText()
         assertFalse(stored.contains(secretContext))
-        assertFalse(stored.contains("Private Book Title"))
-        assertFalse(stored.contains("Private Chapter Title"))
+        assertFalse(stored.contains("Private Source Title"))
+        assertFalse(stored.contains("Private Section Title"))
         assertFalse(stored.contains("sk-secret"))
     }
 

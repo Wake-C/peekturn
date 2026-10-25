@@ -1,0 +1,7 @@
+<resources>
+    <string name="video_shell_title">Video</string>
+    <string name="video_shell_import_title">Add a YouTube video</string>
+    <string name="video_shell_url_hint">https://youtu.be/…</string>
+    <string name="video_shell_url_error">Enter a valid YouTube video link.</string>
+    <string name="video_shell_delete_failed">Could not remove this video. Try again.</string>
+</resources>

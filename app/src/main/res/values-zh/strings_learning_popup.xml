@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="learning_popup_replay_sentence">重听本句</string>
+    <string name="learning_popup_continue_watching">继续观看</string>
+</resources>

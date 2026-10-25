@@ -24,13 +24,15 @@ import app.peekturn.reader.PeekturnApp
 import app.peekturn.reader.R
 import app.peekturn.reader.reader.ReaderActivity
 import app.peekturn.reader.ui.PeekturnTheme
+import app.peekturn.reader.video.VideoActivity
+import app.peekturn.reader.video.YouTubeUrls
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
  * The one entry for content another app sends. It exists as its own activity because a share while
  * the reader is on top is otherwise delivered to that task and never reaches the library screen.
- * Links go to the import browser; EPUB streams go straight to the importer.
+ * YouTube links go to video import, other links to the browser, EPUB streams to the importer.
  */
 class ImportShareActivity : AppCompatActivity() {
     private val graph get() = (application as PeekturnApp).graph
@@ -56,7 +58,9 @@ class ImportShareActivity : AppCompatActivity() {
         }
         val target = when (val incoming = extract(intent)) {
             is Incoming.Link -> {
-                startActivity(WebImportActivity.intent(this, incoming.url, direct = true))
+                startActivity(if (YouTubeUrls.isYouTubeUrl(incoming.url))
+                    VideoActivity.importIntent(this, incoming.url)
+                else WebImportActivity.intent(this, incoming.url, direct = true))
                 finish()
                 return
             }
@@ -100,7 +104,9 @@ class ImportShareActivity : AppCompatActivity() {
         when (intent?.action) {
             Intent.ACTION_SEND -> {
                 if (intent.type?.startsWith("text/") == true) {
-                    firstHttpUrl(intent.getStringExtra(Intent.EXTRA_TEXT))?.let(Incoming::Link)
+                    val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+                    if (YouTubeUrls.isYouTubeUrl(text)) Incoming.Link(text)
+                    else firstHttpUrl(text)?.let(Incoming::Link)
                 } else {
                     streamUri(intent)?.takeIf { it.scheme == "content" }?.let(Incoming::Epub)
                 }

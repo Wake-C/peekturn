@@ -32,11 +32,21 @@ import androidx.compose.ui.unit.sp
 import app.peekturn.reader.R
 import app.peekturn.reader.model.Book
 import app.peekturn.reader.model.ReadingStats
+import app.peekturn.reader.video.VideoItem
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 
 internal data class ReadingSummary(val today: Long, val week: Long, val total: Long, val daily: List<Pair<LocalDate, Long>>)
+
+/** Video learning time per item, summed exactly as book time is. */
+internal fun videoSeconds(stats: ReadingStats): Map<Long, Long> =
+    stats.videos.groupBy { it.itemId }.mapValues { (_, records) -> records.sumOf { it.seconds.coerceAtLeast(0L) } }
+
+/** Videos with real learning time, most recently watched first; a deterministic order for equal times. */
+internal fun recentlyWatchedVideos(videos: List<VideoItem>, totals: Map<Long, Long>): List<VideoItem> =
+    videos.filter { (totals[it.id] ?: 0L) > 0L }
+        .sortedWith(compareByDescending<VideoItem> { it.lastWatchedAt }.thenByDescending { it.id })
 
 /** Local calendar dates, including zero days, with an explicit clock for deterministic callers. */
 internal fun readingSummary(stats: ReadingStats, today: LocalDate, period: Int): ReadingSummary {
@@ -111,7 +121,8 @@ private fun compactDurationText(seconds: Long): String {
 }
 
 @Composable
-fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> Unit) {
+fun StatisticsScreen(stats: ReadingStats, books: List<Book>, videos: List<VideoItem>, onOpen: (Book) -> Unit,
+    onOpenVideo: (VideoItem) -> Unit) {
     var period by rememberSaveable { mutableIntStateOf(7) }
     val today by produceState(LocalDate.now()) {
         while (true) { value = LocalDate.now(); delay(30_000) }
@@ -119,6 +130,8 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
     val summary = remember(stats, today, period) { readingSummary(stats, today, period) }
     val totals = remember(stats.books) { stats.books.groupBy { it.bookId }.mapValues { (_, records) -> records.sumOf { it.seconds.coerceAtLeast(0L) } } }
     val recent = remember(books, totals) { books.filter { (totals[it.id] ?: 0L) > 0 }.sortedByDescending { it.lastReadAt } }
+    val videoTotals = remember(stats.videos) { videoSeconds(stats) }
+    val recentVideos = remember(videos, videoTotals) { recentlyWatchedVideos(videos, videoTotals) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 24.dp)) {
         item {
             BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
@@ -132,14 +145,14 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
                             TimeMetric(R.string.shell_metric_week, summary.week, Modifier.weight(1f), compact = true,
                                 accessibleLabel = R.string.shell_metric_week_description)
                             TimeMetric(R.string.shell_metric_total, summary.total, Modifier.weight(1f), compact = true,
-                                accessibleLabel = R.string.shell_metric_total_description)
+                                accessibleLabel = R.string.video_data_metric_total_description)
                         }
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         TimeMetric(R.string.shell_metric_today, summary.today)
                         TimeMetric(R.string.shell_metric_week, summary.week, accessibleLabel = R.string.shell_metric_week_description)
-                        TimeMetric(R.string.shell_metric_total, summary.total, accessibleLabel = R.string.shell_metric_total_description)
+                        TimeMetric(R.string.shell_metric_total, summary.total, accessibleLabel = R.string.video_data_metric_total_description)
                     }
                 }
             }
@@ -148,7 +161,7 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
         item {
             Column(Modifier.padding(top = 24.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.shell_reading_time), style = MaterialTheme.typography.titleLarge,
+                    Text(stringResource(R.string.video_data_learning_time), style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.weight(1f).padding(end = 12.dp))
                     // A period control is a quiet segmented pill: soft track, sheet-coloured thumb.
                     Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -170,7 +183,7 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
                         }
                     }
                 }
-                Text(stringResource(R.string.shell_reading_time_last_days,
+                Text(stringResource(R.string.video_data_learning_time_last_days,
                         readingDurationText(summary.daily.sumOf { it.second }), period),
                     color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(top = 12.dp))
@@ -178,7 +191,7 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
         }
         item { ReadingChart(summary.daily) }
         if (summary.total == 0L) item {
-            Text(stringResource(R.string.shell_no_reading_time), style = MaterialTheme.typography.titleMedium,
+            Text(stringResource(R.string.video_data_no_learning_time), style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(top = 12.dp))
         }
         if (recent.isNotEmpty()) item {
@@ -196,6 +209,25 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, onOpen: (Book) -> U
                         style = MaterialTheme.typography.bodySmall)
                 }
                 Text(compactDurationText(totals[book.id] ?: 0L), color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false)
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
+        if (recentVideos.isNotEmpty()) item {
+            Text(stringResource(R.string.video_data_recent_videos), style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(top = 28.dp, bottom = 2.dp))
+        }
+        items(recentVideos, key = { "video-${it.id}" }) { video ->
+            Row(Modifier.fillMaxWidth().clickable(role = Role.Button,
+                    onClickLabel = stringResource(R.string.video_data_open_video, video.title)) { onOpenVideo(video) }
+                    .padding(vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(video.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                    Text(video.author.ifBlank { stringResource(R.string.shell_unknown_author) }, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                Text(compactDurationText(videoTotals[video.id] ?: 0L), color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false)
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

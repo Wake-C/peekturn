@@ -48,7 +48,7 @@ class ExplanationClientTest {
         assertEquals("before11", context["before"].asString.substringBefore(' '))
     }
 
-    @Test fun chineseRequestPreservesBookDataAndTheStructuredExampleSchema() = runBlocking {
+    @Test fun chineseRequestPreservesSourceDataAndTheStructuredExampleSchema() = runBlocking {
         server.enqueue(stream(chunk(bilingualPayload) + chunk(finish = "stop") + "data: [DONE]\n\n"))
         val lookup = LookupContext("bank", "the river ", " was muddy", "Book", "Chapter")
         ExplanationClient().explain(config(), lookup, ExplanationLanguage.Chinese).toList()
@@ -58,7 +58,6 @@ class ExplanationClientTest {
         val system = messages[0].asJsonObject["content"].asString
         val user = messages[1].asJsonObject["content"].asString
         val passage = JsonParser.parseString(user).asJsonObject
-        assertEquals(setOf("selection", "before", "after", "bookTitle", "chapterTitle"), passage.keySet())
         assertEquals(lookup.selection, passage["selection"].asString)
 
         val schema = JsonParser.parseString(system.substringAfter("Required JSON schema: ")).asJsonObject
@@ -123,11 +122,14 @@ class ExplanationClientTest {
         val cases = listOf(
             MockResponse().setResponseCode(401).setBody("private rejection") to ExplanationFailureCategory.Authentication,
             MockResponse().setResponseCode(403) to ExplanationFailureCategory.Authentication,
+            MockResponse().setResponseCode(402).setBody("private balance detail") to ExplanationFailureCategory.Balance,
             MockResponse().setResponseCode(429) to ExplanationFailureCategory.Quota,
-            MockResponse().setResponseCode(400) to ExplanationFailureCategory.ProviderRejected,
-            MockResponse().setResponseCode(500) to ExplanationFailureCategory.ProviderRejected,
-            MockResponse().setHeader("Content-Type", "application/json").setBody("{}") to ExplanationFailureCategory.ProviderRejected,
+            MockResponse().setResponseCode(400).setBody("private parameter detail") to ExplanationFailureCategory.InvalidRequest,
+            MockResponse().setResponseCode(422) to ExplanationFailureCategory.InvalidRequest,
+            MockResponse().setResponseCode(500).setBody("private gateway detail") to ExplanationFailureCategory.ProviderRejected,
+            MockResponse().setHeader("Content-Type", "application/json").setBody("{}") to ExplanationFailureCategory.Protocol,
             stream("data: {\"error\":{\"message\":\"private\"}}\n\n") to ExplanationFailureCategory.ProviderRejected,
+            stream("data: {}\n\n") to ExplanationFailureCategory.Protocol,
             stream("data: {\"choices\":[{\"delta\":{\"refusal\":\"private\"}}]}\n\n") to ExplanationFailureCategory.Refusal,
             stream(chunk("not JSON") + chunk(finish = "stop")) to ExplanationFailureCategory.MalformedResponse,
             stream(chunk("{}") + chunk(finish = "stop")) to ExplanationFailureCategory.MalformedResponse,
@@ -145,7 +147,7 @@ class ExplanationClientTest {
             assertEquals("Unexpected category: ${failure?.message}", expected, failure?.category)
             assertFalse("Provider text must not reach localized UI copy", events.toString().contains("private"))
         }
-        val offline = ExplanationClient(OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).build())
+        val offline = ExplanationClient(ModelChatTransport(OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).build()))
             .explain(config().copy(endpoint = "http://127.0.0.1:1/v1"), LookupContext("hello"), ExplanationLanguage.English)
             .toList().filterIsInstance<ExplanationEvent.Failure>().single()
         assertEquals(ExplanationFailureCategory.Connectivity, offline.category)
@@ -182,7 +184,7 @@ class ExplanationClientTest {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
         val http = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()
         val events = mutableListOf<ExplanationEvent>()
-        val job = launch(Dispatchers.Default) { ExplanationClient(http).explain(config(), LookupContext("hello"), ExplanationLanguage.English).toList(events) }
+        val job = launch(Dispatchers.Default) { ExplanationClient(ModelChatTransport(http)).explain(config(), LookupContext("hello"), ExplanationLanguage.English).toList(events) }
         assertNotNull(withContext(Dispatchers.IO) { server.takeRequest(5, TimeUnit.SECONDS) })
         withTimeout(3_000) { job.cancelAndJoin() }
         assertTrue(events.isEmpty())

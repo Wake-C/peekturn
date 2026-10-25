@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Merged captions are a low-frequency reading aid; the player itself shows one switch. -->
+    <string name="video_merge_switch">Merge captions into sentences</string>
+    <string name="video_merge_status_off">Original captions</string>
+    <string name="video_merge_status_cached">Merged captions ready</string>
+    <string name="video_merge_status_generating">Merging captions…</string>
+    <string name="video_merge_status_available">Merged captions shown</string>
+    <string name="video_merge_status_failed">Caption merge failed. Original captions are shown.</string>
+    <string name="video_merge_retry">Retry merge</string>
+    <string name="video_merge_regenerate">Regenerate merged captions</string>
+    <string name="video_merge_clear_cache">Clear merged caption cache</string>
+    <string name="video_merge_no_captions">Merging needs a caption track.</string>
+    <string name="video_merge_cache_size">Merged caption cache: %1$s</string>
+</resources>

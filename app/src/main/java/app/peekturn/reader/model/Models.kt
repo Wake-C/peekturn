@@ -79,7 +79,12 @@ data class AppSettings(
     val appTheme: String = "dark",
     /** "system", "en" or "zh"; stored as the in-app choice, never inferred from the current locale. */
     val uiLanguage: String = "system",
-    val volumeKeysNarration: Boolean = false
+    val volumeKeysNarration: Boolean = false,
+    val videoMergeCaptions: Boolean = false,
+    /** A height preference, never an expiring stream id. */
+    val videoQualityHeight: Int = 1080,
+    /** Compatibility default for videos without an explicit per-video playback mode. */
+    val videoAudioOnly: Boolean = false
 ) {
     val model: ModelConfig
         get() = profiles.firstOrNull { it.id == activeProfileId }?.config ?: ModelConfig()
@@ -89,12 +94,12 @@ data class LookupContext(
     val selection: String,
     val before: String = "",
     val after: String = "",
-    val bookTitle: String = "",
-    val chapterTitle: String = "",
-    /** Library row identity; two books with the same title must never share an answer. */
-    val bookId: Long = 0L,
-    /** Stable resource identity inside the book, without fragment, query or directory-only prefixes. */
-    val chapterKey: String = ""
+    val sourceTitle: String = "",
+    val sectionTitle: String = "",
+    /** Namespaced identity, for example epub:42 or youtube:videoId. */
+    val sourceId: String = "",
+    /** Stable source location, independent of the displayed text layout. */
+    val sectionKey: String = ""
 )
 
 /**
@@ -152,4 +157,6 @@ data class Explanation(
 data class DictionaryEntry(val word: String, val phonetic: String, val partOfSpeech: String, val meaning: String)
 data class ReadingDay(val date: String, val seconds: Long)
 data class BookReadingTime(val bookId: Long, val seconds: Long)
-data class ReadingStats(val days: List<ReadingDay> = emptyList(), val books: List<BookReadingTime> = emptyList())
+data class VideoReadingTime(val itemId: Long, val seconds: Long)
+data class ReadingStats(val days: List<ReadingDay> = emptyList(), val books: List<BookReadingTime> = emptyList(),
+    val videos: List<VideoReadingTime> = emptyList())

@@ -6,6 +6,8 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.util.Log
 import app.peekturn.reader.model.*
+import app.peekturn.reader.video.VideoItem
+import app.peekturn.reader.video.VideoMetadata
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -32,6 +34,8 @@ class PeekturnStore internal constructor(private val context: Context, private v
     val error: StateFlow<String?> = _error.asStateFlow()
     private val _books = MutableStateFlow<List<Book>>(emptyList())
     val books: StateFlow<List<Book>> = _books.asStateFlow()
+    private val _videos = MutableStateFlow<List<VideoItem>>(emptyList())
+    val videos: StateFlow<List<VideoItem>> = _videos.asStateFlow()
     private val _settings = MutableStateFlow(readSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
     private val _stats = MutableStateFlow(ReadingStats())
@@ -153,6 +157,131 @@ class PeekturnStore internal constructor(private val context: Context, private v
                 database.execSQL("UPDATE reading_daily SET seconds=seconds+? WHERE book_id=? AND date=?", arrayOf<Any>(seconds, bookId, date))
                 database.setTransactionSuccessful()
             } finally { database.endTransaction() }
+            refreshStats()
+        }
+    }
+
+    suspend fun findVideo(id: Long): VideoItem? = withContext(Dispatchers.IO) {
+        db.readableDatabase.query("videos", null, "id=?", arrayOf(id.toString()), null, null, null).use { c ->
+            if (c.moveToFirst()) c.video() else null
+        }
+    }
+
+    suspend fun findVideoBySource(videoId: String): VideoItem? = withContext(Dispatchers.IO) {
+        db.readableDatabase.query("videos", null, "video_id=?", arrayOf(videoId), null, null, null).use { c ->
+            if (c.moveToFirst()) c.video() else null
+        }
+    }
+
+    /**
+     * A video's public identity ([VideoMetadata.videoId]) owns at most one row. Re-importing the
+     * same video refreshes the source-provided metadata only: the watching position, the last watch
+     * time and the chosen caption track belong to the user and survive. An unknown duration (0)
+     * never replaces a duration that was already learned.
+     */
+    suspend fun upsertVideo(metadata: VideoMetadata): VideoItem = withContext(Dispatchers.IO) {
+        writes.withLock {
+            require(metadata.videoId.isNotBlank()) { "A video identity is required" }
+            val database = db.writableDatabase
+            val duration = metadata.durationMs.coerceAtLeast(0L)
+            database.beginTransaction()
+            try {
+                val existing = database.query("videos", null, "video_id=?", arrayOf(metadata.videoId), null, null, null)
+                    .use { c -> if (c.moveToFirst()) c.video() else null }
+                if (existing == null) {
+                    database.insertOrThrow("videos", null, ContentValues().apply {
+                        put("video_id", metadata.videoId)
+                        put("title", metadata.title)
+                        put("author", metadata.author)
+                        put("duration_ms", duration)
+                        put("thumbnail_url", metadata.thumbnailUrl)
+                        put("position_ms", 0L)
+                        put("last_watched_at", 0L)
+                        putNull("selected_track_id")
+                    })
+                } else {
+                    val keptDuration = if (duration > 0) duration else existing.durationMs
+                    database.update("videos", ContentValues().apply {
+                        put("title", metadata.title)
+                        put("author", metadata.author)
+                        put("duration_ms", keptDuration)
+                        put("thumbnail_url", metadata.thumbnailUrl)
+                    }, "video_id=?", arrayOf(metadata.videoId))
+                }
+                database.setTransactionSuccessful()
+            } finally {
+                database.endTransaction()
+            }
+            refreshVideos()
+            _videos.value.firstOrNull { it.videoId == metadata.videoId }
+                ?: throw IllegalStateException("Could not save video")
+        }
+    }
+
+    suspend fun saveVideoPosition(id: Long, positionMs: Long) = withContext(Dispatchers.IO) {
+        writes.withLock {
+            val database = db.writableDatabase
+            // A position cannot run past a known duration; an unknown duration stays unbounded.
+            val duration = database.query("videos", arrayOf("duration_ms"), "id=?", arrayOf(id.toString()), null, null, null)
+                .use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+            val position = positionMs.coerceAtLeast(0L).let { if (duration > 0) it.coerceAtMost(duration) else it }
+            if (database.update("videos", ContentValues().apply { put("position_ms", position) }, "id=?", arrayOf(id.toString())) > 0) {
+                refreshVideos()
+            }
+        }
+    }
+
+    suspend fun markVideoOpened(id: Long) = withContext(Dispatchers.IO) {
+        writes.withLock {
+            val values = ContentValues().apply { put("last_watched_at", System.currentTimeMillis()) }
+            if (db.writableDatabase.update("videos", values, "id=?", arrayOf(id.toString())) > 0) refreshVideos()
+        }
+    }
+
+    suspend fun selectVideoTrack(id: Long, trackId: String?, explicit: Boolean = true) = withContext(Dispatchers.IO) {
+        writes.withLock {
+            val values = ContentValues().apply {
+                put("selected_track_id", trackId)
+                put("track_explicit", if (explicit) 1 else 0)
+            }
+            if (db.writableDatabase.update("videos", values, "id=?", arrayOf(id.toString())) > 0) refreshVideos()
+        }
+    }
+
+    /** Removes the video and, by cascade, its daily time. The caption cache is cleared by the repository. */
+    suspend fun selectVideoAudioMode(id: Long, audioOnly: Boolean) = withContext(Dispatchers.IO) {
+        writes.withLock {
+            val values = ContentValues().apply { put("audio_only", if (audioOnly) 1 else 0) }
+            check(db.writableDatabase.update("videos", values, "id=?", arrayOf(id.toString())) == 1) {
+                "Video playback preference was not saved"
+            }
+            refreshVideos()
+        }
+    }
+
+    suspend fun deleteVideo(id: Long) = withContext(Dispatchers.IO) {
+        writes.withLock {
+            db.writableDatabase.delete("videos", "id=?", arrayOf(id.toString()))
+            refreshVideos()
+            refreshStats()
+        }
+    }
+
+    suspend fun addVideoTime(id: Long, date: String, seconds: Long) = withContext(Dispatchers.IO) {
+        if (seconds <= 0) return@withContext
+        writes.withLock {
+            val database = db.writableDatabase
+            database.beginTransaction()
+            try {
+                database.execSQL(
+                    "INSERT OR IGNORE INTO video_daily(video_id,date,seconds) SELECT ?,?,0 WHERE EXISTS(SELECT 1 FROM videos WHERE id=?)",
+                    arrayOf<Any>(id, date, id)
+                )
+                database.execSQL("UPDATE video_daily SET seconds=seconds+? WHERE video_id=? AND date=?", arrayOf<Any>(seconds, id, date))
+                database.setTransactionSuccessful()
+            } finally {
+                database.endTransaction()
+            }
             refreshStats()
         }
     }
@@ -331,33 +460,74 @@ class PeekturnStore internal constructor(private val context: Context, private v
         }
         return saved
     }
-    private fun refresh() { refreshBooks(); refreshStats() }
+    private fun refresh() { refreshBooks(); refreshVideos(); refreshStats() }
     private fun refreshBooks() {
         _books.value = db.readableDatabase.query("books", null, null, null, null, null, "last_read_at DESC,id DESC").use { c ->
             buildList { while (c.moveToNext()) add(c.book()) }
         }
     }
+    private fun refreshVideos() {
+        _videos.value = db.readableDatabase.query("videos", null, null, null, null, null, "last_watched_at DESC,id DESC").use { c ->
+            buildList { while (c.moveToNext()) add(c.video()) }
+        }
+    }
     private fun refreshStats() {
-        val days = db.readableDatabase.rawQuery("SELECT date,SUM(seconds) FROM reading_daily GROUP BY date ORDER BY date", null).use { c ->
+        // Both tables keep their own rows; a local day is the sum of reading and video time, and a
+        // book id and a video id never mix even when they happen to be the same number.
+        val days = db.readableDatabase.rawQuery(
+            "SELECT date,SUM(seconds) FROM (" +
+                "SELECT date,seconds FROM reading_daily UNION ALL SELECT date,seconds FROM video_daily" +
+                ") GROUP BY date ORDER BY date", null
+        ).use { c ->
             buildList { while (c.moveToNext()) add(ReadingDay(c.getString(0), c.getLong(1))) }
         }
         val books = db.readableDatabase.rawQuery("SELECT book_id,SUM(seconds) FROM reading_daily GROUP BY book_id", null).use { c ->
             buildList { while (c.moveToNext()) add(BookReadingTime(c.getLong(0), c.getLong(1))) }
         }
-        _stats.value = ReadingStats(days, books)
+        val videos = db.readableDatabase.rawQuery("SELECT video_id,SUM(seconds) FROM video_daily GROUP BY video_id", null).use { c ->
+            buildList { while (c.moveToNext()) add(VideoReadingTime(c.getLong(0), c.getLong(1))) }
+        }
+        _stats.value = ReadingStats(days, books, videos)
     }
+    private fun android.database.Cursor.video() = VideoItem(
+        id = getLong(getColumnIndexOrThrow("id")),
+        videoId = getString(getColumnIndexOrThrow("video_id")),
+        title = getString(getColumnIndexOrThrow("title")),
+        author = getString(getColumnIndexOrThrow("author")),
+        durationMs = getLong(getColumnIndexOrThrow("duration_ms")),
+        thumbnailUrl = getColumnIndexOrThrow("thumbnail_url")
+            .let { if (isNull(it)) null else getString(it) },
+        positionMs = getLong(getColumnIndexOrThrow("position_ms")),
+        lastWatchedAt = getLong(getColumnIndexOrThrow("last_watched_at")),
+        selectedTrackId = getColumnIndexOrThrow("selected_track_id")
+            .let { if (isNull(it)) null else getString(it) },
+        trackExplicit = getInt(getColumnIndexOrThrow("track_explicit")) != 0,
+        audioOnly = getColumnIndexOrThrow("audio_only").let { if (isNull(it)) null else getInt(it) != 0 }
+    )
     private fun android.database.Cursor.book() = Book(
         id = getLong(getColumnIndexOrThrow("id")), title = getString(getColumnIndexOrThrow("title")),
         author = getString(getColumnIndexOrThrow("author")), filePath = getString(getColumnIndexOrThrow("file_path")),
         coverPath = getString(getColumnIndexOrThrow("cover_path")), locatorJson = getString(getColumnIndexOrThrow("locator")),
         progression = getDouble(getColumnIndexOrThrow("progression")), lastReadAt = getLong(getColumnIndexOrThrow("last_read_at"))
     )
-    private class Database(context: Context) : SQLiteOpenHelper(context, "peekturn.db", null, 1) {
+    private class Database(context: Context) : SQLiteOpenHelper(context, "peekturn.db", null, 4) {
         override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE books(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,author TEXT NOT NULL,file_path TEXT NOT NULL,cover_path TEXT,locator TEXT,progression REAL NOT NULL DEFAULT 0,last_read_at INTEGER NOT NULL DEFAULT 0)")
             db.execSQL("CREATE TABLE reading_daily(book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,date TEXT NOT NULL,seconds INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(book_id,date))")
+            createVideoTables(db)
         }
-        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = error("No migration from $oldVersion to $newVersion")
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+            if (newVersion > 4) error("No migration from $oldVersion to $newVersion")
+            if (oldVersion < 2) createVideoTables(db)
+            else {
+                if (oldVersion < 3) db.execSQL("ALTER TABLE videos ADD COLUMN track_explicit INTEGER NOT NULL DEFAULT 0")
+                if (oldVersion < 4) db.execSQL("ALTER TABLE videos ADD COLUMN audio_only INTEGER")
+            }
+        }
+        private fun createVideoTables(db: SQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS videos(id INTEGER PRIMARY KEY AUTOINCREMENT,video_id TEXT NOT NULL UNIQUE,title TEXT NOT NULL,author TEXT NOT NULL,duration_ms INTEGER NOT NULL DEFAULT 0,thumbnail_url TEXT,position_ms INTEGER NOT NULL DEFAULT 0,last_watched_at INTEGER NOT NULL DEFAULT 0,selected_track_id TEXT,track_explicit INTEGER NOT NULL DEFAULT 0,audio_only INTEGER)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS video_daily(video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,date TEXT NOT NULL,seconds INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(video_id,date))")
+        }
     }
 }

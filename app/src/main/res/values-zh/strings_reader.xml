@@ -19,12 +19,15 @@
     <string name="reader_lookup_dictionary_error">无法打开离线词典，请重试。</string>
     <string name="reader_lookup_explanation_failure_configuration">请在设置中检查模型配置：填写 API 密钥、选择模型，并确认接口地址和温度。</string>
     <string name="reader_lookup_explanation_failure_authentication">服务商拒绝了 API 密钥或访问权限，请检查设置中的这个模型配置。</string>
+    <string name="reader_lookup_explanation_failure_balance">服务商报告账户余额不足，请为该服务商账户充值，或切换模型配置。</string>
     <string name="reader_lookup_explanation_failure_quota">已达到服务商的速率或配额限制，请稍后重试或切换模型配置。</string>
+    <string name="reader_lookup_explanation_failure_invalid_request">服务商拒绝了请求参数，请在设置中检查模型、温度和 JSON 输出支持。</string>
     <string name="reader_lookup_explanation_failure_connectivity">无法连接服务商或连接已中断，请检查网络和接口地址后重试。</string>
+    <string name="reader_lookup_explanation_failure_protocol">服务商未按流式对话接口的协议返回内容，请检查接口地址和兼容性。</string>
     <string name="reader_lookup_explanation_failure_malformed">服务商返回的内容无法解析，请重试，或选择支持结构化或 JSON 输出的服务商和模型。</string>
     <string name="reader_lookup_explanation_failure_incomplete">服务商在回答完成前中断了返回，请重试，或选择输出上限更大的模型。</string>
     <string name="reader_lookup_explanation_failure_refusal">服务商拒绝解释这段选文，请尝试其他选文或模型配置。</string>
-    <string name="reader_lookup_explanation_failure_rejected">服务商拒绝了请求、模型或 JSON 输出模式，请在设置中检查兼容性，或稍后重试。</string>
+    <string name="reader_lookup_explanation_failure_rejected">服务商拒绝了请求，请检查设置中的这个模型配置，或稍后重试。</string>
     <string name="reader_lookup_explanation_failure_unknown">无法加载解释，请重试。</string>
 
     <!-- 原生选择菜单操作 -->

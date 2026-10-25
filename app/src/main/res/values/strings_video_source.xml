@@ -1,0 +1,12 @@
+<resources>
+    <string name="video_source_error_invalid_link">This YouTube link is not a supported public video.</string>
+    <string name="video_source_error_network">Could not reach YouTube. Check the connection and try again.</string>
+    <string name="video_source_error_unavailable">This video is unavailable.</string>
+    <string name="video_source_error_restricted">This video is private, age-restricted, paid, or not available in this region.</string>
+    <string name="video_source_error_unsupported">This video cannot be played in the app.</string>
+    <string name="video_source_error_captions">Captions could not be loaded.</string>
+    <string name="video_source_error_provider">YouTube could not be read right now. Try again.</string>
+    <string name="video_source_error_storage">The video could not be saved.</string>
+    <string name="video_source_caption_automatic">Auto-generated</string>
+    <string name="video_source_caption_none">No captions</string>
+</resources>

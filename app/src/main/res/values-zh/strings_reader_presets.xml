@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reader_typography_theme">主题</string>
+    <string name="reader_typography_more">更多排版</string>
+    <string name="reader_typography_less">收起更多排版</string>
+    <string name="reader_typography_vertical_padding">上下留白</string>
+    <string name="reader_typography_custom">现有自定义设置</string>
+    <string name="reader_size_small">小</string>
+    <string name="reader_size_medium">中</string>
+    <string name="reader_size_large">大</string>
+    <string name="reader_size_extra_large">特大</string>
+    <string name="reader_preset_small">小</string>
+    <string name="reader_preset_medium">中</string>
+    <string name="reader_preset_large">大</string>
+</resources>

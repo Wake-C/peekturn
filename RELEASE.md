@@ -14,7 +14,15 @@ The password is stored in macOS Keychain under `com.peekturn.reader.upload-key`,
 
 Back up both the keystore and the password somewhere safe. Losing the upload key can block updates unless Google Play lets you reset it. With Play App Signing, Google holds the app signing key; this file is only the upload key.
 
-## Build a release
+## Fast local APK
+
+```sh
+./tools/local-release.sh
+```
+
+Use this for local iteration, including uncommitted work. It assembles only the signed production APK, skips automatic lint-vital tasks, verifies the existing signer and non-debuggable package, and collects a checksum and receipt under `app/build/outputs/delivery/local-release.*/`. It does not run tests or lint, build an AAB, install, change versions, commit, tag or publish. Choose target tests separately based on the code change. The receipt records tests and lint as `not_run`, never as passed from an older report.
+
+## Public release gate
 
 The worktree must be clean. The release script reads the password from Keychain, builds a non-debuggable release, runs unit tests and release lint, verifies both signatures, and writes checksums plus a receipt.
 

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 统计：图书与视频都计入学习时长 -->
+    <string name="video_data_learning_time">学习时长</string>
+    <string name="video_data_learning_time_last_days">最近 %2$d 天共学习 %1$s</string>
+    <string name="video_data_no_learning_time">还没有学习记录</string>
+    <string name="video_data_metric_total_description">总学习时长</string>
+    <string name="video_data_recent_videos">最近观看</string>
+    <string name="video_data_open_video">打开 %1$s</string>
+</resources>

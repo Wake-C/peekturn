@@ -69,7 +69,7 @@ internal fun AppSettings.withReaderOption(option: ReaderOption, enabled: Boolean
     }
 
 /**
- * A typography draft carries stale switch values while the user drags sliders. Applying it must
+ * A typography draft carries stale switch values while the user chooses appearance presets. Applying it must
  * keep the behaviour settings authoritative: only type and layout fields come from [reading].
  */
 internal fun AppSettings.withTypography(reading: ReaderPreferences): AppSettings = copy(

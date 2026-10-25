@@ -298,10 +298,9 @@ class ReaderActivity : AppCompatActivity() {
                         "search" -> SearchDialog()
                         "typography" -> ReaderTypographySheet(
                             settings = settings,
-                            onApply = { reading ->
-                                // Merge into the latest settings, not the draft's snapshot: an
-                                // immersive or scroll toggle made while the sheet was open wins.
-                                graph.scope.launch { graph.store.updateSettings { it.withTypography(reading) } }
+                            onApply = { reading, theme ->
+                                // Apply appearance together, but retain the latest behaviour switches.
+                                graph.scope.launch { graph.store.updateSettings { it.withTypography(reading).copy(appTheme = theme) } }
                                 panel = null
                             },
                             onDismiss = { panel = null }
@@ -1007,8 +1006,8 @@ class ReaderActivity : AppCompatActivity() {
                 contextAfterSelection(locator.text.after.orEmpty()),
                 book?.title.orEmpty(),
                 chapterTitles?.titleFor(locator).orEmpty(),
-                bookId = book?.id ?: 0L,
-                chapterKey = chapterTitles?.keyFor(locator).orEmpty()
+                sourceId = "epub:${book?.id ?: 0L}",
+                sectionKey = chapterTitles?.keyFor(locator).orEmpty()
             ),
             dictionary
         )

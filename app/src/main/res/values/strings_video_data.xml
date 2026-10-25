@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Statistics: books and videos are both learning time. -->
+    <string name="video_data_learning_time">Learning time</string>
+    <string name="video_data_learning_time_last_days">%1$s in the last %2$d days</string>
+    <string name="video_data_no_learning_time">No learning time yet</string>
+    <string name="video_data_metric_total_description">All learning time</string>
+    <string name="video_data_recent_videos">Recent videos</string>
+    <string name="video_data_open_video">Open %1$s</string>
+</resources>

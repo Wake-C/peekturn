@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Explicit actions in the learning answer layer; closing or dismissing never resumes playback. -->
+    <string name="learning_popup_replay_sentence">Replay sentence</string>
+    <string name="learning_popup_continue_watching">Continue watching</string>
+</resources>

@@ -1,6 +1,7 @@
 package app.peekturn.reader
 
 import android.content.Intent
+import android.content.Context
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import androidx.activity.SystemBarStyle
@@ -14,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -33,6 +35,11 @@ import app.peekturn.reader.reader.ReaderActivity
 import app.peekturn.reader.ui.*
 import app.peekturn.reader.webimport.WebImportActivity
 import app.peekturn.reader.webimport.normalizeHttpUrl
+import app.peekturn.reader.video.VideoActivity
+import app.peekturn.reader.video.VideoLibraryScreen
+import app.peekturn.reader.video.YouTubeUrls
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     private val graph get() = (application as PeekturnApp).graph
@@ -43,7 +50,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         AppLanguage.apply(this, graph.store.settings.value.uiLanguage)
         applyAppTheme(graph.store.settings.value.appTheme)
-        vm.initialize(reopen = savedInstanceState == null)
+        val videoEntry = intent.getBooleanExtra(EXTRA_VIDEO_TAB, false)
+        if (videoEntry) vm.showVideos()
+        vm.initialize(reopen = savedInstanceState == null && !videoEntry)
         setContent {
             val settings by graph.store.settings.collectAsStateWithLifecycle()
             LaunchedEffect(settings.uiLanguage) { AppLanguage.apply(this@MainActivity, settings.uiLanguage) }
@@ -54,8 +63,12 @@ class MainActivity : AppCompatActivity() {
             PeekturnTheme(theme = settings.appTheme) {
                 PeekturnHome(vm, settings,
                     onImportFile = { pickEpub.launch(arrayOf("application/epub+zip", "application/zip", "application/octet-stream")) },
-                    onImportUrl = { url -> startActivity(WebImportActivity.intent(this, url)) },
-                    onOpen = { id -> startActivity(ReaderActivity.intent(this, id)) }
+                    onImportUrl = { url ->
+                        startActivity(if (YouTubeUrls.isYouTubeUrl(url)) VideoActivity.importIntent(this, url)
+                            else WebImportActivity.intent(this, url))
+                    },
+                    onOpen = { id -> startActivity(ReaderActivity.intent(this, id)) },
+                    onOpenVideo = { id -> startActivity(VideoActivity.intent(this, id)) }
                 )
             }
         }
@@ -71,6 +84,19 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
     }
     override fun onPause() { graph.speech.stop(); super.onPause() }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_VIDEO_TAB, false)) vm.showVideos()
+    }
+
+    companion object {
+        private const val EXTRA_VIDEO_TAB = "video_tab"
+        fun videoIntent(context: Context): Intent = Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(EXTRA_VIDEO_TAB, true)
+    }
 }
 
 @Composable
@@ -79,14 +105,19 @@ private fun PeekturnHome(
     settings: AppSettings,
     onImportFile: () -> Unit,
     onImportUrl: (String) -> Unit,
-    onOpen: (Long) -> Unit
+    onOpen: (Long) -> Unit,
+    onOpenVideo: (Long) -> Unit
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val books by vm.graph.store.books.collectAsStateWithLifecycle()
+    val videos by vm.graph.store.videos.collectAsStateWithLifecycle()
     val stats by vm.graph.store.stats.collectAsStateWithLifecycle()
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
+    val videoDeleteFailure = stringResource(R.string.video_shell_delete_failed)
+    val scope = rememberCoroutineScope()
+    var videoUrlDialog by rememberSaveable { mutableStateOf(false) }
     var urlDialog by remember { mutableStateOf(false) }
     var urlText by rememberSaveable { mutableStateOf("") }
     var urlInvalid by remember { mutableStateOf(false) }
@@ -112,11 +143,12 @@ private fun PeekturnHome(
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
                     listOf(
                         stringResource(R.string.shell_library_title),
+                        stringResource(R.string.video_shell_title),
                         stringResource(R.string.shell_statistics_title),
                         stringResource(R.string.settings_title)
                     ).forEachIndexed { index, label ->
                         NavigationBarItem(selected = state.tab == index, onClick = { vm.tab(index) },
-                            icon = { Icon(when(index) { 0 -> Icons.Outlined.AutoStories; 1 -> Icons.Outlined.BarChart; else -> Icons.Outlined.Settings }, label) },
+                            icon = { Icon(when(index) { 0 -> Icons.Outlined.AutoStories; 1 -> Icons.Outlined.VideoLibrary; 2 -> Icons.Outlined.BarChart; else -> Icons.Outlined.Settings }, label) },
                             label = { Text(label) },
                             colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.surfaceVariant,
                                 selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary))
@@ -128,8 +160,18 @@ private fun PeekturnHome(
         Box(Modifier.fillMaxSize().padding(padding)) {
             if (!state.ready) CircularProgressIndicator(Modifier.align(Alignment.Center))
             else when (state.tab) {
-                0 -> LibraryScreen(books, vm::open, onImportFile, { urlDialog = true }, vm::delete)
-                1 -> StatisticsScreen(stats, books, vm::open)
+                0 -> LibraryScreen(books, vm::open, onImportFile, { videoUrlDialog = false; urlDialog = true }, vm::delete)
+                1 -> VideoLibraryScreen(videos,
+                    onOpen = { onOpenVideo(it.id) },
+                    onImport = { videoUrlDialog = true; urlDialog = true },
+                    onDelete = { item ->
+                        scope.launch {
+                            try { vm.graph.videos.delete(item) }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { snackbar.showSnackbar(videoDeleteFailure) }
+                        }
+                    })
+                2 -> StatisticsScreen(stats, books, videos, vm::open, { onOpenVideo(it.id) })
                 else -> SettingsScreen(
                     settings, vm::save, vm.graph.explanations::testConnection, vm.graph.speech,
                     vm.graph.explanationCache::sizeBytes,
@@ -161,7 +203,7 @@ private fun PeekturnHome(
     if (urlDialog) {
         AlertDialog(
             onDismissRequest = { urlDialog = false },
-            title = { Text(stringResource(R.string.shell_import_from_url)) },
+            title = { Text(stringResource(if (videoUrlDialog) R.string.video_shell_import_title else R.string.shell_import_from_url)) },
             text = {
                 OutlinedTextField(
                     value = urlText,
@@ -171,16 +213,18 @@ private fun PeekturnHome(
                         keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
                         autoCorrectEnabled = false
                     ),
-                    label = { Text(stringResource(R.string.shell_import_url_hint)) },
+                    label = { Text(stringResource(if (videoUrlDialog) R.string.video_shell_url_hint else R.string.shell_import_url_hint)) },
                     isError = urlInvalid,
                     supportingText = if (urlInvalid) {
-                        { Text(stringResource(R.string.shell_import_url_invalid)) }
+                        { Text(stringResource(if (videoUrlDialog) R.string.video_shell_url_error else R.string.shell_import_url_invalid)) }
                     } else null
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val url = normalizeHttpUrl(urlText)
+                    val isVideo = videoUrlDialog || YouTubeUrls.isYouTubeUrl(urlText)
+                    val url = if (isVideo) urlText.trim().takeIf { YouTubeUrls.parse(it) != null }
+                        else normalizeHttpUrl(urlText)
                     if (url == null) urlInvalid = true
                     else { urlDialog = false; urlText = ""; onImportUrl(url) }
                 }) { Text(stringResource(R.string.shell_import_open)) }

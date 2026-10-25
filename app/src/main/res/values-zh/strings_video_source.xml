@@ -1,0 +1,12 @@
+<resources>
+    <string name="video_source_error_invalid_link">此 YouTube 链接不是可播放的公开视频。</string>
+    <string name="video_source_error_network">无法连接 YouTube，请检查网络后重试。</string>
+    <string name="video_source_error_unavailable">该视频不可用。</string>
+    <string name="video_source_error_restricted">该视频为私密、年龄限制、付费内容，或在当前地区不可用。</string>
+    <string name="video_source_error_unsupported">该视频无法在应用内播放。</string>
+    <string name="video_source_error_captions">字幕加载失败。</string>
+    <string name="video_source_error_provider">暂时无法读取 YouTube 内容，请重试。</string>
+    <string name="video_source_error_storage">无法保存该视频。</string>
+    <string name="video_source_caption_automatic">自动生成</string>
+    <string name="video_source_caption_none">无字幕</string>
+</resources>

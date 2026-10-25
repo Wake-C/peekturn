@@ -1,0 +1,7 @@
+<resources>
+    <string name="video_shell_title">视频</string>
+    <string name="video_shell_import_title">加入 YouTube 视频</string>
+    <string name="video_shell_url_hint">https://youtu.be/…</string>
+    <string name="video_shell_url_error">请输入有效的 YouTube 视频链接。</string>
+    <string name="video_shell_delete_failed">无法删除这个视频，请重试。</string>
+</resources>
