@@ -6,8 +6,6 @@
     <string name="video_ui_empty_detail">从 YouTube 添加的视频会出现在这里。</string>
     <string name="video_ui_import_video">导入视频</string>
     <string name="video_ui_import_link">导入链接</string>
-    <string name="video_ui_continue_watching">继续观看</string>
-    <string name="video_ui_continue">继续</string>
     <string name="video_ui_all_videos">全部视频</string>
     <string name="video_ui_video_count">%1$d 个视频</string>
     <string name="video_ui_unknown_channel">未知频道</string>
@@ -76,7 +74,7 @@
 
     <!-- 播放设置 -->
     <string name="video_ui_merge_title">按句组织字幕</string>
-    <string name="video_ui_merge_detail">本地根据标点和说话人组织，不调用 AI，不改原文。缺少精确词级时间时，~ 表示接近的原字幕时间。</string>
+    <string name="video_ui_merge_detail">本地按句组织，不调用 AI，不改原文。共用时间起点的句子保留在同一播放分组，不估算词级时间；~ 表示接近的原字幕时间。</string>
     <string name="video_ui_merge_reading">正在按句组织字幕…</string>
     <string name="video_ui_merge_generating">正在生成合并字幕… %1$d/%2$d</string>
     <string name="video_ui_merge_available">正在按句显示字幕</string>

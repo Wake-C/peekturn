@@ -13,7 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -172,11 +171,6 @@ private fun ContinueRow(item: VideoItem, onOpen: (VideoItem) -> Unit) {
         )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                stringResource(R.string.video_ui_continue_watching),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
                 item.title,
                 style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp, lineHeight = 25.sp),
                 maxLines = 2,
@@ -190,19 +184,6 @@ private fun ContinueRow(item: VideoItem, onOpen: (VideoItem) -> Unit) {
                 overflow = TextOverflow.Ellipsis
             )
             ProgressLine(item)
-            Spacer(Modifier.height(5.dp))
-            Button(
-                onClick = { onOpen(item) },
-                modifier = Modifier.heightIn(min = 48.dp),
-                shape = CircleShape,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.onBackground,
-                    contentColor = MaterialTheme.colorScheme.background
-                ),
-                contentPadding = PaddingValues(horizontal = 18.dp)
-            ) {
-                Text(stringResource(R.string.video_ui_continue), style = MaterialTheme.typography.labelLarge)
-            }
         }
     }
 }
@@ -232,7 +213,7 @@ private fun VideoRow(item: VideoItem, onOpen: () -> Unit, onRemove: () -> Unit) 
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    itemMeta(item),
+                    item.author.ifBlank { stringResource(R.string.video_ui_unknown_channel) },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -244,11 +225,6 @@ private fun VideoRow(item: VideoItem, onOpen: () -> Unit, onRemove: () -> Unit) 
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Icon(
-                Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
         VideoOptions(item, onRemove)
     }
@@ -276,17 +252,6 @@ private fun ProgressLine(item: VideoItem) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
-}
-
-@Composable
-private fun itemMeta(item: VideoItem): String {
-    val channel = item.author.ifBlank { stringResource(R.string.video_ui_unknown_channel) }
-    val duration = if (item.durationMs > 0L) {
-        formatClock(item.durationMs)
-    } else {
-        stringResource(R.string.video_ui_duration_unknown)
-    }
-    return "$channel · $duration"
 }
 
 @Composable

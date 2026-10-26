@@ -28,11 +28,74 @@ class CaptionSentencesTest {
         assertFalse(result.last().timingApproximate)
     }
 
-    @Test fun missingWordTimesUsesHonestSourceAnchorNotEvenlySpacedGuesses() {
+    @Test fun missingWordTimesKeepOnePlayableBlockInsteadOfTwoIdenticalSeekRows() {
         val result = sentenceCaptions(document(CaptionCue(0, 500, 9_000, "Hello. Next sentence.")))
-        assertEquals(2, result.size)
-        assertEquals(500L, result.last().startMs)
-        assertTrue(result.last().timingApproximate)
+        assertEquals(1, result.size)
+        assertEquals(500L, result.single().startMs)
+        assertEquals("Hello. Next sentence.", result.single().text)
+        assertEquals(9_000L, result.single().endMs)
+    }
+
+    @Test fun distinctApproximateStartsStayNavigableWithoutInventingWordTimes() {
+        val result = sentenceCaptions(document(
+            CaptionCue(0, 0, 5_000, "The first sentence continues"),
+            CaptionCue(1, 5_000, 10_000, "and ends. A second sentence starts."),
+            CaptionCue(2, 10_000, 15_000, "A third sentence starts here.")))
+        assertEquals(listOf(0L, 5_000L, 10_000L), result.map { it.startMs })
+        assertEquals("The first sentence continues and ends.", result.first().text)
+        assertEquals("A second sentence starts.", result[1].text)
+        assertTrue(result[1].timingApproximate)
+        assertEquals("A third sentence starts here.", result.last().text)
+    }
+
+    @Test fun overlappingSourceTimingCannotProduceAPlaybackTimelineThatGoesBackwards() {
+        val original = document(
+            CaptionCue(0, 0, 10_000, "First. Second.", listOf(CaptionWord("First.", 0), CaptionWord("Second.", 8_000))),
+            CaptionCue(1, 5_000, 12_000, "Third."),
+            CaptionCue(2, 12_000, 15_000, "Last."))
+        val rows = sentenceCaptions(original)
+        assertTrue(rows.zipWithNext().all { (a, b) -> a.startMs < b.startMs })
+        assertEquals("First. Second. Third. Last.", rows.joinToString(" ") { it.text })
+        assertEquals(0L, rows.first().startMs)
+        assertEquals(12_000L, rows.last().startMs)
+    }
+
+    @Test fun aBackwardAnchorCanAbsorbSeveralGroupsWithoutChangingTheirTextOrTimingPolicy() {
+        val original = document(
+            CaptionCue(0, 0, 20_000, "First. Second. Third.", listOf(
+                CaptionWord("First.", 0), CaptionWord("Second.", 6_000), CaptionWord("Third.", 12_000))),
+            CaptionCue(1, 5_000, 25_000, "Fourth."),
+            CaptionCue(2, 30_000, 35_000, "Last."))
+        val result = sentenceCaptions(original)
+        assertEquals(listOf("First.", "Second. Third. Fourth.", "Last."), result.map { it.text })
+        assertEquals(listOf(0L, 5_000L, 30_000L), result.map { it.startMs })
+        assertEquals(listOf(6_000L, 25_000L, 35_000L), result.map { it.endMs })
+        assertEquals(listOf(false, true, false), result.map { it.timingApproximate })
+        assertEquals(listOf(0, 1, 2), result.map { it.id })
+        assertEquals(listOf(0L, 6_000L, 12_000L), original.cues.first().words!!.map { it.startMs })
+    }
+
+    @Test fun aLongUntimedTranscriptIsNotCollapsedIntoOnePlaybackGroup() {
+        val cues = (0 until 100).map { index -> CaptionCue(index, index * 5_000L, (index + 1) * 5_000L,
+            if (index == 0) "First. Following sentence starts" else "and ends. Following sentence starts") }
+        val result = sentenceCaptions(document(*cues.toTypedArray()))
+        assertTrue(result.size >= 99)
+        assertTrue(result.zipWithNext().all { (a, b) -> a.startMs < b.startMs })
+        assertEquals(normalizedCaptionText(cues.joinToString(" ") { it.text }), result.joinToString(" ") { it.text })
+    }
+
+    // A generous budget guards the former quadratic merge, not normal device timing.
+    @Test(timeout = 5_000) fun aLargeUntimedCueDoesNotRepeatedlyCopyTheGrowingGroup() {
+        val text = List(32_000) { "A sentence." }.joinToString(" ")
+        val original = parseVideoCaptions("u4LUix-BU0s",
+            CaptionTrack("en", "en", false, "https://captions.example"),
+            "WEBVTT\n\n00:00:00.000 --> 10:00:00.000\n$text\n")
+        val result = sentenceCaptions(original)
+        assertEquals(1, result.size)
+        assertEquals(text, result.single().text)
+        assertEquals(0L, result.single().startMs)
+        assertEquals(36_000_000L, result.single().endMs)
+        assertFalse(result.single().timingApproximate)
     }
 
     @Test fun handlesTitlesDecimalsAndSpeakerChanges() {
@@ -52,17 +115,21 @@ class CaptionSentencesTest {
     }
 
     @Test fun speakerBoundariesWorkInsideOneSourceBlock() {
-        val result = sentenceCaptions(document(CaptionCue(0, 0, 5_000, ">> Thank you >> You are welcome.")))
+        val result = sentenceCaptions(document(CaptionCue(0, 0, 5_000, ">> Thank you >> You are welcome.", listOf(
+            CaptionWord(">>", 0), CaptionWord("Thank", 0), CaptionWord("you", 200),
+            CaptionWord(">>", 1_000), CaptionWord("You", 1_000), CaptionWord("are", 1_200), CaptionWord("welcome.", 1_400)))))
         assertEquals(listOf(">> Thank you", ">> You are welcome."), result.map { it.text })
     }
 
     @Test fun sentenceAfterFinalInitialIsNotAttachedToTheName() {
-        val result = sentenceCaptions(document(CaptionCue(0, 0, 5_000, "My name is Coin K. And I will stay.")))
+        val result = sentenceCaptions(document(CaptionCue(0, 0, 2_000, "My name is Coin K."),
+            CaptionCue(1, 2_000, 5_000, "And I will stay.")))
         assertEquals(listOf("My name is Coin K.", "And I will stay."), result.map { it.text })
     }
 
     @Test fun inlineCensorMarkerDoesNotBreakTheSurroundingSentence() {
-        val result = sentenceCaptions(document(CaptionCue(0, 0, 5_000, ">> Mark, that's [ __ ] man. That's a new problem.")))
+        val result = sentenceCaptions(document(CaptionCue(0, 0, 2_000, ">> Mark, that's [ __ ] man."),
+            CaptionCue(1, 2_000, 5_000, "That's a new problem.")))
         assertEquals(listOf(">> Mark, that's [ __ ] man.", "That's a new problem."), result.map { it.text })
     }
 

@@ -27,6 +27,7 @@ Owners: [SystemSpeech](../../app/src/main/java/app/peekturn/reader/speech/System
 
 - A custom cache key does not by itself keep a signed media URL off disk: `CacheDataSource` also writes the redirected URI into content metadata. Strip `ContentMetadata.KEY_REDIRECTED_URI` before committing cache metadata. Persist only opaque content identities, not temporary stream addresses.
 - A custom `CacheDataSink.Factory` needs the same cache instance as `CacheDataSource.Factory`; the source factory does not inject it. Unidentified streams and cache initialization failures must still be able to stream normally.
+- A resolved progressive stream without enough length/revision metadata needs a private session key, not the raw URI and not disabled replay caching. Hold that opaque key in the resolved descriptor; do not reuse it across fresh resolutions where content identity cannot be proved.
 - Source resolution, forward buffering, retained samples and disk fragments are separate layers. A subtitle seek reuses the player, but an uncached target still needs network bytes. Disk caching is not an offline-download promise.
 
 Owners: [VideoMediaCache](../../app/src/main/java/app/peekturn/reader/video/VideoMediaCache.kt), [VideoViewModel](../../app/src/main/java/app/peekturn/reader/video/VideoViewModel.kt).

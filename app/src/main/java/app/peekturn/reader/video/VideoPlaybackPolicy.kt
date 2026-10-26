@@ -96,14 +96,13 @@ internal fun initialQualityId(
         ?: qualities.firstOrNull { it.source == playback }?.id
 
 /**
- * The cue a real player position falls in. Overlapping source cues resolve to the first one that
- * contains the time. Silence between cues and after the last end has no current line: the UI must
- * never invent active subtitle text outside the source cue's own interval.
+ * The latest-started row owns the display. Source display tails can overlap later sentences;
+ * choosing the first containing row makes Next seek to the same later start repeatedly. Once a
+ * newer row starts, an older long tail must not regain ownership, even through a later gap.
  */
 internal fun activeCueIndex(cues: List<CaptionCue>, positionMs: Long): Int? {
-    if (cues.isEmpty()) return null
-    val containing = cues.indexOfFirst { positionMs >= it.startMs && positionMs < it.endMs }
-    return containing.takeIf { it >= 0 }
+    val index = navigationCueIndex(cues, positionMs) ?: return null
+    return index.takeIf { positionMs < cues[index].endMs }
 }
 
 /**
@@ -118,18 +117,17 @@ internal fun navigationCueIndex(cues: List<CaptionCue>, positionMs: Long): Int? 
 
 internal fun previousCueIndex(cues: List<CaptionCue>, positionMs: Long): Int? {
     val current = activeCueIndex(cues, positionMs)
-    if (current != null) return (current - 1).takeIf { it >= 0 }
+    if (current != null) return (current - 1 downTo 0).firstOrNull {
+        cues[it].startMs < cues[current].startMs
+    }
     // Inside a gap the last started cue is behind the playhead, so it is a legal previous target.
     return navigationCueIndex(cues, positionMs)
 }
 
 internal fun nextCueIndex(cues: List<CaptionCue>, positionMs: Long): Int? {
-    if (cues.isEmpty()) return null
-    val current = activeCueIndex(cues, positionMs)
-    if (current != null) return (current + 1).takeIf { it <= cues.lastIndex }
-    // Before the first cue the next target is the first line; after the last end there is none.
-    val navigation = navigationCueIndex(cues, positionMs) ?: return 0
-    return (navigation + 1).takeIf { it <= cues.lastIndex }
+    // A transport action must advance to a distinct future anchor, including in original view
+    // where two source display rows can share a timestamp.
+    return cues.indices.firstOrNull { cues[it].startMs > positionMs }
 }
 
 /**

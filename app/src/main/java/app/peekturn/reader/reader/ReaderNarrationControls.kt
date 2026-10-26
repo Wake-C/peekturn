@@ -27,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,8 +47,8 @@ internal fun narrationSpeedLabel(speed: Float): String =
         .stripTrailingZeros().toPlainString()
 
 /**
- * The floating transport card above the reading menu. It is an overlay: its presence, error row
- * or cached label never resize the publication. Every control keeps an independent touch target
+ * The transport card overlays the reading menu without changing the publication viewport.
+ * Every control keeps an independent touch target
  * so the book around the card receives its original taps and swipes.
  */
 @Composable
@@ -92,40 +91,9 @@ internal fun ReaderNarrationCard(
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1
                 )
-                Spacer(Modifier.weight(1f))
-                if (state.cached && state.error == null) {
-                    Text(
-                        stringResource(R.string.reader_narration_cached),
-                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.2.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
             }
-            if (state.active) {
-                Text(
-                    stringResource(
-                        R.string.reader_narration_reserve,
-                        state.readyParagraphs,
-                        (state.readyDurationMs / 1_000L).toInt()
-                    ),
-                    style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.2.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)
-                )
-            }
-            if (state.notice != null && state.error == null) {
-                Text(
-                    state.notice,
-                    style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.2.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)
-                )
-            }
+            // Engine/source notices and reserve/cache counters remain in Settings/diagnostics,
+            // not on the reading surface. Preparation status above and real failures below stay.
             if (state.error != null) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),

@@ -17,6 +17,10 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
+import kotlinx.coroutines.runBlocking
+import com.google.gson.Gson
+import java.io.File
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -84,6 +88,25 @@ class VideoMediaCacheTest {
         }
     }
 
+    @Test fun streamsWithoutRevisionMetadataStillReplayFromCacheWithinTheirResolvedSession() {
+        val server = MockWebServer(); server.start()
+        try {
+            repeat(2) { server.enqueue(response()) }
+            val url = server.url("/media?signature=temporary").toString()
+            val sessionKey = mediaStreamCacheKey("u4LUix-BU0s", 18, "avc", "", url)
+            VideoMediaCache(context, temporary.newFolder()).use { cache ->
+                val factory = cache.factory(upstream(), true)
+                assertArrayEquals(payload.copyOf(1024), read(factory, spec(url, sessionKey)))
+                assertArrayEquals(payload.copyOf(1024), read(factory, spec(url, sessionKey)))
+                assertEquals(1, server.requestCount)
+                val nextSessionKey = mediaStreamCacheKey("u4LUix-BU0s", 18, "avc", "", url)
+                assertNotEquals(sessionKey, nextSessionKey)
+                assertArrayEquals(payload.copyOf(1024), read(factory, spec(url, nextSessionKey)))
+                assertEquals(2, server.requestCount)
+            }
+        } finally { server.shutdown() }
+    }
+
     @Test fun cachedRangesSurviveReopeningAndNoRedirectOrSignedUrlIsPersisted() {
         val server = MockWebServer(); server.start()
         val directory = temporary.newFolder()
@@ -120,7 +143,9 @@ class VideoMediaCacheTest {
         assertNotEquals(key, mediaStreamCacheKey("u4LUix-BU0s", 141, "mp4a", "en", url))
         assertNotEquals(key, mediaStreamCacheKey("u4LUix-BU0s", 140, "mp4a", "ja", url))
         assertNotEquals(key, mediaStreamCacheKey("u4LUix-BU0s", 140, "mp4a", "en", url.replace("123", "124")))
-        assertNull(mediaStreamCacheKey("u4LUix-BU0s", 140, "mp4a", "en", "https://media.example/unknown"))
+        val session = mediaStreamCacheKey("u4LUix-BU0s", 140, "mp4a", "en", "https://media.example/unknown")
+        assertTrue(session.startsWith("session-"))
+        assertNotEquals(session, mediaStreamCacheKey("u4LUix-BU0s", 140, "mp4a", "en", "https://media.example/unknown"))
         assertFalse(key.contains("u4LUix") || key.contains("signature"))
     }
 
@@ -134,6 +159,51 @@ class VideoMediaCacheTest {
             }
             assertEquals(1, server.requestCount)
         } finally { server.shutdown() }
+    }
+
+    /** Opt-in real VOD check with the same unknown-length flags as ProgressiveMediaPeriod. */
+    @Test fun liveMuxedStreamCachesARepeatedPrefixWithoutPersistingItsSignedUrl() = runBlocking {
+        val id = System.getenv("PEEKTURN_MEDIA_PROBE_ID")
+        val output = System.getenv("PEEKTURN_MEDIA_PROBE_DIR")
+        assumeTrue(!id.isNullOrBlank() && !output.isNullOrBlank())
+        val resolved = YouTubeSource().resolve(id!!)
+        val source = resolved.qualities.first { it.height == 360 && it.source.audioUrl == null }.source
+        val key = source.videoCacheKey!!
+        val events = mutableListOf<String>()
+        val client = OkHttpClient.Builder().readTimeout(20, TimeUnit.SECONDS).build()
+        val upstream = OkHttpDataSource.Factory(client).setDefaultRequestProperties(source.headers)
+        val directory = File(output!!, "muxed-session-cache")
+        VideoMediaCache(context, directory, onEvent = { events += it }).use { cache ->
+            val factory = cache.factory(upstream, true)
+            fun prefix(): Pair<ByteArray, Long> {
+                val data = factory.createDataSource()
+                try {
+                    val length = data.open(DataSpec.Builder().setUri(source.videoUrl).setKey(key)
+                        .setFlags(DataSpec.FLAG_ALLOW_CACHE_FRAGMENTATION or DataSpec.FLAG_DONT_CACHE_IF_LENGTH_UNKNOWN).build())
+                    val result = ByteArrayOutputStream()
+                    val buffer = ByteArray(4096)
+                    while (result.size() < 16384) {
+                        val count = data.read(buffer, 0, minOf(buffer.size, 16384 - result.size()))
+                        if (count < 0) break
+                        result.write(buffer, 0, count)
+                    }
+                    return result.toByteArray() to length
+                } finally { data.close() }
+            }
+            val first = prefix()
+            val opens = events.count { it == "media-network-open" }
+            val second = prefix()
+            File(output, "muxed-live-check.json").writeText(Gson().toJson(mapOf(
+                "height" to 360, "cacheScope" to if (key.startsWith("session-")) "session" else "content",
+                "declaredLength" to first.second, "prefixBytes" to first.first.size,
+                "firstNetworkOpens" to opens, "totalNetworkOpens" to events.count { it == "media-network-open" },
+                "cacheReadObserved" to events.any { it.startsWith("media-cache-read-bytes:") }
+            )))
+            assertEquals(16384, first.first.size)
+            assertArrayEquals(first.first, second.first)
+            assertEquals(opens, events.count { it == "media-network-open" })
+            assertTrue(events.any { it.startsWith("media-cache-read-bytes:") })
+        }
     }
 
     @Test fun leastRecentFragmentsAreEvictedWithinTheByteBudget() {

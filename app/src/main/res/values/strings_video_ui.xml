@@ -6,8 +6,6 @@
     <string name="video_ui_empty_detail">Videos you add from YouTube appear here.</string>
     <string name="video_ui_import_video">Import video</string>
     <string name="video_ui_import_link">Import a link</string>
-    <string name="video_ui_continue_watching">Continue watching</string>
-    <string name="video_ui_continue">Continue</string>
     <string name="video_ui_all_videos">All videos</string>
     <string name="video_ui_video_count">%1$d videos</string>
     <string name="video_ui_unknown_channel">Unknown channel</string>
@@ -76,7 +74,7 @@
 
     <!-- Playback settings -->
     <string name="video_ui_merge_title">Organize by sentence</string>
-    <string name="video_ui_merge_detail">Local punctuation and speaker rules, without AI requests. Words stay unchanged. ~ marks a nearby source time when exact word timing is missing.</string>
+    <string name="video_ui_merge_detail">Local sentence grouping, without AI or text changes. Sentences sharing a source start stay in one playback group. ~ marks a nearby source anchor.</string>
     <string name="video_ui_merge_reading">Organizing sentences…</string>
     <string name="video_ui_merge_generating">Generating merged subtitles… %1$d/%2$d</string>
     <string name="video_ui_merge_available">Sentence view in use</string>

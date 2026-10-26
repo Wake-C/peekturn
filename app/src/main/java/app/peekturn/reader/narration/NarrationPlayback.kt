@@ -41,7 +41,7 @@ data class NarrationState(
     val cached: Boolean = false,
     val speed: Float = 1f,
     val error: String? = null,
-    /** An honest limitation of the active provider, shown without blocking the transport. */
+    /** Provider limitation metadata; successful playback does not display it on the reading surface. */
     val notice: String? = null,
     /** The first requested sentence, or the reserve after it, is still being rendered. */
     val buffering: Boolean = false,

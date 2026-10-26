@@ -95,35 +95,23 @@ fun LibraryScreen(
             }
         } else {
             if (focus != null) item(key = "focus-${focus.id}") {
-                // A turns the featured book into a compact continue row: a cover column and one text
-                // column, flat on the page with a hairline beneath instead of an elevated card.
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    BookCover(focus, Modifier.width(92.dp).clickable(role = Role.Button,
-                        onClickLabel = stringResource(R.string.shell_continue_book, focus.title)) { onOpen(focus) })
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Row(verticalAlignment = Alignment.Top) {
-                            Text(focus.title, Modifier.weight(1f).padding(top = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.weight(1f).clickable(role = Role.Button,
+                        onClickLabel = stringResource(R.string.shell_open_book, focus.title)) { onOpen(focus) },
+                        horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        BookCover(focus, Modifier.width(92.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(focus.title,
                                 style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp, lineHeight = 27.sp),
                                 maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            BookActions(focus, onRemove = { deletingId = focus.id })
-                        }
-                        // Author and reading status form one metadata block; the status is named
-                        // ("Progress: Reading") so it cannot read as an unlabelled chip.
-                        Text(focus.author.ifBlank { stringResource(R.string.shell_unknown_author) },
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(stringResource(R.string.shell_progress_label, bookProgressText(focus)),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(5.dp))
-                        Button(onClick = { onOpen(focus) }, modifier = Modifier.heightIn(min = 48.dp), shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.onBackground,
-                                contentColor = MaterialTheme.colorScheme.background
-                            ),
-                            contentPadding = PaddingValues(horizontal = 18.dp)) {
-                            Text(stringResource(R.string.shell_continue), style = MaterialTheme.typography.labelLarge)
+                            Text(focus.author.ifBlank { stringResource(R.string.shell_unknown_author) },
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(bookProgressText(focus),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
+                    BookActions(focus, onRemove = { deletingId = focus.id }, modifier = Modifier.align(Alignment.Top))
                 }
             }
             item {

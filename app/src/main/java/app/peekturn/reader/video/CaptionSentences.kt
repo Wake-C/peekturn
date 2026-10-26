@@ -50,7 +50,7 @@ internal fun sentenceCaptions(
     if (algorithm == SentenceAlgorithm.READABLE && boundaries.isEmpty()) {
         // No sentence punctuation is not evidence for one track-long sentence. Keep source rows
         // rather than inventing boundaries from length or hiding a whole timeline in one row.
-        return document.cues.map { it.copy(text = normalizedCaptionText(it.text)) }
+        return playableSentenceRows(document.cues.map { it.copy(text = normalizedCaptionText(it.text)) })
     }
     if (algorithm == SentenceAlgorithm.READABLE) {
         // Speaker changes are real boundaries. A comma alone is not one. Preserve grammatical
@@ -102,5 +102,40 @@ internal fun sentenceCaptions(
             timingApproximate = !covered.first().precise)
     }
     check(normalizedCaptionText(output.joinToString(" ") { it.text }) == content)
-    return output
+    return playableSentenceRows(output)
+}
+
+private data class PlaybackRowSpan(val firstRow: Int, val lastRow: Int, val startMs: Long,
+    val endMs: Long, val timingApproximate: Boolean)
+
+/**
+ * Shared or backward anchors cannot be independent seek targets. Keep those sentences together.
+ * A distinct nearest source anchor remains navigable and marked approximate; absence of word
+ * times alone must not collapse a long transcript into one group. Never estimate a word time.
+ * Source captions remain unchanged; all group endpoints still come from source timestamps.
+ */
+private fun playableSentenceRows(rows: List<CaptionCue>): List<CaptionCue> {
+    val groups = ArrayList<PlaybackRowSpan>()
+    for ((index, row) in rows.withIndex()) {
+        var firstRow = index
+        var startMs = row.startMs
+        var endMs = row.endMs
+        var approximate = row.timingApproximate
+        while (groups.isNotEmpty() && startMs <= groups.last().startMs) {
+            val previous = groups.removeAt(groups.lastIndex)
+            firstRow = previous.firstRow
+            approximate = previous.timingApproximate || startMs < previous.startMs
+            startMs = minOf(previous.startMs, startMs)
+            endMs = maxOf(previous.endMs, endMs)
+        }
+        groups += PlaybackRowSpan(firstRow, index, startMs, endMs, approximate)
+    }
+    // Spans partition the input. Build each final group's text once, never an ever-growing
+    // intermediate string for every same-anchor sentence in a large untimed source block.
+    return groups.mapIndexed { index, group ->
+        if (group.firstRow == group.lastRow) rows[group.firstRow].copy(id = index)
+        else CaptionCue(index, group.startMs, group.endMs,
+            normalizedCaptionText(rows.subList(group.firstRow, group.lastRow + 1).joinToString(" ") { it.text }),
+            timingApproximate = group.timingApproximate)
+    }
 }

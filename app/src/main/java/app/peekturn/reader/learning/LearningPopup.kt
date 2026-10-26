@@ -46,6 +46,7 @@ import app.peekturn.reader.data.OfflineDictionary
 import app.peekturn.reader.model.*
 import app.peekturn.reader.speech.PronunciationPlayer
 import app.peekturn.reader.speech.SpeechReport
+import app.peekturn.reader.speech.SpeechState
 import kotlinx.coroutines.CancellationException
 import kotlin.math.roundToInt
 
@@ -310,14 +311,7 @@ fun LearningPopup(
                                 else session.retry(context, latestSettings.activeProfileId, latestSettings.model, language)
                             }, enabled = !loading) { Text(stringResource(R.string.reader_lookup_retry)) }
                         }
-                        playback.notice?.let {
-                            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 17.sp)
-                        }
-                        playback.error?.let {
-                            Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
-                            playback.diagnostic?.let { report -> SpeechReport(report) }
-                            TextButton(onClick = speech::dismissFailure) { Text(stringResource(R.string.reader_lookup_dismiss_failure)) }
-                        }
+                        LookupSpeechFailure(playback, speech::dismissFailure)
                     }
                 }
                 HorizontalDivider()
@@ -385,6 +379,17 @@ private fun LookupTab(label: String, selected: Boolean, modifier: Modifier, onCl
                 if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
                 RoundedCornerShape(2.dp)))
         }
+    }
+}
+
+/** Learning content stays quiet on success; route/engine evidence belongs to failures or Settings. */
+@Composable
+internal fun LookupSpeechFailure(playback: SpeechState, onDismiss: () -> Unit) {
+    val error = playback.error ?: return
+    Column {
+        Text(error, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
+        playback.diagnostic?.let { SpeechReport(it) }
+        TextButton(onClick = onDismiss) { Text(stringResource(R.string.reader_lookup_dismiss_failure)) }
     }
 }
 

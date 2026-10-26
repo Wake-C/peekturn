@@ -3,7 +3,7 @@
 - **Book**: one imported EPUB publication in the reader's local library. Not a translated book or a text reconstruction.
 - **Video**: a saved public YouTube video entry with a viewing position. Not a downloaded video file or an EPUB.
 - **Original subtitles**: the video's source caption text and timing, before sentence grouping.
-- **Merged subtitles**: consecutive source captions grouped for reading, with words, punctuation and order unchanged. Not rewritten or translated subtitles.
+- **Playback group**: the displayed subtitle unit used for replay and previous/next navigation, with a distinct source time anchor, marked approximate when word timing is unavailable. It can contain several complete sentences when they share the same anchor; words, punctuation and order stay unchanged.
 - **Reading position**: a durable location within a book, independent of current screen size and page count. Avoid using “page” as a synonym.
 - **Last-read book**: the book most recently opened successfully for reading. Not merely a selected library card.
 - **Selection**: the exact word or phrase chosen in the rendered book or video subtitles.
@@ -18,10 +18,10 @@
 - **System speech**: synthesized reading of text using the phone's configured speech engine.
 - **Preferred accent**: the desired English pronunciation variety. It does not describe the accent of every available voice or audio source.
 - **Reading time**: measured active foreground reading duration. It is not vocabulary mastery or estimated time remaining.
-- **Learning time**: active reading, video viewing or explanation-reading duration. Not video progress or playback-speed-adjusted time.
-- **Model configuration**: the settings used to request explanations and subtitle grouping from a model provider.
+- **Learning time**: active reading, video viewing/listening or explanation-reading duration. Not video progress or playback-speed-adjusted time.
+- **Model configuration**: the settings used to request contextual explanations from a model provider.
 - **Temperature**: model sampling randomness. Not response speed or reasoning mode.
 - **Model profile**: a named, saved model configuration.
-- **Active profile**: the model profile selected for new explanation and subtitle-grouping requests.
+- **Active profile**: the model profile selected for new explanation requests.
 - **Chapter page position**: the currently visible page and total pages for the current chapter under current layout. Not a durable reading position or a fixed whole-book page count.
 - **Interface language**: the language of the app's own controls and messages (English or Simplified Chinese). Distinct from book text, chapter titles, dictionary data and IPA, which are never translated.

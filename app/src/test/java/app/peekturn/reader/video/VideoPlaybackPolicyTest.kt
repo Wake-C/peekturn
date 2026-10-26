@@ -31,7 +31,7 @@ class VideoPlaybackPolicyTest {
         assertEquals(0, navigationCueIndex(gapped, 1500)!!)
 
         val overlapping = listOf(cue(0, 0, 2000), cue(1, 1000, 3000))
-        assertEquals(0, activeCueIndex(overlapping, 1500)!!)
+        assertEquals(1, activeCueIndex(overlapping, 1500)!!)
         assertEquals(1, activeCueIndex(overlapping, 2500)!!)
     }
 
@@ -56,6 +56,31 @@ class VideoPlaybackPolicyTest {
         assertEquals(1, nextCueIndex(gapped, 500)!!)
         assertEquals(1, previousCueIndex(gapped, 3200)!!)
         assertNull(nextCueIndex(gapped, 3200))
+    }
+
+    @Test fun `merged next at two hour boundary advances to the following complete group`() {
+        val hour = 2 * 3_600_000L + 10 * 60_000L
+        val merged = listOf(cue(0, hour + 10_000, hour + 22_000, "First complete sentence."),
+            cue(1, hour + 15_000, hour + 27_000, "Second complete sentence."),
+            cue(2, hour + 20_000, hour + 32_000, "Third complete sentence."))
+        assertEquals(1, nextCueIndex(merged, hour + 10_000))
+        assertEquals(2, nextCueIndex(merged, hour + 15_000))
+        assertEquals(0, previousCueIndex(merged, hour + 15_000))
+        assertEquals(1, activeCueIndex(merged, hour + 15_000))
+    }
+
+    @Test fun `merged highlight never resurrects an earlier long overlapping cue`() {
+        val merged = listOf(cue(0, 10_000, 30_000), cue(1, 15_000, 20_000), cue(2, 35_000, 40_000))
+        assertEquals(1, activeCueIndex(merged, 16_000))
+        assertNull(activeCueIndex(merged, 25_000))
+        assertEquals(1, previousCueIndex(merged, 25_000))
+        assertEquals(2, nextCueIndex(merged, 25_000))
+    }
+
+    @Test fun `merged transport skips source rows with the same nonadvancing anchor`() {
+        val cues = listOf(cue(0, 10_000, 15_000), cue(1, 10_000, 15_000), cue(2, 15_000, 20_000))
+        assertEquals(2, nextCueIndex(cues, 10_000))
+        assertNull(previousCueIndex(cues, 10_000))
     }
 
     @Test

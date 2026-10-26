@@ -6,10 +6,7 @@
     <string name="shell_library_title">书架</string>
     <string name="shell_add_book">添加图书</string>
     <string name="shell_empty_library">书架还是空的</string>
-    <string name="shell_continue_book">继续阅读《%1$s》</string>
     <string name="shell_unknown_author">未知作者</string>
-    <string name="shell_progress_label">进度：%1$s</string>
-    <string name="shell_continue">继续阅读</string>
     <string name="shell_shelf_heading">全部图书</string>
     <string name="shell_search_books_hint">搜索图书</string>
     <string name="shell_search_books_description">按书名或作者搜索</string>

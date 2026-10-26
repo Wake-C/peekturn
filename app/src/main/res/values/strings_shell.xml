@@ -6,10 +6,7 @@
     <string name="shell_library_title">Library</string>
     <string name="shell_add_book">Add book</string>
     <string name="shell_empty_library">No books yet</string>
-    <string name="shell_continue_book">Continue %1$s</string>
     <string name="shell_unknown_author">Unknown author</string>
-    <string name="shell_progress_label">Progress: %1$s</string>
-    <string name="shell_continue">Continue</string>
     <string name="shell_shelf_heading">Shelf</string>
     <string name="shell_search_books_hint">Search books</string>
     <string name="shell_search_books_description">Search by title or author</string>

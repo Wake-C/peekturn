@@ -1,6 +1,6 @@
 # Build and delivery
 
-[README: Build](../../README.md#build) owns toolchain setup. [RELEASE.md](../../RELEASE.md) owns signing, public releases and Play delivery. Scripts and manifests are the source of truth for exact commands and versions.
+Use JDK 17 and Android SDK platform 35. [RELEASE.md](../../RELEASE.md) owns signing, public releases and Play delivery. Scripts and manifests are the source of truth for exact commands and versions.
 
 ## Local builds
 

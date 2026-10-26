@@ -17,6 +17,7 @@ import androidx.media3.datasource.cache.SimpleCache
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.File
 import java.security.MessageDigest
+import java.util.UUID
 
 // Shared disk budget across all videos and audio streams, not a per-video or RAM allocation.
 internal const val VIDEO_MEDIA_CACHE_BYTES = 1024L * 1024 * 1024
@@ -26,12 +27,17 @@ internal const val VIDEO_BACK_BUFFER_MS = 30_000
 internal fun videoLoadControl(): DefaultLoadControl =
     DefaultLoadControl.Builder().setBackBuffer(VIDEO_BACK_BUFFER_MS, true).build()
 
-/** Content identity only. Expiring URLs, signatures and access tokens must never become disk keys. */
-internal fun mediaStreamCacheKey(videoId: String, formatId: Int, codec: String, trackId: String, url: String): String? {
-    if (!YouTubeUrls.isVideoId(videoId) || formatId <= 0) return null
-    val parsed = url.toHttpUrlOrNull() ?: return null
-    val length = parsed.queryParameter("clen")?.toLongOrNull()?.takeIf { it > 0 } ?: return null
-    val modified = parsed.queryParameter("lmt")?.toLongOrNull()?.takeIf { it > 0 } ?: return null
+/**
+ * Reuse across resolutions only with source-backed content identity. Otherwise assign an opaque
+ * key once to this resolved stream: replay can cache within the session without persisting a
+ * signed URL or confusing a later rendition/revision with these bytes.
+ */
+internal fun mediaStreamCacheKey(videoId: String, formatId: Int, codec: String, trackId: String, url: String): String {
+    fun sessionKey() = "session-" + UUID.randomUUID().toString()
+    if (!YouTubeUrls.isVideoId(videoId) || formatId <= 0) return sessionKey()
+    val parsed = url.toHttpUrlOrNull() ?: return sessionKey()
+    val length = parsed.queryParameter("clen")?.toLongOrNull()?.takeIf { it > 0 } ?: return sessionKey()
+    val modified = parsed.queryParameter("lmt")?.toLongOrNull()?.takeIf { it > 0 } ?: return sessionKey()
     val identity = listOf("youtube-media-v1", videoId, formatId, codec, trackId, length, modified).joinToString("\n")
     return "media-" + MessageDigest.getInstance("SHA-256").digest(identity.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
