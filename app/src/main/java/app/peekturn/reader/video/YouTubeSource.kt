@@ -78,13 +78,15 @@ fun defaultVideoHttpClient(onEvent: ((String) -> Unit)? = null): OkHttpClient = 
     .readTimeout(30, TimeUnit.SECONDS)
     .writeTimeout(30, TimeUnit.SECONDS)
     .callTimeout(60, TimeUnit.SECONDS)
+    .cookieJar(VideoSessionCookies())
     .apply { if (onEvent != null) eventListenerFactory(VideoHttpDiagnostics(onEvent)) }
     .build()
 
 /**
  * Resolves a YouTube video through NewPipeExtractor and reads its WebVTT caption tracks.
  *
- * Only the public extractor is used; no po-token, cookie or login backend exists. Signed stream
+ * Only the public extractor is used; no po-token or login backend exists. Server-issued anonymous
+ * source cookies live only in the bounded HTTP-client session jar. Signed stream
  * URLs stay inside the returned [ResolvedVideo] and are never stored, logged or reused later.
  * Extraction runs on the IO dispatcher, coroutine cancellation cancels the active HTTP call
  * instead of waiting for a timeout, and NewPipe's process-wide statics are initialized exactly

@@ -27,6 +27,8 @@ import app.peekturn.reader.AppGraph
 import app.peekturn.reader.data.OfflineDictionary
 import app.peekturn.reader.learning.LearningSession
 import app.peekturn.reader.model.LookupContext
+import app.peekturn.reader.model.ReaderPreferences
+import app.peekturn.reader.reader.withTypography
 import app.peekturn.reader.narration.NarrationService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -77,9 +79,11 @@ internal data class VideoPlaybackState(
     val selectedQualityId: String? = null,
     val qualityChanging: Boolean = false,
     val audioOnly: Boolean = false,
+    val readMode: Boolean = false,
     val audioAvailable: Boolean = false,
     val modeSaving: Boolean = false,
     val modeSaveFailed: Boolean = false,
+    val resumeSaveFailed: Boolean = false,
     val preferredHeight: Int = 1080,
     val captions: CaptionDocument? = null,
     val captionStatus: VideoCaptionStatus = VideoCaptionStatus.Absent,
@@ -103,6 +107,10 @@ internal data class VideoPlaybackState(
     val aspectRatio: Float = videoAspectRatio(0, 0),
     val lookup: VideoLookupRequest? = null
 ) {
+    /** Late metadata must not rewind a session that already attached its real player state. */
+    internal fun withStoredMetadata(stored: VideoItem): VideoPlaybackState =
+        if (item == null) copy(item = stored, positionMs = stored.positionMs, durationMs = stored.durationMs) else this
+
     /** Merged cues replace the original lines; while a merge runs the original stays visible. */
     val displayedCues: List<CaptionCue> get() = mergedCues ?: captions?.cues.orEmpty()
 
@@ -273,7 +281,7 @@ internal class VideoViewModel(
      * The Activity passes either a stored entry or a shared/pasted canonical link. Repeating the
      * same request after a configuration change is a no-op so the player is never recreated.
      */
-    fun start(id: Long?, url: String?, force: Boolean = false) {
+    fun start(id: Long?, url: String?, force: Boolean = false, autoPlay: Boolean = true) {
         val next = Request(id, url)
         if (!force && (request == next || id != null && _state.value.item?.id == id && _state.value.phase is VideoPhase.Ready)) return
         request = next
@@ -322,7 +330,8 @@ internal class VideoViewModel(
                 // The title may appear while the source resolves; the phase stays Loading, so this
                 // is stored metadata only and never fakes a playable picture or subtitle.
                 if (stored != null && token == sessionGeneration) {
-                    _state.update { if (it.item == null) it.copy(item = stored) else it }
+                    _state.update { it.withStoredMetadata(stored) }
+                    if (foreground) rememberForegroundVideo()
                 }
             }
         }
@@ -338,7 +347,7 @@ internal class VideoViewModel(
                     graph.videos.open(videoId)
                 }
                 if (token != sessionGeneration) return@launch
-                attachSession(data, linkStart, autoPlay = true, token = token)
+                attachSession(data, linkStart, autoPlay = autoPlay, token = token)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: VideoFailure) {
@@ -451,11 +460,12 @@ internal class VideoViewModel(
                 selectedQualityId = qualityId,
                 qualityChanging = false,
                 audioOnly = audioOnly,
+                readMode = item.readMode,
                 audioAvailable = audioSource != null,
                 modeSaving = false,
                 modeSaveFailed = false,
                 preferredHeight = preferences.videoQualityHeight,
-                toolsVisible = it.toolsVisible || audioOnly,
+                toolsVisible = if (item.readMode) false else it.toolsVisible || audioOnly,
                 captions = sessionDocument,
                 captionStatus = status,
                 captionFailure = data.captionFailure,
@@ -472,6 +482,7 @@ internal class VideoViewModel(
             )
         }
         lastSavedPosition = start
+        if (foreground) rememberForegroundVideo()
         val itemTracker = trackerFor(item)
         if (foreground) itemTracker.foreground(true)
         // Caption HTTP can start while the previous narration is being stopped.
@@ -571,9 +582,23 @@ internal class VideoViewModel(
 
     fun onForeground() {
         foreground = true
+        rememberForegroundVideo()
         track?.foreground(true)
         track?.playing(player.isPlaying)
         startTicker()
+    }
+
+    private fun rememberForegroundVideo() {
+        val id = _state.value.item?.id ?: return
+        graph.scope.launch {
+            if (!foreground || _state.value.item?.id != id) return@launch
+            try { graph.store.markVideoOpened(id) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                graph.developerLog.recordFailure("video", "remember-open", failure)
+                _state.update { it.copy(resumeSaveFailed = true) }
+            }
+        }
     }
 
     /** Activity visibility only changes learning accounting; the media service keeps playback. */
@@ -674,9 +699,27 @@ internal class VideoViewModel(
         }
     }
 
-    fun setAudioOnly(enabled: Boolean) {
+    suspend fun saveReadingAppearance(reading: ReaderPreferences, theme: String): Boolean = try {
+        graph.store.updateSettings { it.withTypography(reading).copy(appTheme = theme) }
+        true
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (failure: Exception) {
+        graph.developerLog.recordFailure("video", "reading-appearance", failure)
+        false
+    }
+
+    fun setAudioOnly(enabled: Boolean) = setPresentation(enabled, readMode = false)
+
+    fun setReadMode(enabled: Boolean) {
+        if (enabled && (_state.value.displayedCues.isEmpty() || !_state.value.audioAvailable)) return
+        setPresentation(audioOnly = enabled, readMode = enabled)
+    }
+
+    private fun setPresentation(audioOnly: Boolean, readMode: Boolean) {
+        val enabled = audioOnly
         val current = _state.value
-        if (current.modeSaving || current.phase !is VideoPhase.Ready && current.phase !is VideoPhase.Failed || enabled == current.audioOnly) return
+        if (current.modeSaving || current.phase !is VideoPhase.Ready && current.phase !is VideoPhase.Failed ||
+            enabled == current.audioOnly && readMode == current.readMode) return
         val source = if (enabled) audioSource else current.qualities.firstOrNull {
             it.id == current.selectedQualityId
         }?.source
@@ -688,17 +731,19 @@ internal class VideoViewModel(
         // even when a paused Activity/service is closed while SQLite is committing it.
         graph.scope.launch {
             try {
-                graph.store.selectVideoAudioMode(itemId, enabled)
+                graph.store.selectVideoPresentation(itemId, enabled, readMode)
                 if (token != sessionGeneration || _state.value.item?.id != itemId) return@launch
                 val at = lastKnownPosition()
                 val resume = player.playWhenReady && _state.value.lookup == null
                 qualityGeneration++
                 activeQualitySwitch = null
-                _state.update { it.copy(phase = VideoPhase.Ready, audioOnly = enabled,
-                    item = it.item?.copy(audioOnly = enabled), toolsVisible = true, qualityChanging = false, modeSaving = false) }
-                player.pause()
-                preparePlayer(source, at, resume)
-                startTicker()
+                _state.update { it.copy(phase = VideoPhase.Ready, audioOnly = enabled, readMode = readMode,
+                    item = it.item?.copy(audioOnly = enabled, readMode = readMode), toolsVisible = !readMode, qualityChanging = false, modeSaving = false) }
+                if (enabled != current.audioOnly) {
+                    player.pause()
+                    preparePlayer(source, at, resume)
+                    startTicker()
+                }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {
                 graph.developerLog.recordFailure("video", "audio-preference", failure)
@@ -706,6 +751,8 @@ internal class VideoViewModel(
             }
         }
     }
+
+    fun dismissResumeSaveFailure() { _state.update { it.copy(resumeSaveFailed = false) } }
 
     fun dismissModeSaveFailure() { _state.update { it.copy(modeSaveFailed = false) } }
 
@@ -1368,7 +1415,7 @@ internal class VideoViewModel(
     fun onOrientation(landscape: Boolean) {
         if (lastLandscape == landscape) return
         lastLandscape = landscape
-        _state.update { it.copy(toolsVisible = landscape) }
+        _state.update { if (it.readMode) it else it.copy(toolsVisible = landscape) }
     }
 
     fun interact() {

@@ -18,7 +18,7 @@ internal class ExplanationParser(private val language: ExplanationLanguage = Exp
     private var key = ""
     private var needsValue = false
     private var ended = false
-    private val keys = setOf("term", "partOfSpeech", "ukIpa", "usIpa", "meaning", "context", "examples")
+    private val keys = setOf("term", "partOfSpeech", "ukIpa", "usIpa", "meaning", "context", "examples", "synonyms", "antonyms")
     private val exampleKeys = setOf("text", "translation")
 
     fun append(fragment: String): Explanation {
@@ -40,7 +40,7 @@ internal class ExplanationParser(private val language: ExplanationLanguage = Exp
         return answer
     }
 
-    private fun answer() = Explanation(fields["term"].orEmpty(), fields["partOfSpeech"].orEmpty(), fields["ukIpa"].orEmpty(), fields["usIpa"].orEmpty(), fields["meaning"].orEmpty(), fields["context"].orEmpty(), examples.toList())
+    private fun answer() = Explanation(fields["term"].orEmpty(), fields["partOfSpeech"].orEmpty(), fields["ukIpa"].orEmpty(), fields["usIpa"].orEmpty(), fields["meaning"].orEmpty(), fields["context"].orEmpty(), examples.toList(), fields["synonyms"].orEmpty(), fields["antonyms"].orEmpty())
 
     private fun whitespace() { while (position < text.length && text[position] in " \r\n\t") position++ }
     private fun string(): String? {
@@ -101,7 +101,11 @@ internal class ExplanationParser(private val language: ExplanationLanguage = Exp
                     requireResponse(character == '[') { "Expected an examples array." }
                     position++; needsValue = true; phase = 5
                 } else {
-                    fields[key] = string() ?: return
+                    val value = string() ?: return
+                    if (key == "synonyms" || key == "antonyms") {
+                        requireResponse(validExplanationRelation(value)) { "Expected a short, single-line word relation." }
+                    }
+                    fields[key] = value
                     phase = 4
                 }
                 4 -> when (character) {

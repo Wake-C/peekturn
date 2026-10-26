@@ -31,8 +31,8 @@ internal const val CONTEXT_WORD_LIMIT = 30
  * The cache key and persisted record gate use the same generation.
  */
 internal fun explanationPromptGeneration(language: ExplanationLanguage): String = when (language) {
-    ExplanationLanguage.English -> "explanation-prompt-v3"
-    ExplanationLanguage.Chinese -> "explanation-prompt-v2"
+    ExplanationLanguage.English -> "explanation-prompt-v4"
+    ExplanationLanguage.Chinese -> "explanation-prompt-v3"
 }
 
 private val contextWhitespace = Regex("[\\s\\p{Z}\\u0085]+")
@@ -118,6 +118,12 @@ class ExplanationClient(private val transport: ModelChatTransport = ModelChatTra
                 })
             })
         }
+        listOf("synonyms", "antonyms").forEach { name ->
+            properties.add(name, JsonObject().apply {
+                addProperty("type", "string")
+                addProperty("maxLength", EXPLANATION_RELATION_MAX_CHARACTERS)
+            })
+        }
         val schema = JsonObject().apply {
             addProperty("type", "object"); addProperty("additionalProperties", false); add("properties", properties)
             add("required", JsonArray().apply { properties.keySet().forEach { add(it) } })
@@ -145,7 +151,11 @@ class ExplanationClient(private val transport: ModelChatTransport = ModelChatTra
             examples 提供一到两个自然、完整、便于模仿的英文例句，表达同一个语境义。
             每个例句是包含 text 和 translation 的对象：text 必须是英文原句，
             translation 必须是对应的中文解释或译文，帮助理解整句；两项都不能为空。
-            不要翻译来源标题、小节标题或选中的英文 term。除无法确定的音标外，所有必填字符串都必须非空。
+            examples 之后输出 synonyms 和 antonyms，分别给出符合当前语境义和词性的英文近义词、反义词。
+            每项最多两个简短词或短语，用逗号分隔，只占一行，不加解释、换行或词头；不要把相关词当作近义词。
+            没有自然、准确的近义词或反义词时，对应字段用空字符串，不凑数，不编造对立关系。
+            不要翻译来源标题、小节标题、选中的英文 term 或这两个字段中的英文词。
+            除无法确定的音标、没有合适词的 synonyms 和 antonyms 外，所有必填字符串都必须非空。
         """.trimIndent()
         val policy =
             "Use elementary English for meaning and contextual explanation. Write meaning and context in English. Use " +
@@ -164,7 +174,12 @@ class ExplanationClient(private val transport: ModelChatTransport = ModelChatTra
             "Provide term, partOfSpeech, UK and US IPA (empty if unavailable), meaning, context explaining its use here, " +
             "and one or two complete examples. Start context directly with the explanation, without an introductory label " +
             "such as 'In this passage' or 'In the source'. Do not repeat the source passage; explain the selected word or phrase. " +
-            "Every required string must be nonempty, except unavailable IPA and an English example's translation, which must be empty. " +
+            "After examples, provide synonyms and antonyms for this exact contextual sense and part of speech. " +
+            "Each is one short line of at most two English words or phrases, comma-separated, without labels, explanations or line breaks. " +
+            "Use genuine alternatives or opposites, not merely related words. If there is no natural accurate match, use an empty string; " +
+            "do not invent an opposite for a phrase that has none. " +
+            "Every required string must be nonempty, except unavailable IPA, synonyms or antonyms with no suitable match, " +
+            "and an English example's translation, which must be empty. " +
             "Do not include reasoning, hidden thoughts, markdown or extra fields."
     }
 }

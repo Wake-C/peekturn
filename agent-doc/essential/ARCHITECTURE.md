@@ -23,6 +23,13 @@ Owners: [ReaderActivity](../../app/src/main/java/app/peekturn/reader/reader/Read
 
 Owners: [SystemSpeech](../../app/src/main/java/app/peekturn/reader/speech/SystemSpeech.kt), [SpeechDiagnosis](../../app/src/main/java/app/peekturn/reader/speech/SpeechDiagnosis.kt), [SystemSpeechRenderer](../../app/src/main/java/app/peekturn/reader/narration/SystemSpeechRenderer.kt), [NarrationBuffer](../../app/src/main/java/app/peekturn/reader/narration/NarrationBuffer.kt), [NarrationPlayback](../../app/src/main/java/app/peekturn/reader/narration/NarrationPlayback.kt).
 
+## YouTube source redirects
+
+- A working network and cached media fragments do not guarantee source resolution. Google/YouTube can redirect through a challenge route and issue an anonymous session cookie; discarding that cookie repeats the redirect until OkHttp's follow-up limit. Keep only server-issued cookies in the source client's bounded memory jar, respecting host/domain/path/secure flags and expiry. Never import browser/account cookies or persist/log cookie values.
+- Source resolution, Media3 READY, advancing playback and caption availability are separate checks. The opt-in Android `VideoPlaybackLiveTest` (`videoLiveId` instrumentation argument) exercises the real service/player and Read/Watch switching. A subtitle HTTP 429 does not imply that video preparation failed; a metadata-only pass does not establish playback.
+
+Owners: [YouTubeSource](../../app/src/main/java/app/peekturn/reader/video/YouTubeSource.kt), [VideoSessionCookies](../../app/src/main/java/app/peekturn/reader/video/VideoSessionCookies.kt).
+
 ## Media3 streaming cache
 
 - A custom cache key does not by itself keep a signed media URL off disk: `CacheDataSource` also writes the redirected URI into content metadata. Strip `ContentMetadata.KEY_REDIRECTED_URI` before committing cache metadata. Persist only opaque content identities, not temporary stream addresses.

@@ -66,6 +66,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
             } ?: return@withLock
             db.writableDatabase.delete("books", "id=?", arrayOf(id.toString()))
             if (lastBookId() == id) check(prefs.edit().remove("last_book").commit()) { "Could not clear last book" }
+            if (lastContent() == LastContent.Book(id)) clearLastContentPreference()
             for (path in listOfNotNull(book.filePath, book.coverPath)) {
                 val file = File(path).canonicalFile
                 if (file.path.startsWith(context.filesDir.canonicalPath + File.separator) && file.exists() && !file.delete()) {
@@ -91,12 +92,38 @@ class PeekturnStore internal constructor(private val context: Context, private v
         writes.withLock {
             val values = ContentValues().apply { put("last_read_at", System.currentTimeMillis()) }
             if (db.writableDatabase.update("books", values, "id=?", arrayOf(bookId.toString())) > 0) {
-                check(prefs.edit().putLong("last_book", bookId).commit()) { "Could not save last book" }
+                check(prefs.edit().putLong("last_book", bookId).putString("last_content_kind", "book")
+                    .putLong("last_content_id", bookId).commit()) { "Could not save last book" }
                 refreshBooks()
             }
         }
     }
     fun lastBookId(): Long? = prefs.getLong("last_book", -1L).takeIf { it >= 0 }
+
+    fun lastContent(): LastContent? {
+        val id = prefs.getLong("last_content_id", -1L)
+        return when (prefs.getString("last_content_kind", null)) {
+            "book" -> id.takeIf { it > 0 }?.let { LastContent.Book(it) }
+            "video" -> id.takeIf { it > 0 }?.let { LastContent.Video(it) }
+            null -> lastBookId()?.let { LastContent.Book(it) } // Existing installations retain EPUB resume.
+            else -> null
+        }
+    }
+
+    private fun clearLastContentPreference() {
+        check(prefs.edit().putString("last_content_kind", "none").remove("last_content_id").commit()) {
+            "Could not clear last content"
+        }
+    }
+
+    suspend fun clearLastContent(expected: LastContent) = withContext(Dispatchers.IO) {
+        writes.withLock {
+            if (lastContent() == expected) {
+                clearLastContentPreference()
+                if (expected is LastContent.Book) check(prefs.edit().remove("last_book").commit())
+            }
+        }
+    }
 
     fun builtinBookSeeded(): Boolean = prefs.getBoolean("builtin_the_prophet_seeded", false)
 
@@ -133,7 +160,10 @@ class PeekturnStore internal constructor(private val context: Context, private v
         }
     }
     suspend fun clearLastBook() = withContext(Dispatchers.IO) {
-        writes.withLock { check(prefs.edit().remove("last_book").commit()) { "Could not clear last book" } }
+        writes.withLock {
+            if (lastContent() is LastContent.Book) clearLastContentPreference()
+            check(prefs.edit().remove("last_book").commit()) { "Could not clear last book" }
+        }
     }
     suspend fun updateSettings(transform: (AppSettings) -> AppSettings) = withContext(Dispatchers.IO) {
         writes.withLock {
@@ -231,10 +261,15 @@ class PeekturnStore internal constructor(private val context: Context, private v
         }
     }
 
-    suspend fun markVideoOpened(id: Long) = withContext(Dispatchers.IO) {
+    suspend fun markVideoOpened(id: Long, remember: Boolean = true) = withContext(Dispatchers.IO) {
         writes.withLock {
             val values = ContentValues().apply { put("last_watched_at", System.currentTimeMillis()) }
-            if (db.writableDatabase.update("videos", values, "id=?", arrayOf(id.toString())) > 0) refreshVideos()
+            if (db.writableDatabase.update("videos", values, "id=?", arrayOf(id.toString())) > 0) {
+                if (remember) check(prefs.edit().putString("last_content_kind", "video").putLong("last_content_id", id).commit()) {
+                    "Could not save last video"
+                }
+                refreshVideos()
+            }
         }
     }
 
@@ -248,10 +283,16 @@ class PeekturnStore internal constructor(private val context: Context, private v
         }
     }
 
-    /** Removes the video and, by cascade, its daily time. The caption cache is cleared by the repository. */
-    suspend fun selectVideoAudioMode(id: Long, audioOnly: Boolean) = withContext(Dispatchers.IO) {
+    suspend fun selectVideoAudioMode(id: Long, audioOnly: Boolean) =
+        selectVideoPresentation(id, audioOnly, readMode = false)
+
+    suspend fun selectVideoPresentation(id: Long, audioOnly: Boolean, readMode: Boolean) = withContext(Dispatchers.IO) {
+        require(!readMode || audioOnly)
         writes.withLock {
-            val values = ContentValues().apply { put("audio_only", if (audioOnly) 1 else 0) }
+            val values = ContentValues().apply {
+                put("audio_only", if (audioOnly) 1 else 0)
+                put("read_mode", if (readMode) 1 else 0)
+            }
             check(db.writableDatabase.update("videos", values, "id=?", arrayOf(id.toString())) == 1) {
                 "Video playback preference was not saved"
             }
@@ -262,6 +303,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
     suspend fun deleteVideo(id: Long) = withContext(Dispatchers.IO) {
         writes.withLock {
             db.writableDatabase.delete("videos", "id=?", arrayOf(id.toString()))
+            if (lastContent() == LastContent.Video(id)) clearLastContentPreference()
             refreshVideos()
             refreshStats()
         }
@@ -502,7 +544,8 @@ class PeekturnStore internal constructor(private val context: Context, private v
         selectedTrackId = getColumnIndexOrThrow("selected_track_id")
             .let { if (isNull(it)) null else getString(it) },
         trackExplicit = getInt(getColumnIndexOrThrow("track_explicit")) != 0,
-        audioOnly = getColumnIndexOrThrow("audio_only").let { if (isNull(it)) null else getInt(it) != 0 }
+        audioOnly = getColumnIndexOrThrow("audio_only").let { if (isNull(it)) null else getInt(it) != 0 },
+        readMode = getInt(getColumnIndexOrThrow("read_mode")) != 0
     )
     private fun android.database.Cursor.book() = Book(
         id = getLong(getColumnIndexOrThrow("id")), title = getString(getColumnIndexOrThrow("title")),
@@ -510,7 +553,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
         coverPath = getString(getColumnIndexOrThrow("cover_path")), locatorJson = getString(getColumnIndexOrThrow("locator")),
         progression = getDouble(getColumnIndexOrThrow("progression")), lastReadAt = getLong(getColumnIndexOrThrow("last_read_at"))
     )
-    private class Database(context: Context) : SQLiteOpenHelper(context, "peekturn.db", null, 4) {
+    private class Database(context: Context) : SQLiteOpenHelper(context, "peekturn.db", null, 5) {
         override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE books(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,author TEXT NOT NULL,file_path TEXT NOT NULL,cover_path TEXT,locator TEXT,progression REAL NOT NULL DEFAULT 0,last_read_at INTEGER NOT NULL DEFAULT 0)")
@@ -518,15 +561,16 @@ class PeekturnStore internal constructor(private val context: Context, private v
             createVideoTables(db)
         }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            if (newVersion > 4) error("No migration from $oldVersion to $newVersion")
+            if (newVersion > 5) error("No migration from $oldVersion to $newVersion")
             if (oldVersion < 2) createVideoTables(db)
             else {
                 if (oldVersion < 3) db.execSQL("ALTER TABLE videos ADD COLUMN track_explicit INTEGER NOT NULL DEFAULT 0")
                 if (oldVersion < 4) db.execSQL("ALTER TABLE videos ADD COLUMN audio_only INTEGER")
+                if (oldVersion < 5) db.execSQL("ALTER TABLE videos ADD COLUMN read_mode INTEGER NOT NULL DEFAULT 0")
             }
         }
         private fun createVideoTables(db: SQLiteDatabase) {
-            db.execSQL("CREATE TABLE IF NOT EXISTS videos(id INTEGER PRIMARY KEY AUTOINCREMENT,video_id TEXT NOT NULL UNIQUE,title TEXT NOT NULL,author TEXT NOT NULL,duration_ms INTEGER NOT NULL DEFAULT 0,thumbnail_url TEXT,position_ms INTEGER NOT NULL DEFAULT 0,last_watched_at INTEGER NOT NULL DEFAULT 0,selected_track_id TEXT,track_explicit INTEGER NOT NULL DEFAULT 0,audio_only INTEGER)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS videos(id INTEGER PRIMARY KEY AUTOINCREMENT,video_id TEXT NOT NULL UNIQUE,title TEXT NOT NULL,author TEXT NOT NULL,duration_ms INTEGER NOT NULL DEFAULT 0,thumbnail_url TEXT,position_ms INTEGER NOT NULL DEFAULT 0,last_watched_at INTEGER NOT NULL DEFAULT 0,selected_track_id TEXT,track_explicit INTEGER NOT NULL DEFAULT 0,audio_only INTEGER,read_mode INTEGER NOT NULL DEFAULT 0)")
             db.execSQL("CREATE TABLE IF NOT EXISTS video_daily(video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,date TEXT NOT NULL,seconds INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(video_id,date))")
         }
     }

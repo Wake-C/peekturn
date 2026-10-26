@@ -6,8 +6,8 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ExplanationParserTest {
-    private val answer = """{"term":"turn down","partOfSpeech":"phrasal verb","ukIpa":"","usIpa":"","meaning":"Refuse an offer.","context":"Here the person refuses.","examples":[{"text":"She turned down the offer.","translation":""},{"text":"He turned it down.","translation":""}]}"""
-    private val chineseAnswer = """{"term":"turn down","partOfSpeech":"phrasal verb","ukIpa":"/tɜːn daʊn/","usIpa":"/tɝːn daʊn/","meaning":"拒绝","context":"这里表示拒绝某个提议。","examples":[{"text":"She turned down the offer.","translation":"她拒绝了那个提议。"},{"text":"He turned it down.","translation":"他拒绝了它。"}]}"""
+    private val answer = """{"term":"turn down","partOfSpeech":"phrasal verb","ukIpa":"","usIpa":"","meaning":"Refuse an offer.","context":"Here the person refuses.","synonyms":"refuse, reject","antonyms":"accept","examples":[{"text":"She turned down the offer.","translation":""},{"text":"He turned it down.","translation":""}]}"""
+    private val chineseAnswer = """{"term":"turn down","partOfSpeech":"phrasal verb","ukIpa":"/tɜːn daʊn/","usIpa":"/tɝːn daʊn/","meaning":"拒绝","context":"这里表示拒绝某个提议。","synonyms":"refuse, reject","antonyms":"accept","examples":[{"text":"She turned down the offer.","translation":"她拒绝了那个提议。"},{"text":"He turned it down.","translation":"他拒绝了它。"}]}"""
 
     @Test fun clipsOnlyAvailableContextAtThirtyWords() {
         val words = (1..45).map { "word$it" }
@@ -34,6 +34,29 @@ class ExplanationParserTest {
             if (index < answer.indexOf("turn down\"") + "turn down".length) assertEquals("", partial.term)
         }
         assertEquals(completedExamples, parser.finish().examples)
+    }
+
+    @Test fun relationsStreamOnlyWhenClosedAndRemainInTheFinishedAnswer() {
+        val input = answer.replace("\"synonyms\":\"refuse, reject\",\"antonyms\":\"accept\",", "")
+            .dropLast(1) + ",\"synonyms\":\"refuse, reject\",\"antonyms\":\"accept\"}"
+        val parser = ExplanationParser()
+        input.forEach { character ->
+            val partial = parser.append(character.toString())
+            assertTrue(partial.synonyms in listOf("", "refuse, reject"))
+            assertTrue(partial.antonyms in listOf("", "accept"))
+        }
+        assertEquals("refuse, reject", parser.finish().synonyms)
+        assertEquals("accept", parser.finish().antonyms)
+    }
+
+    @Test fun emptyRelationsAreHonestButMissingOrMultilineRelationsAreInvalid() {
+        val empty = answer.replace("refuse, reject", "").replace("\"antonyms\":\"accept\"", "\"antonyms\":\"\"")
+        assertEquals("", ExplanationParser().apply { append(empty) }.finish().antonyms)
+        for (invalid in listOf(
+            answer.replace("\"synonyms\":\"refuse, reject\",", ""),
+            answer.replace("refuse, reject", "refuse\\nreject"),
+            answer.replace("refuse, reject", "x".repeat(EXPLANATION_RELATION_MAX_CHARACTERS + 1))
+        )) assertThrows(ExplanationFailure::class.java) { ExplanationParser().apply { append(invalid) }.finish() }
     }
 
     @Test fun handlesEscapedQuotesAndUnicodeAcrossChunks() {

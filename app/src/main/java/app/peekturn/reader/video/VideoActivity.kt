@@ -18,6 +18,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.core.view.WindowCompat
@@ -30,6 +31,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import app.peekturn.reader.AppLanguage
 import app.peekturn.reader.MainActivity
 import app.peekturn.reader.PeekturnApp
+import app.peekturn.reader.reader.readerSystemBars
 import app.peekturn.reader.ui.PeekturnTheme
 import app.peekturn.reader.ui.isDarkTheme
 import app.peekturn.reader.ui.peekturnColorScheme
@@ -60,7 +62,7 @@ class VideoActivity : AppCompatActivity() {
                 finish()
                 return
             }
-            if (id != null || url != null) vm.start(id, url)
+            if (id != null || url != null) vm.start(id, url, autoPlay = !intent.getBooleanExtra(EXTRA_RESUME_ON_LAUNCH, false))
             if (resumed) vm.onForeground()
             showSession()
         }
@@ -80,21 +82,31 @@ class VideoActivity : AppCompatActivity() {
         bound = bindService(service.setAction(VideoPlaybackService.ACTION_LOCAL), connection, Context.BIND_AUTO_CREATE)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (isLandscape()) exitFullscreen() else leaveVideo()
+                val state = if (::vm.isInitialized) vm.state.value else null
+                when {
+                    state?.readMode == true && state.toolsVisible -> vm.hideTools()
+                    isLandscape() && state?.readMode != true -> exitFullscreen()
+                    else -> leaveVideo()
+                }
             }
         })
     }
 
     private fun showSession() {
+        val initialReadMode = vm.state.value.readMode
         setContent {
             val settings by graph.store.settings.collectAsStateWithLifecycle()
+            val readMode by remember(vm) { vm.state.map { it.readMode }.distinctUntilChanged() }
+                .collectAsStateWithLifecycle(initialValue = initialReadMode)
             LaunchedEffect(settings.uiLanguage) { AppLanguage.apply(this@VideoActivity, settings.uiLanguage) }
             DisposableEffect(settings.appTheme) {
                 applyAppTheme(settings.appTheme)
                 applySystemBars(isLandscape())
                 onDispose { }
             }
-            LaunchedEffect(LocalConfiguration.current.orientation) { applySystemBars(isLandscape()) }
+            LaunchedEffect(LocalConfiguration.current.orientation, readMode, settings.reading.immersive) {
+                applySystemBars(isLandscape())
+            }
             PeekturnTheme(theme = settings.appTheme) {
                 VideoScreen(
                     vm = vm,
@@ -131,7 +143,7 @@ class VideoActivity : AppCompatActivity() {
         setIntent(intent)
         openedFromShare = videoUrl(intent) != null
         if (::vm.isInitialized && (videoId(intent) != null || videoUrl(intent) != null)) {
-            vm.start(videoId(intent), videoUrl(intent))
+            vm.start(videoId(intent), videoUrl(intent), autoPlay = !intent.getBooleanExtra(EXTRA_RESUME_ON_LAUNCH, false))
         }
     }
 
@@ -200,7 +212,16 @@ class VideoActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        if (landscape) {
+        if (::vm.isInitialized && vm.state.value.readMode) {
+            val settings = graph.store.settings.value
+            val bars = readerSystemBars(settings.reading, settings.appTheme)
+            controller.isAppearanceLightStatusBars = bars.darkIcons
+            controller.isAppearanceLightNavigationBars = bars.darkIcons
+            if (bars.statusVisible) controller.show(WindowInsetsCompat.Type.statusBars())
+            else controller.hide(WindowInsetsCompat.Type.statusBars())
+            if (bars.navigationVisible) controller.show(WindowInsetsCompat.Type.navigationBars())
+            else controller.hide(WindowInsetsCompat.Type.navigationBars())
+        } else if (landscape) {
             controller.isAppearanceLightStatusBars = false
             controller.isAppearanceLightNavigationBars = false
             controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -213,12 +234,14 @@ class VideoActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val EXTRA_RESUME_ON_LAUNCH = "resume_on_launch"
         private const val EXTRA_VIDEO_ID = "video_id"
         private const val EXTRA_VIDEO_URL = "video_url"
 
-        fun intent(context: Context, id: Long): Intent =
+        fun intent(context: Context, id: Long, resumeOnLaunch: Boolean = false): Intent =
             Intent(context, VideoActivity::class.java)
                 .putExtra(EXTRA_VIDEO_ID, id)
+                .putExtra(EXTRA_RESUME_ON_LAUNCH, resumeOnLaunch)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
 
         fun importIntent(context: Context, url: String): Intent =

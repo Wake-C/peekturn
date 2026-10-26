@@ -19,8 +19,8 @@ import java.util.concurrent.TimeUnit
 
 class ExplanationClientTest {
     private lateinit var server: MockWebServer
-    private val payload = """{"term":"hello","partOfSpeech":"interjection","ukIpa":"","usIpa":"","meaning":"A greeting.","context":"Used to greet someone.","examples":[{"text":"Hello, how are you?","translation":""}]}"""
-    private val bilingualPayload = """{"term":"turn down","partOfSpeech":"phrasal verb","ukIpa":"/tɜːn daʊn/","usIpa":"/tɝːn daʊn/","meaning":"拒绝","context":"这里表示拒绝某个提议。","examples":[{"text":"She turned down the offer.","translation":"她拒绝了那个提议。"}]}"""
+    private val payload = """{"term":"hello","partOfSpeech":"interjection","ukIpa":"","usIpa":"","meaning":"A greeting.","context":"Used to greet someone.","synonyms":"hi","antonyms":"goodbye","examples":[{"text":"Hello, how are you?","translation":""}]}"""
+    private val bilingualPayload = """{"term":"turn down","partOfSpeech":"phrasal verb","ukIpa":"/tɜːn daʊn/","usIpa":"/tɝːn daʊn/","meaning":"拒绝","context":"这里表示拒绝某个提议。","synonyms":"refuse, reject","antonyms":"accept","examples":[{"text":"She turned down the offer.","translation":"她拒绝了那个提议。"}]}"""
     @Before fun setup() { server = MockWebServer(); server.start() }
     @After fun teardown() { server.shutdown() }
     private fun config() = ModelConfig(endpoint = server.url("/v1").toString(), model = "configured-model", apiKey = "test-key")
@@ -37,6 +37,8 @@ class ExplanationClientTest {
         val events = ExplanationClient().explain(config(), LookupContext("hello", before = (1..40).joinToString(" ") { "before$it" }), ExplanationLanguage.English).toList()
         assertTrue(events.first() is ExplanationEvent.Content)
         assertEquals("hello", (events.last() as ExplanationEvent.Complete).answer.term)
+        assertEquals("hi", (events.last() as ExplanationEvent.Complete).answer.synonyms)
+        assertEquals("goodbye", (events.last() as ExplanationEvent.Complete).answer.antonyms)
         assertFalse(events.toString().contains("private thoughts"))
         val request = server.takeRequest()
         assertEquals("/v1/chat/completions", request.path)
@@ -61,6 +63,10 @@ class ExplanationClientTest {
         assertEquals(lookup.selection, passage["selection"].asString)
 
         val schema = JsonParser.parseString(system.substringAfter("Required JSON schema: ")).asJsonObject
+        val required = schema.getAsJsonArray("required").map { it.asString }
+        assertTrue(required.containsAll(listOf("synonyms", "antonyms")))
+        assertEquals("string", schema.getAsJsonObject("properties").getAsJsonObject("synonyms")["type"].asString)
+        assertEquals("string", schema.getAsJsonObject("properties").getAsJsonObject("antonyms")["type"].asString)
         val exampleItems = schema.getAsJsonObject("properties").getAsJsonObject("examples").getAsJsonObject("items")
         assertEquals("object", exampleItems["type"].asString)
         assertFalse(exampleItems["additionalProperties"].asBoolean)

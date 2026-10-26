@@ -117,6 +117,43 @@ class PeekturnStoreVideoTest {
         assertEquals(true, PeekturnStore(context).findVideo(1)!!.audioOnly)
     }
 
+    @Test fun versionFourAddsReadModeWithoutChangingAudioIntentOrPosition() = runBlocking {
+        createVersionOneDatabase()
+        SQLiteDatabase.openDatabase(context.getDatabasePath("peekturn.db").path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("CREATE TABLE videos(id INTEGER PRIMARY KEY AUTOINCREMENT,video_id TEXT NOT NULL UNIQUE,title TEXT NOT NULL,author TEXT NOT NULL,duration_ms INTEGER NOT NULL DEFAULT 0,thumbnail_url TEXT,position_ms INTEGER NOT NULL DEFAULT 0,last_watched_at INTEGER NOT NULL DEFAULT 0,selected_track_id TEXT,track_explicit INTEGER NOT NULL DEFAULT 0,audio_only INTEGER)")
+            db.execSQL("CREATE TABLE video_daily(video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,date TEXT NOT NULL,seconds INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(video_id,date))")
+            db.execSQL("INSERT INTO videos(video_id,title,author,position_ms,selected_track_id,track_explicit,audio_only) VALUES('kept','Kept','Channel',12345,'en',1,1)")
+            db.execSQL("INSERT INTO video_daily VALUES(1,'2026-10-25',42)")
+            db.version = 4
+        }
+        val upgraded = PeekturnStore(context)
+        upgraded.load()
+        val kept = upgraded.findVideo(1)!!
+        assertFalse(kept.readMode)
+        assertEquals(true, kept.audioOnly)
+        assertEquals(12_345L, kept.positionMs)
+        assertEquals("en", kept.selectedTrackId)
+        assertTrue(kept.trackExplicit)
+        assertEquals(42L, upgraded.stats.value.videos.single().seconds)
+        assertEquals("v1 locator", upgraded.findBook(1)!!.locatorJson)
+        upgraded.selectVideoPresentation(1, audioOnly = true, readMode = true)
+        assertTrue(PeekturnStore(context).findVideo(1)!!.readMode)
+        upgraded.selectVideoAudioMode(1, false)
+        assertFalse(PeekturnStore(context).findVideo(1)!!.readMode)
+    }
+
+    @Test fun readModeIsPerVideoAndSurvivesMetadataRefresh() = runBlocking {
+        val reading = video("reading")
+        val watching = video("watching")
+        store.selectVideoPresentation(reading.id, audioOnly = true, readMode = true)
+        store.saveVideoPosition(reading.id, 19_000)
+        val refreshed = store.upsertVideo(VideoMetadata("reading", "Updated title", "Channel", 60_000, null))
+        assertTrue(refreshed.readMode)
+        assertEquals(true, refreshed.audioOnly)
+        assertEquals(19_000L, refreshed.positionMs)
+        assertFalse(PeekturnStore(context).findVideo(watching.id)!!.readMode)
+    }
+
     @Test fun upsertingVideoKeepsPositionWatchTimeAndChosenTrack() = runBlocking {
         val first = video("video-one", title = "Original title", durationMs = 60_000)
         store.saveVideoPosition(first.id, 12_500)

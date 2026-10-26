@@ -12,7 +12,8 @@ data class VideoItem(val id: Long, val videoId: String, val title: String, val a
     val lastWatchedAt: Long = 0, val selectedTrackId: String? = null,
     val trackExplicit: Boolean = false,
     /** Null inherits the legacy app default; explicit choices belong to this video. */
-    val audioOnly: Boolean? = null)
+    val audioOnly: Boolean? = null,
+    val readMode: Boolean = false)
 
 /** Resolved URLs are session-only and must never be persisted or logged. */
 data class CaptionTrack(val id: String, val language: String, val automatic: Boolean, val url: String,

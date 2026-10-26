@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import app.peekturn.reader.data.LastContent
 import app.peekturn.reader.model.AppSettings
 import app.peekturn.reader.model.Book
 import app.peekturn.reader.reader.BuiltinBook
@@ -20,6 +21,7 @@ internal data class MainState(
     val busy: Boolean = false,
     val message: String? = null,
     val pendingBookId: Long? = null,
+    val pendingVideoId: Long? = null,
     val tab: Int = 0
 )
 
@@ -44,16 +46,27 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
                 }
                 _state.update { it.copy(ready = true) }
                 if (reopen && _state.value.tab == 0) {
-                    val id = graph.store.lastBookId()
-                    if (id != null) {
-                        val book = graph.store.findBook(id)
-                        if (book != null && File(book.filePath).isFile) {
-                            _state.update { if (it.tab == 0) it.copy(pendingBookId = book.id) else it }
+                    when (val last = graph.store.lastContent()) {
+                        is LastContent.Book -> {
+                            val book = graph.store.findBook(last.id)
+                            if (book != null && File(book.filePath).isFile) {
+                                _state.update { if (it.tab == 0) it.copy(pendingBookId = book.id) else it }
+                            } else {
+                                graph.store.clearLastContent(last)
+                                message("Your last book is no longer available. Choose another book from the library.")
+                            }
                         }
-                        else {
-                            graph.store.clearLastBook()
-                            message("Your last book is no longer available. Choose another book from the library.")
+                        is LastContent.Video -> {
+                            val video = graph.store.findVideo(last.id)
+                            if (video != null) {
+                                _state.update { if (it.tab == 0) it.copy(pendingVideoId = video.id, tab = 1) else it }
+                            } else {
+                                graph.store.clearLastContent(last)
+                                _state.update { if (it.tab == 0) it.copy(tab = 1) else it }
+                                message("Your last video is no longer available. Choose another video.")
+                            }
                         }
+                        null -> Unit
                     }
                 }
                 graph.store.error.value?.let {
@@ -97,8 +110,9 @@ internal class MainViewModel(val graph: AppGraph) : ViewModel() {
     }
     fun open(book: Book) { _state.update { it.copy(pendingBookId = book.id) } }
     fun consumeOpen(id: Long) { _state.update { if (it.pendingBookId == id) it.copy(pendingBookId = null) else it } }
-    fun tab(index: Int) { _state.update { it.copy(tab = index) } }
-    fun showVideos() { _state.update { it.copy(tab = 1, pendingBookId = null) } }
+    fun consumeVideoOpen(id: Long) { _state.update { if (it.pendingVideoId == id) it.copy(pendingVideoId = null) else it } }
+    fun tab(index: Int) { _state.update { it.copy(tab = index, pendingBookId = null, pendingVideoId = null) } }
+    fun showVideos() { _state.update { it.copy(tab = 1, pendingBookId = null, pendingVideoId = null) } }
     fun message(value: String) { _state.update { it.copy(message = value) } }
     fun clearMessage() { _state.update { it.copy(message = null) } }
     fun delete(book: Book) {

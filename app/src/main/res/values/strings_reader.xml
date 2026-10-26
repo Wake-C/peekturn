@@ -76,4 +76,7 @@
     <string name="speech_report_copied">Copied</string>
     <string name="speech_report_clip_label">Speech details</string>
     <string name="reader_position_pages">%1$d / %2$d</string>
+    <string name="reader_lookup_synonyms">Synonyms: %1$s</string>
+    <string name="reader_lookup_antonyms">Antonyms: %1$s</string>
+    <string name="reader_lookup_no_relation">None in this context</string>
 </resources>

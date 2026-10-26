@@ -79,6 +79,53 @@ class PortraitToolsTest {
         compose.onNodeWithContentDescription(description(R.string.video_ui_hide_controls)).assertDoesNotExist()
     }
 
+    @Test fun readingToolsHaveNoClockOrSeekAndFollowStaysLeftOfCenteredTransport() {
+        var follows = 0
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
+                PeekturnTheme(theme = "dark") {
+                    Box(Modifier.width(320.dp)) {
+                        PortraitTools(fixture.copy(readMode = true, audioOnly = true), {}, {}, {}, {}, {},
+                            Modifier.testTag("tools"), following = false, onFollow = { follows++ })
+                    }
+                }
+            }
+        }
+        compose.onNode(hasProgressBarRangeInfo()).assertDoesNotExist()
+        compose.onNodeWithText("00:40").assertDoesNotExist()
+        compose.onNodeWithText("02:00").assertDoesNotExist()
+        val panel = compose.onNodeWithTag("tools").fetchSemanticsNode().boundsInRoot
+        val follow = compose.onNodeWithText(description(R.string.video_ui_follow)).fetchSemanticsNode().boundsInRoot
+        val previous = compose.onNodeWithContentDescription(description(R.string.video_ui_previous_subtitle)).fetchSemanticsNode().boundsInRoot
+        val play = compose.onNodeWithContentDescription(description(R.string.video_ui_play)).fetchSemanticsNode().boundsInRoot
+        assertEquals(panel.center.x, play.center.x, 1f)
+        assertTrue("follow=$follow previous=$previous", follow.right <= previous.left)
+        compose.onNodeWithText(description(R.string.video_ui_follow)).performClick()
+        compose.runOnIdle { assertEquals(1, follows) }
+    }
+
+    @Test fun readingParagraphIsTextWithoutTimestampAndWordLookupDoesNotSeek() {
+        var selected: CaptionSelection? = null
+        val cue = CaptionCue(1, 24_000, 48_000, "A remarkable story.")
+        compose.setContent {
+            PeekturnTheme(theme = "dark") {
+                Box(Modifier.width(320.dp)) {
+                    VideoReadingParagraph(cue = cue, current = true, onLookup = { selected = it })
+                }
+            }
+        }
+        compose.onNodeWithText(cue.text).assertIsDisplayed()
+        compose.onNodeWithText("00:24", substring = true).assertDoesNotExist()
+        compose.onNodeWithText(description(R.string.video_ui_captions)).assertDoesNotExist()
+        // The first glyph is inside the first word, exercising the existing caption selection path.
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        compose.onNodeWithText(cue.text).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val wordPoint = layouts.single().getBoundingBox(0).center
+        compose.onNodeWithText(cue.text).performTouchInput { click(wordPoint) }
+        compose.runOnIdle { assertNotNull(selected) }
+    }
+
     @Test fun roundThumbIsCentredOnTheThinTrackAndClocks() {
         var pixelsPerDp = 1f
         compose.setContent {

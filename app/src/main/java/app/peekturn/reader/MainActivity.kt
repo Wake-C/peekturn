@@ -68,7 +68,8 @@ class MainActivity : AppCompatActivity() {
                             else WebImportActivity.intent(this, url))
                     },
                     onOpen = { id -> startActivity(ReaderActivity.intent(this, id)) },
-                    onOpenVideo = { id -> startActivity(VideoActivity.intent(this, id)) }
+                    onOpenVideo = { id -> startActivity(VideoActivity.intent(this, id)) },
+                    onResumeVideo = { id -> startActivity(VideoActivity.intent(this, id, resumeOnLaunch = true)) }
                 )
             }
         }
@@ -106,7 +107,8 @@ private fun PeekturnHome(
     onImportFile: () -> Unit,
     onImportUrl: (String) -> Unit,
     onOpen: (Long) -> Unit,
-    onOpenVideo: (Long) -> Unit
+    onOpenVideo: (Long) -> Unit,
+    onResumeVideo: (Long) -> Unit
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val books by vm.graph.store.books.collectAsStateWithLifecycle()
@@ -126,6 +128,13 @@ private fun PeekturnHome(
         if (id != null && lifecycle.isAtLeast(Lifecycle.State.RESUMED)) {
             vm.consumeOpen(id)
             onOpen(id)
+        }
+    }
+    LaunchedEffect(state.pendingVideoId, lifecycle) {
+        val id = state.pendingVideoId
+        if (id != null && lifecycle.isAtLeast(Lifecycle.State.RESUMED)) {
+            vm.consumeVideoOpen(id)
+            onResumeVideo(id)
         }
     }
     LaunchedEffect(state.message) {

@@ -195,7 +195,7 @@ class VideoRepository internal constructor(
             ?.let { id -> tracks.firstOrNull { it.id == id } } ?: preferredTrack(tracks)
 
     private suspend fun opened(item: VideoItem): VideoItem = try {
-        store.markVideoOpened(item.id)
+        store.markVideoOpened(item.id, remember = false)
         store.findVideo(item.id) ?: item
     } catch (cancelled: CancellationException) {
         throw cancelled

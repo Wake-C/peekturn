@@ -76,4 +76,7 @@
     <string name="speech_report_copied">已复制</string>
     <string name="speech_report_clip_label">语音详情</string>
     <string name="reader_position_pages">%1$d / %2$d</string>
+    <string name="reader_lookup_synonyms">近义词：%1$s</string>
+    <string name="reader_lookup_antonyms">反义词：%1$s</string>
+    <string name="reader_lookup_no_relation">此语境下无合适词</string>
 </resources>

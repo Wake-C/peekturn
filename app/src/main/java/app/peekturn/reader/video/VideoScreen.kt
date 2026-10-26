@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.FullscreenExit
+import androidx.compose.material.icons.outlined.OndemandVideo
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
@@ -40,10 +41,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
@@ -52,6 +55,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
@@ -62,12 +66,19 @@ import app.peekturn.reader.R
 import app.peekturn.reader.learning.LearningPopup
 import app.peekturn.reader.learning.LearningPopupPlacement
 import app.peekturn.reader.model.AppSettings
+import app.peekturn.reader.model.ReaderPreferences
+import app.peekturn.reader.reader.ReaderTypographySheet
+import app.peekturn.reader.reader.ReaderTextMetrics
+import app.peekturn.reader.reader.readerTextMetrics
+import app.peekturn.reader.reader.rememberReaderFontFamily
+import app.peekturn.reader.ui.SettingsDisclosure
 import app.peekturn.reader.reader.readerTransportPrevious
 import app.peekturn.reader.reader.readerTransportNext
 import app.peekturn.reader.reader.readerTransportPlay
 import app.peekturn.reader.reader.readerTransportPause
 import app.peekturn.reader.speech.PronunciationPlayer
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.launch
 
 private val VideoScrim = Color.Black.copy(alpha = 0.68f)
 private val CaptionScrim = Color.Black.copy(alpha = 0.66f)
@@ -76,6 +87,7 @@ private val LandscapeFooterHeight = 64.dp
 private val CaptionControlsGap = 8.dp
 // Two 48dp touch rows; the system navigation inset is added separately.
 internal val PortraitToolsHeight = 96.dp
+internal val ReadingToolsHeight = 56.dp
 
 /**
  * A's native surface. The picture, the scrolling caption column and the bottom tools are three
@@ -98,6 +110,11 @@ internal fun VideoScreen(
     val snackbar = remember { SnackbarHostState() }
     val notice = state.cacheNotice
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    var appearanceOpen by rememberSaveable { mutableStateOf(false) }
+    var savingAppearance by remember { mutableStateOf(false) }
+    var appearanceSaveFailed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val appearanceFailure = stringResource(R.string.video_ui_appearance_save_failed)
     val text = notice?.let { stringResource(it.messageResource()) }
     LaunchedEffect(notice, text, settingsOpen) {
         if (text != null && (notice != VideoCacheNotice.Failed || !settingsOpen)) {
@@ -106,6 +123,13 @@ internal fun VideoScreen(
         }
     }
 
+    val resumeFailureText = stringResource(R.string.video_ui_resume_save_failed)
+    LaunchedEffect(state.resumeSaveFailed) {
+        if (state.resumeSaveFailed) {
+            snackbar.showSnackbar(resumeFailureText)
+            vm.dismissResumeSaveFailure()
+        }
+    }
     val modeFailureText = stringResource(R.string.video_ui_audio_save_failed)
     LaunchedEffect(state.modeSaveFailed, settingsOpen) {
         if (state.modeSaveFailed && !settingsOpen) {
@@ -127,6 +151,7 @@ internal fun VideoScreen(
         } else {
             PortraitPlayer(
                 state = state,
+                reading = settings.reading,
                 player = vm.player,
                 vm = vm,
                 onBack = onBack,
@@ -146,7 +171,28 @@ internal fun VideoScreen(
         VideoSettingsSheet(
             state = state,
             vm = vm,
-            onDismiss = { settingsOpen = false }
+            onDismiss = { settingsOpen = false },
+            onReadingAppearance = if (state.readMode) ({ settingsOpen = false; appearanceSaveFailed = false; appearanceOpen = true }) else null
+        )
+    }
+    if (appearanceOpen) {
+        ReaderTypographySheet(
+            settings = settings,
+            saving = savingAppearance,
+            saveError = if (appearanceSaveFailed) appearanceFailure else null,
+            onApply = { reading, theme ->
+                if (!savingAppearance) {
+                    savingAppearance = true
+                    appearanceSaveFailed = false
+                    scope.launch {
+                        try {
+                            if (vm.saveReadingAppearance(reading, theme)) appearanceOpen = false
+                            else appearanceSaveFailed = true
+                        } finally { savingAppearance = false }
+                    }
+                }
+            },
+            onDismiss = { if (!savingAppearance) appearanceOpen = false }
         )
     }
 
@@ -175,12 +221,15 @@ internal fun VideoScreen(
 @Composable
 private fun PortraitPlayer(
     state: VideoPlaybackState,
+    reading: ReaderPreferences,
     player: Player,
     vm: VideoViewModel,
     onBack: () -> Unit,
     onSettings: () -> Unit,
     onFullscreen: () -> Unit
 ) {
+    var follow by rememberSaveable(state.item?.id) { mutableStateOf(true) }
+    var followRequest by rememberSaveable(state.item?.id) { mutableIntStateOf(0) }
     Box(Modifier.fillMaxSize()) {
         when (val phase = state.phase) {
             VideoPhase.Idle, VideoPhase.Loading -> {
@@ -209,34 +258,47 @@ private fun PortraitPlayer(
                     configuration.screenWidthDp.dp / state.aspectRatio.coerceAtLeast(0.2f),
                     (configuration.screenHeightDp * 0.45f).dp
                 )
-                Column(Modifier.fillMaxSize()) {
+                val topBar: @Composable (Boolean) -> Unit = { applyInsets ->
                     VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true,
                         hasItem = state.item != null, landscape = false,
-                        trailingIcon = Icons.Outlined.Fullscreen,
-                        trailingDescription = stringResource(R.string.video_ui_fullscreen),
-                        onTrailing = onFullscreen)
-                    if (!state.audioOnly) {
-                        Box(Modifier.fillMaxWidth().height(videoHeight).background(Color.Black)) {
-                            PlayerSurface(player, Modifier.matchParentSize())
-                            PictureTapLayer(vm, Modifier.matchParentSize())
-                        }
-                    }
-                    CaptionPanel(
-                        state = state,
-                        vm = vm,
-                        modifier = Modifier.weight(1f).fillMaxWidth()
-                    )
+                        trailingIcon = if (state.readMode) Icons.Outlined.OndemandVideo else Icons.Outlined.Fullscreen,
+                        trailingDescription = stringResource(if (state.readMode) R.string.video_ui_watch_video else R.string.video_ui_fullscreen),
+                        onTrailing = if (state.readMode) { { vm.setReadMode(false) } } else onFullscreen,
+                        trailingEnabled = !state.modeSaving, applySystemInsets = applyInsets)
                 }
-                if (state.toolsVisible || state.audioOnly) {
-                    PortraitTools(
-                        state = state,
-                        onSeek = vm::seekTo,
-                        onPrevious = vm::previousCue,
-                        onTogglePlay = vm::togglePlay,
-                        onNext = vm::nextCue,
-                        onSpeed = vm::setSpeed,
-                        modifier = Modifier.align(Alignment.BottomCenter)
+                val captions: @Composable (Modifier) -> Unit = { modifier ->
+                    CaptionPanel(state, reading, vm, follow, followRequest,
+                        onManualScroll = { follow = false }, modifier = modifier)
+                }
+                val transport: @Composable (Boolean) -> Unit = { applyInsets ->
+                    PortraitTools(state, vm::seekTo, vm::previousCue, vm::togglePlay, vm::nextCue, vm::setSpeed,
+                        following = follow, onFollow = { follow = true; followRequest++ },
+                        applyNavigationInsets = applyInsets)
+                }
+                if (state.readMode) {
+                    VideoReadingLayout(
+                        immersive = reading.immersive,
+                        toolsVisible = state.toolsVisible,
+                        onToggleTools = vm::toggleTools,
+                        content = { captions(Modifier.fillMaxSize()) },
+                        topBar = { topBar(false) },
+                        expandedTransport = { transport(false) },
+                        compactTransport = { VideoCompactTransport(state, vm::previousCue, vm::togglePlay, vm::nextCue) }
                     )
+                } else {
+                    Column(Modifier.fillMaxSize()) {
+                        topBar(true)
+                        if (!state.audioOnly) {
+                            Box(Modifier.fillMaxWidth().height(videoHeight).background(Color.Black)) {
+                                PlayerSurface(player, Modifier.matchParentSize())
+                                PictureTapLayer(vm, Modifier.matchParentSize())
+                            }
+                        }
+                        captions(Modifier.weight(1f).fillMaxWidth())
+                    }
+                    if (state.toolsVisible || state.audioOnly) {
+                        Box(Modifier.align(Alignment.BottomCenter)) { transport(true) }
+                    }
                 }
             }
         }
@@ -286,7 +348,7 @@ private fun LandscapePlayer(
 }
 
 @Composable
-private fun VideoTopBar(
+internal fun VideoTopBar(
     title: String,
     onBack: () -> Unit,
     onSettings: () -> Unit,
@@ -295,14 +357,16 @@ private fun VideoTopBar(
     landscape: Boolean,
     trailingIcon: ImageVector,
     trailingDescription: String,
-    onTrailing: () -> Unit
+    onTrailing: () -> Unit,
+    trailingEnabled: Boolean = true,
+    applySystemInsets: Boolean = true
 ) {
     if (!controlsVisible) return
     val foreground = if (landscape) Color.White else MaterialTheme.colorScheme.onSurface
     val container = if (landscape) VideoScrim else MaterialTheme.colorScheme.surface
     Column(
         Modifier.fillMaxWidth()
-            .then(if (landscape) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)) else Modifier.statusBarsPadding())
+            .then(if (landscape) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)) else if (applySystemInsets) Modifier.statusBarsPadding() else Modifier)
             .background(container)
     ) {
         Row(
@@ -327,7 +391,7 @@ private fun VideoTopBar(
                     contentDescription = stringResource(R.string.video_ui_settings),
                     tint = if (hasItem) foreground else foreground.copy(alpha = 0.38f))
             }
-            IconButton(onClick = onTrailing, modifier = Modifier.size(48.dp)) {
+            IconButton(onClick = onTrailing, enabled = trailingEnabled, modifier = Modifier.size(48.dp)) {
                 Icon(trailingIcon, contentDescription = trailingDescription, tint = foreground)
             }
         }
@@ -504,7 +568,10 @@ internal fun PortraitTools(
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
     onSpeed: (Float) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    following: Boolean = true,
+    onFollow: () -> Unit = {},
+    applyNavigationInsets: Boolean = true
 ) {
     Surface(
         modifier.fillMaxWidth(),
@@ -514,9 +581,10 @@ internal fun PortraitTools(
         shadowElevation = 0.dp
     ) {
         Column(
-            Modifier.fillMaxWidth().navigationBarsPadding().height(PortraitToolsHeight).padding(horizontal = 12.dp)
+            Modifier.fillMaxWidth().then(if (applyNavigationInsets) Modifier.navigationBarsPadding() else Modifier)
+                .height(if (state.readMode) ReadingToolsHeight else PortraitToolsHeight).padding(horizontal = 12.dp)
         ) {
-            Row(
+            if (!state.readMode) Row(
                 Modifier.fillMaxWidth().height(48.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -526,7 +594,17 @@ internal fun PortraitTools(
                 CompactClock(if (state.durationMs > 0L) formatClock(state.durationMs) else "--:--")
             }
             // Absolute centring keeps the transport still when the speed label changes width.
-            Box(Modifier.fillMaxWidth().height(48.dp)) {
+            Box(Modifier.fillMaxWidth().height(if (state.readMode) ReadingToolsHeight else 48.dp)) {
+                TextButton(
+                    onClick = onFollow,
+                    enabled = state.displayedCues.isNotEmpty(),
+                    contentPadding = PaddingValues(horizontal = 2.dp),
+                    modifier = Modifier.align(Alignment.CenterStart).widthIn(min = 48.dp)
+                ) {
+                    Text(stringResource(R.string.video_ui_follow),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (following) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
                     CueButton(
                         readerTransportPrevious,
@@ -547,6 +625,22 @@ internal fun PortraitTools(
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun VideoCompactTransport(
+    state: VideoPlaybackState,
+    onPrevious: () -> Unit,
+    onTogglePlay: () -> Unit,
+    onNext: () -> Unit
+) {
+    Row(Modifier.padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        CueButton(readerTransportPrevious, stringResource(R.string.video_ui_previous_subtitle),
+            enabled = previousCueIndex(state.displayedCues, state.positionMs) != null, onClick = onPrevious)
+        PlayButton(state, onTogglePlay, size = 48.dp)
+        CueButton(readerTransportNext, stringResource(R.string.video_ui_next_subtitle),
+            enabled = nextCueIndex(state.displayedCues, state.positionMs) != null, onClick = onNext)
     }
 }
 
@@ -774,28 +868,36 @@ private fun PlayButton(state: VideoPlaybackState, onTogglePlay: () -> Unit, size
 @Composable
 private fun CaptionPanel(
     state: VideoPlaybackState,
+    reading: ReaderPreferences,
     vm: VideoViewModel,
+    follow: Boolean,
+    followRequest: Int,
+    onManualScroll: () -> Unit,
     modifier: Modifier
 ) {
     val cues = state.displayedCues
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val metrics = readerTextMetrics(reading, configuration.screenWidthDp.toFloat())
+    val readingFamily = rememberReaderFontFamily(reading.fontFamily)
+    val paragraphGap = with(density) { metrics.paragraphGapSp.sp.toDp() }
+    val maximumTextWidth = with(density) { metrics.maximumWidthSp.sp.toDp() }
     val listState = rememberLazyListState()
     val viewportHeight by remember { derivedStateOf { listState.layoutInfo.viewportSize.height } }
-    var follow by rememberSaveable { mutableStateOf(true) }
-    var followRequest by remember { mutableIntStateOf(0) }
     val dragging by listState.interactionSource.collectIsDraggedAsState()
     val activeIndex = activeCueIndex(cues, state.positionMs)
     // Gaps have no highlighted cue, but a seek still brings the nearby transcript into view.
     val followIndex = activeIndex ?: navigationCueIndex(cues, state.positionMs)
         ?: 0.takeIf { cues.isNotEmpty() }
-    val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    LaunchedEffect(dragging) { if (dragging) follow = false }
-    LaunchedEffect(followIndex, follow, followRequest, state.selectedTrackId, cues.size, viewportHeight) {
+    val navigationBottom = if (state.readMode) 0.dp else WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    LaunchedEffect(dragging) { if (dragging) onManualScroll() }
+    LaunchedEffect(followIndex, follow, followRequest, state.selectedTrackId, cues.size, viewportHeight, state.readMode) {
         if (!follow || dragging || followIndex == null) return@LaunchedEffect
         val offset = (viewportHeight * 0.26f).toInt().coerceAtLeast(0)
         listState.animateScrollToItem(followIndex, scrollOffset = -offset)
     }
     Column(modifier) {
-        Row(
+        if (!state.readMode) Row(
             Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -806,22 +908,18 @@ private fun CaptionPanel(
             )
             Spacer(Modifier.weight(1f))
             TextButton(
-                onClick = {
-                    follow = true
-                    vm.interact()
-                    followRequest++
-                },
-                enabled = cues.isNotEmpty(),
+                onClick = { vm.setReadMode(true) },
+                enabled = cues.isNotEmpty() && state.audioAvailable && !state.modeSaving,
                 modifier = Modifier.heightIn(min = 48.dp)
             ) {
                 Text(
-                    stringResource(R.string.video_ui_follow),
+                    stringResource(R.string.video_ui_read),
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (follow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        if (!state.readMode) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         when {
             state.captionStatus == VideoCaptionStatus.Loading -> CaptionNotice(
                 text = stringResource(R.string.video_ui_caption_loading),
@@ -851,18 +949,29 @@ private fun CaptionPanel(
             )
             else -> LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier.weight(1f)
+                    .then(if (state.readMode) Modifier.widthIn(max = maximumTextWidth).align(Alignment.CenterHorizontally) else Modifier)
+                    .fillMaxWidth(),
                 contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 8.dp,
-                    bottom = PortraitToolsHeight + CaptionControlsGap + navigationBottom
-                )
+                    start = if (state.readMode) metrics.sidePaddingDp.dp else 16.dp,
+                    end = if (state.readMode) metrics.sidePaddingDp.dp else 16.dp,
+                    top = if (state.readMode) metrics.topPaddingDp.dp else 8.dp,
+                    bottom = if (state.readMode) metrics.bottomPaddingDp.dp + navigationBottom
+                        else PortraitToolsHeight + CaptionControlsGap + navigationBottom
+                ),
+                verticalArrangement = Arrangement.spacedBy(if (state.readMode) paragraphGap else 0.dp)
             ) {
                 itemsIndexed(cues, key = { _, cue -> cue.id }) { index, cue ->
                     val current = index == activeIndex
                     val selection = state.lookup?.takeIf { it.cueId == cue.id }?.selection
-                    Row(
+                    if (state.readMode) {
+                        VideoReadingParagraph(
+                            cue = cue, selected = selection, current = current,
+                            onLookup = { vm.openLookup(cue.id, it) },
+                            preferences = reading, fontFamily = readingFamily, metrics = metrics,
+                            onBlankTap = vm::toggleTools
+                        )
+                    } else Row(
                         Modifier.fillMaxWidth()
                             .padding(horizontal = 4.dp, vertical = 2.dp)
                             .background(
@@ -999,6 +1108,35 @@ private fun LandscapeCaptions(state: VideoPlaybackState, vm: VideoViewModel) {
  * consumes the selection so a lookup can never also seek or toggle the player chrome.
  */
 @Composable
+internal fun VideoReadingParagraph(
+    cue: CaptionCue,
+    selected: CaptionSelection? = null,
+    current: Boolean,
+    onLookup: (CaptionSelection) -> Unit,
+    preferences: ReaderPreferences = ReaderPreferences(),
+    fontFamily: FontFamily = rememberReaderFontFamily(preferences.fontFamily),
+    metrics: ReaderTextMetrics = readerTextMetrics(preferences, LocalConfiguration.current.screenWidthDp.toFloat()),
+    onBlankTap: (() -> Unit)? = null
+) {
+    val flowing = remember(cue.text) { VideoReadingText.from(cue.text) }
+    val displayCue = remember(cue, flowing) { cue.copy(text = flowing.text) }
+    CaptionText(
+        cue = displayCue,
+        selected = flowing.toDisplay(selected),
+        highlight = MaterialTheme.colorScheme.primaryContainer,
+        color = MaterialTheme.colorScheme.onBackground,
+        fontFamily = fontFamily,
+        fontSize = metrics.fontSizeSp.sp,
+        lineHeight = metrics.lineHeightSp.sp,
+        letterSpacing = metrics.letterSpacingEm.em,
+        activeBackground = if (current) MaterialTheme.colorScheme.surfaceVariant else Color.Unspecified,
+        modifier = Modifier.fillMaxWidth(),
+        onLookup = { flowing.toSource(it)?.let(onLookup) },
+        onBlankTap = onBlankTap
+    )
+}
+
+@Composable
 private fun CaptionText(
     cue: CaptionCue,
     selected: CaptionSelection?,
@@ -1006,7 +1144,10 @@ private fun CaptionText(
     /** Explicit, because a bare Box does not carry Material's LocalContentColor. */
     color: Color,
     fontSize: TextUnit = 15.sp,
+    fontFamily: FontFamily? = null,
     lineHeight: TextUnit = 23.sp,
+    letterSpacing: TextUnit = TextUnit.Unspecified,
+    activeBackground: Color = Color.Unspecified,
     maxLines: Int = Int.MAX_VALUE,
     modifier: Modifier = Modifier,
     onLookup: (CaptionSelection) -> Unit,
@@ -1015,9 +1156,12 @@ private fun CaptionText(
     var layout by remember(cue.id) { mutableStateOf<TextLayoutResult?>(null) }
     var dragging by remember(cue.id) { mutableStateOf<CaptionSelection?>(null) }
     val shown = dragging ?: selected
-    val text = remember(cue.text, shown, highlight) {
+    val text = remember(cue.text, shown, highlight, activeBackground) {
         buildAnnotatedString {
             append(cue.text)
+            if (activeBackground != Color.Unspecified && cue.text.isNotEmpty()) {
+                addStyle(SpanStyle(background = activeBackground), 0, cue.text.length)
+            }
             if (shown != null && shown.start in 0..shown.end && shown.end <= cue.text.length) {
                 addStyle(SpanStyle(background = highlight), shown.start, shown.end)
             }
@@ -1033,6 +1177,7 @@ private fun CaptionText(
                 var longPressed = false
                 var moved = false
                 var released = false
+                var releasedChange: androidx.compose.ui.input.pointer.PointerInputChange? = null
                 var selection: CaptionSelection? = null
                 val deadline = down.uptimeMillis + viewConfiguration.longPressTimeoutMillis
                 while (true) {
@@ -1051,6 +1196,7 @@ private fun CaptionText(
                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
                     if (!change.pressed) {
                         released = true
+                        releasedChange = change
                         break
                     }
                     if (!longPressed && (change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
@@ -1066,7 +1212,7 @@ private fun CaptionText(
                 }
                 dragging = null
                 when {
-                    longPressed -> selection?.let(onLookup)
+                    longPressed -> selection?.let { releasedChange?.consume(); onLookup(it) }
                     released && !moved -> {
                         val candidate = wordSelectionAt(
                             cue.text,
@@ -1078,14 +1224,22 @@ private fun CaptionText(
                             (selection.start until selection.end).map { layoutResult.getBoundingBox(it) }
                         }.orEmpty()
                         val word = wordHit(candidate, glyphs, down.position)
-                        if (word != null) onLookup(word) else onBlankTap?.invoke()
+                        if (word != null) {
+                            releasedChange?.consume()
+                            onLookup(word)
+                        } else if (onBlankTap != null) {
+                            releasedChange?.consume()
+                            onBlankTap()
+                        }
                     }
                 }
             }
         },
         color = color,
         fontSize = fontSize,
+        fontFamily = fontFamily,
         lineHeight = lineHeight,
+        letterSpacing = letterSpacing,
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
         onTextLayout = { layout = it }
@@ -1097,7 +1251,8 @@ private fun CaptionText(
 private fun VideoSettingsSheet(
     state: VideoPlaybackState,
     vm: VideoViewModel,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onReadingAppearance: (() -> Unit)? = null
 ) {
     var confirmClearAll by remember { mutableStateOf(false) }
     var tracksExpanded by remember { mutableStateOf(false) }
@@ -1116,6 +1271,11 @@ private fun VideoSettingsSheet(
                 .padding(bottom = 24.dp)
         ) {
             Text(stringResource(R.string.video_ui_settings), style = MaterialTheme.typography.titleLarge)
+            if (onReadingAppearance != null) {
+                SettingsDisclosure(stringResource(R.string.reader_typography_title),
+                    stringResource(R.string.video_ui_shared_reading_appearance), onClick = onReadingAppearance)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {

@@ -46,7 +46,9 @@ class ExplanationCacheTest {
         usIpa = "bæŋk",
         meaning = "The land alongside a river.",
         context = "The river's edge in this sentence.",
-        examples = listOf(ExplanationExample("The bank was muddy.", ""))
+        examples = listOf(ExplanationExample("The bank was muddy.", "")),
+        synonyms = "riverside, riverbank",
+        antonyms = ""
     )
 
     @Before fun setUp() {
@@ -154,6 +156,21 @@ class ExplanationCacheTest {
         val fresh = answer.copy(meaning = "Land beside a river.")
         assertNotNull(cache.put(request, fresh, cache.epoch()))
         assertEquals(fresh, cache().get(request, cache.epoch())?.answer)
+    }
+
+    @Test fun missingRelationFieldsCannotBeReusedAsAnEmptyRelation() = runTest {
+        val cache = cache()
+        assertNotNull(cache.put(request(), answer, cache.epoch()))
+        val file = directory.listFiles()!!.single { it.name.endsWith(".json") }
+        val legacy = JsonParser.parseString(file.readText()).asJsonObject
+        legacy.getAsJsonObject("answer").remove("synonyms")
+        legacy.getAsJsonObject("answer").remove("antonyms")
+        file.writeText(legacy.toString())
+        assertNull(cache.get(request(), cache.epoch()))
+        assertNotNull(cache.put(request(), answer, cache.epoch()))
+        val restored = cache().get(request(), cache.epoch())!!.answer
+        assertEquals("riverside, riverbank", restored.synonyms)
+        assertEquals("", restored.antonyms)
     }
 
     @Test fun previousChinesePromptGenerationCannotBeReused() = runTest {

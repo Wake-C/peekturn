@@ -164,6 +164,102 @@ class MainViewModelTest {
         assertEquals("The next page is waiting.", graph.speech.state.value.text)
     }
 
+    @Test fun latestVideoWinsOverBookAndResumesOnlyOnce() = runBlocking {
+        addLastBook()
+        val video = graph.store.upsertVideo(app.peekturn.reader.video.VideoMetadata("resume-video", "Video", "Author", 90_000, null))
+        graph.store.saveVideoPosition(video.id, 42_000)
+        graph.store.selectVideoPresentation(video.id, audioOnly = true, readMode = true)
+        graph.store.markVideoOpened(video.id)
+        val vm = viewModel("video resume")
+        initialize(vm, reopen = true)
+        assertNull(vm.state.value.pendingBookId)
+        assertEquals(video.id, vm.state.value.pendingVideoId)
+        assertEquals(1, vm.state.value.tab)
+        assertEquals(42_000L, graph.store.findVideo(video.id)!!.positionMs)
+        assertTrue(graph.store.findVideo(video.id)!!.readMode)
+        vm.consumeVideoOpen(video.id)
+        initialize(vm, reopen = true)
+        assertNull(vm.state.value.pendingVideoId)
+    }
+
+    @Test fun bookOpenedAfterVideoWinsEvenWhenBackgroundVideoSavesPosition() = runBlocking {
+        val video = graph.store.upsertVideo(app.peekturn.reader.video.VideoMetadata("background-video", "Video", "Author", 90_000, null))
+        graph.store.markVideoOpened(video.id)
+        val book = addLastBook()
+        graph.store.saveVideoPosition(video.id, 28_000)
+        graph.store.markVideoOpened(video.id, remember = false)
+        val vm = viewModel("book wins")
+        initialize(vm, reopen = true)
+        assertEquals(book.id, vm.state.value.pendingBookId)
+        assertNull(vm.state.value.pendingVideoId)
+    }
+
+    @Test fun deletingLastVideoDoesNotFallBackToStaleBook() = runBlocking {
+        addLastBook()
+        val video = graph.store.upsertVideo(app.peekturn.reader.video.VideoMetadata("deleted-video", "Video", "Author", 90_000, null))
+        graph.store.markVideoOpened(video.id)
+        graph.store.deleteVideo(video.id)
+        val vm = viewModel("deleted video")
+        initialize(vm, reopen = true)
+        assertNull(vm.state.value.pendingBookId)
+        assertNull(vm.state.value.pendingVideoId)
+    }
+
+    @Test fun explicitVideoListAndRecreatedHomeDoNotReopenVideo() = runBlocking {
+        val video = graph.store.upsertVideo(app.peekturn.reader.video.VideoMetadata("explicit-video", "Video", "Author", 90_000, null))
+        graph.store.markVideoOpened(video.id)
+        val vm = viewModel("video list")
+        vm.showVideos()
+        initialize(vm, reopen = true)
+        assertNull(vm.state.value.pendingVideoId)
+        val restored = viewModel("restored home")
+        initialize(restored, reopen = false)
+        assertNull(restored.state.value.pendingVideoId)
+    }
+
+    @Test fun missingVideoTargetClearsOnceAndDoesNotReviveBook() = runBlocking {
+        addLastBook()
+        context.getSharedPreferences("peekturn", Context.MODE_PRIVATE).edit()
+            .putString("last_content_kind", "video").putLong("last_content_id", 9999).commit()
+        val vm = viewModel("missing video")
+        initialize(vm, reopen = true)
+        assertEquals(1, vm.state.value.tab)
+        assertNull(vm.state.value.pendingBookId)
+        assertNull(vm.state.value.pendingVideoId)
+        assertNotNull(vm.state.value.message)
+        val next = viewModel("after missing video")
+        initialize(next, reopen = true)
+        assertNull(next.state.value.pendingBookId)
+        assertNull(next.state.value.pendingVideoId)
+        assertNull(next.state.value.message)
+    }
+
+    @Test fun startupVideoIntentIsPausedButExplicitVideoIntentKeepsNormalPlayback() {
+        assertTrue(app.peekturn.reader.video.VideoActivity.intent(context, 1, resumeOnLaunch = true)
+            .getBooleanExtra("resume_on_launch", false))
+        assertFalse(app.peekturn.reader.video.VideoActivity.intent(context, 1)
+            .getBooleanExtra("resume_on_launch", true))
+    }
+
+    @Test fun readerFailureClearsTypedBookResumeButNeverAYoungerVideo() = runBlocking {
+        addLastBook()
+        graph.store.clearLastBook()
+        assertNull(graph.store.lastContent())
+        val video = graph.store.upsertVideo(app.peekturn.reader.video.VideoMetadata("reader-failure", "Video", "Author", 90_000, null))
+        graph.store.markVideoOpened(video.id)
+        graph.store.clearLastBook()
+        assertEquals(app.peekturn.reader.data.LastContent.Video(video.id), graph.store.lastContent())
+    }
+
+    @Test fun legacyLastBookPreferenceStillReopens() = runBlocking {
+        val book = addLastBook()
+        context.getSharedPreferences("peekturn", Context.MODE_PRIVATE).edit()
+            .remove("last_content_kind").remove("last_content_id").commit()
+        val vm = viewModel("legacy resume")
+        initialize(vm, reopen = true)
+        assertEquals(book.id, vm.state.value.pendingBookId)
+    }
+
     private fun viewModel(key: String) = MainViewModel(graph).also { viewModels.put(key, it) }
 
     private suspend fun initialize(vm: MainViewModel, reopen: Boolean) {

@@ -34,11 +34,11 @@ internal const val EXPLANATION_CACHE_BYTES = 1L * 1024 * 1024 * 1024
 internal const val EXPLANATION_CACHE_MAX_ENTRY_BYTES = 512L * 1024
 
 /** The persisted record layout. Bump when the record fields change. */
-internal const val EXPLANATION_CACHE_FORMAT = "explanation-cache-v1"
+internal const val EXPLANATION_CACHE_FORMAT = "explanation-cache-v2"
 
 private val explanationCacheKeyPattern = Regex("[0-9a-f]{64}")
 private val recordKeys = setOf("format", "prompt", "completedAt", "language", "answer")
-private val answerKeys = setOf("term", "partOfSpeech", "ukIpa", "usIpa", "meaning", "context", "examples")
+private val answerKeys = setOf("term", "partOfSpeech", "ukIpa", "usIpa", "meaning", "context", "examples", "synonyms", "antonyms")
 private val exampleKeys = setOf("text", "translation")
 
 /**
@@ -260,6 +260,8 @@ internal class ExplanationCache(
             addProperty("meaning", answer.meaning)
             addProperty("context", answer.context)
             add("examples", examples)
+            addProperty("synonyms", answer.synonyms)
+            addProperty("antonyms", answer.antonyms)
         }
         return JsonObject().apply {
             addProperty("format", EXPLANATION_CACHE_FORMAT)
@@ -303,7 +305,9 @@ internal class ExplanationCache(
                 translation = example.string("translation") ?: return null
             )
         }
-        val answer = Explanation(term, partOfSpeech, ukIpa, usIpa, meaning, context, examples)
+        val synonyms = answerJson.string("synonyms") ?: return null
+        val antonyms = answerJson.string("antonyms") ?: return null
+        val answer = Explanation(term, partOfSpeech, ukIpa, usIpa, meaning, context, examples, synonyms, antonyms)
             .validated(request.language) ?: return null
         return CachedExplanation(answer, completedAt)
     }

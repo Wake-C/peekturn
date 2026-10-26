@@ -151,7 +151,9 @@ data class Explanation(
     val usIpa: String = "",
     val meaning: String = "",
     val context: String = "",
-    val examples: List<ExplanationExample> = emptyList()
+    val examples: List<ExplanationExample> = emptyList(),
+    val synonyms: String = "",
+    val antonyms: String = ""
 )
 
 data class DictionaryEntry(val word: String, val phonetic: String, val partOfSpeech: String, val meaning: String)

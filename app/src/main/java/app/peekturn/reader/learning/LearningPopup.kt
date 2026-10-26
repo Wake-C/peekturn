@@ -56,6 +56,60 @@ import kotlin.math.roundToInt
  */
 enum class LearningPopupPlacement { Bottom, Center }
 
+/** Text determines height. Compact rows plus the divider gap keep 48dp speech hit targets apart. */
+@Composable
+internal fun ExplanationExampleRow(
+    example: ExplanationExample,
+    language: ExplanationLanguage,
+    playing: Boolean,
+    onSpeech: () -> Unit
+) {
+    val lines = example.displayLines(language)
+    val translated = lines.size > 1
+    val actionSize = if (translated) 48.dp else 44.dp
+    var singleLine by remember(example.text, language) { mutableStateOf(false) }
+    val centerShortLine = !translated && singleLine
+    Row(Modifier.fillMaxWidth(), verticalAlignment = if (centerShortLine) Alignment.CenterVertically else Alignment.Top) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            lines.forEachIndexed { index, line ->
+                Text(line, fontSize = if (index == 0) 14.sp else 13.sp,
+                    lineHeight = if (index == 0) 20.sp else 18.sp,
+                    onTextLayout = { if (index == 0) singleLine = it.lineCount == 1 },
+                    color = if (index == 0) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        // Keep the icon on the first text line, rather than centering it in a tall translation.
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides actionSize) {
+            IconButton(onClick = onSpeech, modifier = Modifier.width(48.dp).height(actionSize)) {
+                Box(Modifier.fillMaxSize(), contentAlignment = if (centerShortLine) Alignment.Center else Alignment.TopCenter) {
+                    Icon(if (playing) Icons.Outlined.Stop else Icons.AutoMirrored.Outlined.VolumeUp,
+                        contentDescription = stringResource(if (playing) R.string.reader_lookup_stop_pronouncing else R.string.reader_lookup_pronounce),
+                        modifier = Modifier.size(20.dp),
+                        tint = if (playing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+/** Two compact lines after examples; a partial stream must not claim that a relation is absent. */
+@Composable
+internal fun ExplanationRelations(answer: Explanation, complete: Boolean) {
+    if (answer.synonyms.isBlank() && answer.antonyms.isBlank() && !complete) return
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        if (answer.synonyms.isNotBlank() || complete) Text(
+            stringResource(R.string.reader_lookup_synonyms,
+                answer.synonyms.ifBlank { stringResource(R.string.reader_lookup_no_relation) }),
+            fontSize = 13.sp, lineHeight = 19.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (answer.antonyms.isNotBlank() || complete) Text(
+            stringResource(R.string.reader_lookup_antonyms,
+                answer.antonyms.ifBlank { stringResource(R.string.reader_lookup_no_relation) }),
+            fontSize = 13.sp, lineHeight = 19.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
 /**
  * Native ink-and-paper answer; content and lookup ownership are unchanged. The caller decides the
  * placement and whether adjusting the source selection is a meaningful action at all.
@@ -271,28 +325,16 @@ fun LearningPopup(
                                     fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold,
                                     letterSpacing = 0.2.sp, color = MaterialTheme.colorScheme.primary)
                                 answer.examples.forEachIndexed { exampleIndex, example ->
-                                    // Both examples share one trailing icon column, and each speaker
-                                    // stays on its own first line: a wrapped example can no longer
-                                    // push its glyph into the middle of the text block.
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            example.displayLines(language).forEachIndexed { index, line ->
-                                                Text(line,
-                                                    fontSize = if (index == 0) 14.sp else 13.sp,
-                                                    lineHeight = if (index == 0) 20.sp else 18.sp,
-                                                    color = if (index == 0) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant)
-                                            }
-                                        }
-                                        // Speech always reads the English sentence, never its translation.
-                                        SpeakButton(example.spokenText, speech, playback.text, playback.playing, firstLine = true) {
-                                            speech.speakExample(example.spokenText, accent, sentenceProvider)
-                                        }
+                                    val active = playback.playing && playback.text == example.spokenText
+                                    ExplanationExampleRow(example, language, active) {
+                                        if (active) speech.stop()
+                                        else speech.speakExample(example.spokenText, accent, sentenceProvider)
                                     }
                                     if (exampleIndex < answer.examples.lastIndex) {
-                                        HorizontalDivider(Modifier.padding(vertical = 2.dp),
-                                            color = MaterialTheme.colorScheme.outlineVariant)
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                     }
                                 }
+                                ExplanationRelations(answer, explanation.complete)
                             }
                         }
                         if (loading) Row(verticalAlignment = Alignment.CenterVertically,
@@ -396,12 +438,12 @@ internal fun LookupSpeechFailure(playback: SpeechState, onDismiss: () -> Unit) {
 @Composable
 private fun SpeakButton(
     text: String, speech: PronunciationPlayer, playingText: String, playing: Boolean,
-    firstLine: Boolean = false, onSpeak: () -> Unit
+    onSpeak: () -> Unit
 ) {
     val active = playing && playingText == text
     IconButton(onClick = { if (active) speech.stop() else onSpeak() }, modifier = Modifier.size(48.dp)) {
         Box(Modifier.fillMaxSize(),
-            contentAlignment = if (firstLine) Alignment.TopCenter else Alignment.Center) {
+            contentAlignment = Alignment.Center) {
             Icon(if (active) Icons.Outlined.Stop else Icons.AutoMirrored.Outlined.VolumeUp,
                 contentDescription = stringResource(if (active) R.string.reader_lookup_stop_pronouncing else R.string.reader_lookup_pronounce),
                 modifier = Modifier.size(20.dp),

@@ -42,6 +42,10 @@
 
     <!-- 字幕 -->
     <string name="video_ui_cached_captions_notice">视频暂时无法播放，以下是已保存的字幕。</string>
+    <string name="video_ui_resume_save_failed">未能记住此视频，下次启动时无法恢复。请重新打开视频重试。</string>
+    <string name="video_ui_shared_reading_appearance">与图书共用</string>
+    <string name="video_ui_appearance_save_failed">未能保存阅读样式，请重试。</string>
+    <string name="video_ui_read">阅读</string>
     <string name="video_ui_captions">字幕</string>
     <string name="video_ui_follow">跟随</string>
     <string name="video_ui_follow_description">跟随当前字幕</string>

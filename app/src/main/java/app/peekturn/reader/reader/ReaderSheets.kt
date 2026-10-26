@@ -2,7 +2,6 @@
 
 package app.peekturn.reader.reader
 
-import android.graphics.Typeface
 import android.text.format.Formatter
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -25,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.Role
@@ -51,7 +49,9 @@ private val readerSheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.
 @Composable internal fun ReaderTypographySheet(
     settings: AppSettings,
     onApply: (ReaderPreferences, String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    saving: Boolean = false,
+    saveError: String? = null
 ) {
     var draft by remember(settings.reading) { mutableStateOf(settings.reading) }
     var draftTheme by remember(settings.appTheme) { mutableStateOf(settings.appTheme) }
@@ -61,7 +61,7 @@ private val readerSheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.
     var choosingFont by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!saving) onDismiss() },
         sheetState = sheetState,
         shape = readerSheetShape,
         containerColor = MaterialTheme.colorScheme.surface
@@ -90,13 +90,16 @@ private val readerSheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.
                 }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (saveError != null) Text(saveError,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+                TextButton(onClick = onDismiss, enabled = !saving, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.reader_typography_cancel))
                 }
                 Spacer(Modifier.weight(1f))
-                Button(onClick = { onApply(draft, draftTheme) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Button(onClick = { onApply(draft, draftTheme) }, enabled = !saving, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.reader_typography_apply))
                 }
             }
@@ -134,19 +137,7 @@ private val readerSheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.
     modifier: Modifier,
     onClick: () -> Unit
 ) {
-    val assets = LocalContext.current.assets
-    val previewFamily = remember(assets, font.id) {
-        if (font.faces.isEmpty()) {
-            FontFamily.Default
-        } else {
-            val face = font.faces.first()
-            val builder = Typeface.Builder(assets, face.path).setWeight(400)
-            if (face.weights.first != face.weights.last) {
-                builder.setFontVariationSettings("'wght' 400")
-            }
-            FontFamily(builder.build())
-        }
-    }
+    val previewFamily = rememberReaderFontFamily(font.id)
     Row(modifier.heightIn(min = 64.dp)
         .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
         .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
