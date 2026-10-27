@@ -49,4 +49,5 @@ enum class VideoFailureKind {
 class VideoFailure(val kind: VideoFailureKind, cause: Throwable? = null) : Exception(kind.name, cause)
 
 data class VideoSessionData(val item: VideoItem, val resolved: ResolvedVideo,
-    val captions: CaptionDocument?, val captionFailure: VideoFailureKind? = null)
+    val captions: CaptionDocument?, val captionFailure: VideoFailureKind? = null,
+    val watchFallbackFailure: VideoFailureKind? = null)

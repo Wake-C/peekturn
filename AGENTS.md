@@ -1,51 +1,56 @@
 # Peekturn
 
-An Android English-learning reader for books and YouTube videos. Help should be brief, useful and easy to leave; the book or video remains the main experience.
+## Purpose
 
-## Engineering taste
+An Android app for people who know some English and want to enjoy books, articles and videos that still feel difficult. Connect unfamiliar words with their meaning in context, pronunciation and the scenes where they occur.
 
-- Readium owns the book layout and navigation. Preserve the original EPUB and its reading position; no custom paginator or flattened chapter text.
-- Small policy functions, thin controllers, quiet surfaces. Parsing and persistence belong below the UI. One rule has one owner.
-- Prefer the platform and existing modules over another framework or abstraction. Keep orchestration explicit and local.
-- Show real books, real provider answers and real reading activity. Honest empty and failure states are better than invented content.
-- Credentials and reading content stay private. Support logs explain what failed without exposing keys, passages, provider answers or private paths.
+Help people stay with content they care about and finish more of it. Reading, listening and watching remain the main experience; learning tools support them.
+
+## UX taste
+
+- Keep help close at hand, brief and easy to dismiss.
+- Protect continuity. Looking up a word, opening controls or changing presentation should preserve the user's place and playback intent.
+- Trust familiar reading and playback habits. Do not explain or duplicate actions the interface already makes clear.
+- Keep frequent actions within reach; place occasional choices and technical details outside the main experience.
+- Make shared actions, reading preferences and controls consistent across books and videos.
+- Keep normal operation quiet. Show honest empty states and clear, recoverable failures.
+
+## UI taste
+
+- Calm, polished and reader-like, not a technical dashboard.
+- Use typography, spacing and alignment to establish hierarchy before adding borders, cards or decoration.
+- Keep controls compact but comfortable to touch. Minimal does not mean cramped, obscure or low-contrast.
+- Use familiar icons where their meaning is clear, with accessible labels. Keep visible labels where they help.
+- Prefer a few meaningful choices and direct previews over fine-grained adjustment.
+- Extend the existing visual language. New features should feel like part of the same app.
+
+## Code preferences
+
+- Prefer mature, widely used, actively maintained libraries and platform APIs over building common capabilities from scratch. Check fit, license, maintenance and integration cost.
+- Use intended APIs and extension points rather than rebuilding library internals. Readium owns EPUB layout and navigation; preserve the original publication and its locators.
+- Reuse existing project solutions before adding dependencies or abstractions. Keep custom code small and specific to Peekturn.
+- Give each rule one owner. Keep policy, parsing and persistence below the UI, with explicit, local orchestration.
+- Do not add complexity for hypothetical needs. Explain material tradeoffs before expanding scope.
+
+## Validation
+
+- Add or update the smallest useful regression tests for changed behavior and its callers. Run targeted tests; reserve full suites for cross-cutting changes or requested release gates, not packaging alone.
+- Verify behavior changes end to end through real screens and controls in the installed signed production app. Repeat the affected journey and relevant reopen, background and offline transitions.
+- Use real content and services when the behavior depends on them. Mocks, controller calls and successful builds do not replace user-level acceptance.
+- Inspect device screenshots for UI consistency, readability, spacing and touch targets. Verify audible behavior when changing speech or playback.
+- After substantial features or refactors, build and verify a signed production APK using the existing release key. Report its path, version, installation result and checks performed.
+- Report passed, failed and unavailable checks separately. A skipped or blocked check is not a pass. Documentation-only changes need document checks, not an app build.
+
+## Working boundaries
+
+- Read the affected code and tests before changing behavior. Preserve unrelated work in a dirty worktree.
+- Keep credentials and reading content private, including in logs and test artifacts. Never clear user data or uninstall the app to bypass a test or installation failure.
+- Commit, push, tag and publish only on explicit request. A version-tag push can publish automatically.
 - VibeReading is a separate product, not a source of code or assets.
+- Update this guide only when intent, design principles or working standards change. Keep implementation detail beside code and history in Git; do not append task diaries or feature inventories. README files are for users.
 
-## Where things live
+## Read when relevant
 
-Application wiring is in `PeekturnApp.kt`; feature packages under `app/src/main/java/app/peekturn/reader/` are named for their work: `reader`, `video`, `learning`, `speech`, `narration`, `webimport`, `data`, `ui` and `diagnostics`. Tests mirror those packages. The implementation and its inline comments explain the behavior.
-
-- [Integration constraints](agent-doc/essential/ARCHITECTURE.md): Readium, WebView and system-speech traps that are expensive to rediscover.
-- [Delivery](agent-doc/essential/DELIVERY.md): building, signing, installing and publishing.
-- [Terms](CONTEXT.md) and [third-party notices](THIRD_PARTY_NOTICES.md): vocabulary and provenance, not feature specifications.
-
-## Evidence and context
-
-A behavior change needs an Android smoke check and the smallest useful target tests for the affected behavior and callers. Video opening/source/mode changes also need an explicit real-target run of `VideoPlaybackLiveTest` with instrumentation argument `videoLiveId`: it must reach Media3 READY, an advancing playback clock and Read/Watch switching. A skipped live test, metadata-only resolution or a network failure is not playback acceptance; report it as blocked, not as a verified release. For intermittent buffering, use the opt-in `VideoPlaybackContinuityLiveTest` (`videoContinuityId`, `continuityMode`, `continuityHeight`, `continuityStartMs`, `continuitySeconds`) to measure sustained clock advancement, rebuffering, buffer depth and dropped frames. A short opening/switching pass does not establish sustained playback quality. Do not run a full suite for a small edit or merely to produce a signed local APK. Broader suites belong to cross-cutting refactors or explicitly requested public-release gates. Local packaging is separate: default to `tools/local-release.sh`, which builds/signs/verifies the APK without tests, lint or an AAB. Run chosen target tests independently and report what actually ran and what remains unverified.
-
-README files are for users: audience, learning pain points, core capabilities, design goals and minimal setup. Keep them short, without build commands, engine/cache internals, test diaries or per-build version edits. Context should earn its place. Keep operational knowledge and hard-won external constraints in `agent-doc/essential/`; keep implementation detail beside the code. No parallel feature specs, frozen task assignments, acceptance snapshots, rolling verification diary or routine documentation update for every feature. Temporary evidence belongs in ignored `verification-local/` or delivery artifacts; history belongs in Git.
-
-Commit, push, tag and publish only on explicit request. A version-tag push can publish a release automatically.
-
-## Current development context
-
-- Whole-book audio preparation has been removed: slow synthesis does not justify a separate whole-book job, saved-audio library or keep-alive service. Preserve live narration's Readium lookahead, upcoming-sentence synthesis, sentence cache and cached replay.
-- The reader starts live narration directly. A centre tap toggles the bottom reading tools; there is no top "Reading tools" title or close bar. Preserve the expanded transport and the hidden-tools previous, play/pause and next controls.
-- Reader typography uses four size presets (small/medium/large/extra large), three spacing levels and a folded More section, not continuous sliders. Keep legacy custom values until their field is explicitly changed. Apply commits the appearance draft together, Cancel changes nothing, and Readium's visible-word anchor still owns reflow. Reader and Settings share direct previews of the same five existing themes; do not add themes or change palette values as part of control styling.
-- Explanations add compact Synonyms and Antonyms lines after examples, using at most two English alternatives/opposites for the actual contextual sense. Empty relations are honest; show localized absence only after successful completion, not during streaming. Both language prompts and the explanation cache format are versioned for these fields, so old cached answers do not mask them. Example layout uses only real display lines: untranslated short examples have a compact 44dp speech row (divider spacing keeps 48dp touch targets separate), translated examples 48dp, and wrapped text expands naturally; do not reserve phantom translation rows or extra divider padding.
-- Successful lookup/example speech and reading transport show no engine/provider notices or cache/reserve counters. Keep play/pause/preparing controls and real failures/retry/diagnostic details. Provider selection, limitations and required attribution stay in Settings and third-party notices; do not change speech routing to hide presentation metadata.
-- Library, Video, Statistics and Settings use bottom navigation to identify the current section, without repeating the app name or page title above the content. Keep content-section headings and actions such as book import. Book/video entries open from their whole content area, with options menus separate; do not add Continue/Open buttons, Continue watching captions, tap-to-open instructions or decorative right arrows that repeat this action. Keep title, author and real progress, accessibility labels and explicit playback/resume controls.
-- Startup resumes the last explicitly foreground-opened content, book or video, with legacy last-book fallback only before a typed resume target exists. Background playback, position writes and source resolution must not steal that target. Deleted/missing targets clear without reviving an older book. Automatic cold video resume restores position/view paused; loading and failure retain the saved clock until a real player position exists. Explicit links, notification sessions and navigation back to the Video list keep their own intent.
-- Video A uses NewPipeExtractor and Media3, separate from EPUB and sharing model profiles/statistics. Media preparation must not wait for network captions. Only explicit subtitle choices survive as user intent; no English track means an honest notice, not silent foreign-language fallback. DB v4 preserves this distinction and per-video audio-only choices without deleting positions or time.
-- Video Read is a per-video presentation, not an EPUB conversion or download. Enter via Read in the existing subtitle header; Read hides picture/header/timestamps/seek/clocks and uses the book's shared ReaderPreferences, existing font assets and theme: font, size, line/letter/paragraph spacing, side margins and vertical insets. The native text adapter follows Readium's root/rem/gutter values without taking over EPUB layout. Player Settings in Read opens the same Reading appearance sheet, explicitly shared with books; Apply saves the global draft and Cancel changes nothing. Reflow subtitle soft line breaks for display only, mapping lookup selections back to original cue offsets; never alter words or timing. Active text gets a quiet inline highlight, not a large rounded card. An accessible video-screen icon in the top bar returns to Watch; Settings remains. Read shares the book's immersive system-bar preference and starts with tools collapsed: only the small previous/play-pause/next controls remain. Blank reading-space taps toggle the top toolbar and expanded 56dp transport on a stable text viewport; reserve the same quiet footer band in both states so text never paints under the compact controls. Word lookup, scrolling and transport taps must not also toggle tools. Expanded transport keeps Follow left, previous/play-pause/next centered and speed right. Back first collapses visible Read tools. Scrolling only suspends follow, never seeks; Follow returns to the active group. Read uses a real independent audio stream, saves its choice before switching and preserves time/speed/pause ownership. DB v5 adds read_mode without changing existing positions, track intent or learning time.
-- Preserve A's independent layers: Watch portrait tools are a fixed 96dp two-row footer (plus system inset), hidden by default and toggled by a picture tap. Follow is at the left of the transport row in both Watch and Read, not in the subtitle header. Elapsed time/seek/total time share the first row; compact previous/play-pause/next stay screen-centred, with speed at the far right, and no close X. Reserve the same footer height in caption scrolling. Fullscreen previous/play-pause/next remain centered, with time/progress below. Chrome visibility never moves subtitles. Explanations are centered overlays in fullscreen, never side rails. No in-picture portrait transport or instructional "tap to explain" copy. Audio-only mode stays in Video, removes the picture and always shows bottom transport; timestamp taps seek and play, word taps only look up.
-- Sentence organization stays in player settings and runs locally with punctuation, abbreviation and speaker rules, not paid model calls. It can split inside source cues and join across them without changing words or punctuation. Preserve source word starts; duplicate/backward anchors belong to one displayed playback group, never separate no-op transport targets. Distinct nearby source anchors may remain navigable with (~); lack of word timing alone must not collapse a long transcript into one row. Never evenly estimate word times. Coalesce playback row ranges first and materialize each final group's text once; same-anchor runs must not repeatedly copy a growing transcript. Highlight and previous/next share this displayed timeline; the latest-started row owns overlaps, and transport targets must advance to a distinct source start. No arbitrary 12-second/30-word cut through a sentence. Old model-group caches must not substitute for local results; keep original caption caches independent.
-- YouTube source resolution keeps server-issued anonymous Google/YouTube cookies in a bounded, thread-safe memory-only jar (128 cookies, 4 KiB per cookie, at most 24 hours and never beyond server expiry). Normal domain/path/secure/host-only rules apply; no browser/login-cookie import, disk persistence, logging or sharing with model/media clients. Dropping these cookies can create a Google challenge redirect loop before media resolves, even when the network otherwise works. Subtitle HTTP 429 is a separate source limit; do not confuse it with media opening or silently retry around it.
-- Video HTTP diagnostics report bounded status codes, domain categories and redirect counts through the existing developer log. Never log raw URLs, Location values, cookies, authorization, response bodies or exception messages. Diagnostics must not change redirects, cookies, TLS or proxy behavior, and a writer failure must not interrupt playback.
-- Playback settings remember the chosen height globally (initially 1080p), using the nearest lower real MP4 rendition or lowest higher one without changing the preference. VideoPlaybackService owns one player/session beyond Activity exit, including lock-screen controls and background listening time. Audio-only must use a real independent stream, never a hidden video download. Save each video's mode before switching; the old global flag is only a fallback for unset rows, and save failures must be visible. Mode/quality switches preserve clock, speed and pause ownership. Media3 keeps a short back buffer plus one app-wide 1 GiB private LRU fragment cache, shared across video and audio streams. It is not a per-video quota, a symmetric progress window, a full download library or a guaranteed 15-minute preload. Use opaque content identities for cross-session cache reuse; streams without enough identity metadata get an opaque key held by that resolved stream for same-session replay only. Signed URLs and redirect addresses must never enter cache keys or metadata. No account login or Premium entitlement is implied. Model HTTP 402 means balance/payment failure, not JSON incompatibility.
-
-## Development handoff
-
-After each development task, update this Agent context with what changed and any lasting decisions. Keep it concise and current; replace superseded context instead of appending a chronological diary.
-
-After each substantial feature or refactor, produce a local signed, non-debuggable production APK using the existing release key and the fast local packaging script; packaging must not expand the test scope. Verify the package, signature and installation, and report its local path, version, checks and unverified limits. A debug APK is not a substitute. Commit, push, tag and publish still require explicit authorization.
+- [Integration constraints](agent-doc/essential/ARCHITECTURE.md): external library and platform traps, only for the integration being changed.
+- [Validation and delivery](agent-doc/essential/DELIVERY.md): test entry points, local production packaging and device checks.
+- [Terms](CONTEXT.md) and [third-party notices](THIRD_PARTY_NOTICES.md): terminology and provenance when needed.

@@ -19,6 +19,7 @@ import app.peekturn.reader.video.CaptionMergeClient
 import app.peekturn.reader.video.VideoCaptionCache
 import app.peekturn.reader.video.VideoMediaCache
 import app.peekturn.reader.video.VideoRepository
+import app.peekturn.reader.video.VideoDownloads
 import app.peekturn.reader.video.YouTubeSource
 import app.peekturn.reader.video.defaultVideoHttpClient
 import kotlinx.coroutines.CancellationException
@@ -79,7 +80,16 @@ class AppGraph(
             onEvent = { event -> developerLog.recordEvent("video", event) })
     }
     val captionMerger = CaptionMergeClient()
-    val videos = VideoRepository(store, videoSource, videoCaptions, captionMerger)
+    // Media bodies may take much longer than source-resolution calls. Bound connection/idle
+    // reads, not the total transfer; Media3 owns cancellation, retry and playback priority.
+    internal val videoMediaHttpClient = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS).build()
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    internal val videoTransferPriority = androidx.media3.common.PriorityTaskManager()
+    internal val videoDownloads by lazy { VideoDownloads(context.applicationContext, this, scope) }
+    val videos = VideoRepository(store, videoSource, videoCaptions, captionMerger,
+        offlineSession = { item -> videoDownloads.session(item) })
     val speech = PronunciationPlayer(
         context.applicationContext,
         onDiagnostic = developerLog::recordSystemSpeech

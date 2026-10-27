@@ -45,6 +45,7 @@
     <string name="video_ui_resume_save_failed">Could not remember this video for the next launch. Please reopen it to retry.</string>
     <string name="video_ui_shared_reading_appearance">Shared with books</string>
     <string name="video_ui_appearance_save_failed">Could not save reading appearance. Please try again.</string>
+    <string name="video_ui_watch_switch_failed">%1$s Your saved audio is still available.</string>
     <string name="video_ui_read">Read</string>
     <string name="video_ui_captions">Subtitles</string>
     <string name="video_ui_follow">Follow</string>

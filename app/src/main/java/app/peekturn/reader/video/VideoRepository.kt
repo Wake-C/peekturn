@@ -25,19 +25,22 @@ class VideoRepository internal constructor(
     private val cache: VideoCaptionCache,
     private val resolveSource: suspend (videoId: String) -> ResolvedVideo,
     private val fetchCaptions: suspend (videoId: String, track: CaptionTrack) -> CaptionDocument,
-    private val mergeGroups: suspend (ModelConfig, CaptionDocument, (Int, Int) -> Unit) -> List<CaptionGroup>
+    private val mergeGroups: suspend (ModelConfig, CaptionDocument, (Int, Int) -> Unit) -> List<CaptionGroup>,
+    private val offlineSession: suspend (VideoItem) -> VideoSessionData? = { null }
 ) {
     constructor(
         store: PeekturnStore,
         source: YouTubeSource,
         cache: VideoCaptionCache,
-        merger: CaptionMergeClient
+        merger: CaptionMergeClient,
+        offlineSession: suspend (VideoItem) -> VideoSessionData? = { null }
     ) : this(
         store = store,
         cache = cache,
         resolveSource = { videoId -> source.resolve(videoId) },
         fetchCaptions = { videoId, track -> source.captions(videoId, track) },
-        mergeGroups = { config, document, progress -> merger.merge(config, document, progress) }
+        mergeGroups = { config, document, progress -> merger.merge(config, document, progress) },
+        offlineSession = offlineSession
     )
 
     /**
@@ -45,8 +48,12 @@ class VideoRepository internal constructor(
      * A caption problem is carried in the session, never disguised as an import failure; a media
      * problem throws and stores nothing.
      */
-    suspend fun `import`(link: VideoLink): VideoSessionData {
-        val resolved = resolve(link.videoId)
+    suspend fun `import`(link: VideoLink, preferDownload: Boolean = true): VideoSessionData {
+        val known = if (preferDownload) store.findVideoBySource(link.videoId) else null
+        val cached = known?.let { offlineSession(it) }
+        if (known != null && cached != null && suppliesChosenView(known, cached)) return cached
+        val resolved = try { resolve(link.videoId) }
+        catch (failure: VideoFailure) { if (cached != null) return cached.copy(watchFallbackFailure = failure.kind) else throw failure }
         val stored = try {
             store.upsertVideo(resolved.metadata)
         } catch (cancelled: CancellationException) {
@@ -61,7 +68,7 @@ class VideoRepository internal constructor(
     }
 
     /** Re-resolves the temporary media URLs and restores position, track choice and cached captions. */
-    suspend fun open(id: Long): VideoSessionData {
+    suspend fun open(id: Long, preferDownload: Boolean = true): VideoSessionData {
         val stored = try {
             store.findVideo(id)
         } catch (cancelled: CancellationException) {
@@ -70,9 +77,16 @@ class VideoRepository internal constructor(
             throw VideoFailure(VideoFailureKind.Storage, e)
         }
         val item = stored ?: throw VideoFailure(VideoFailureKind.Storage)
-        val resolved = resolve(item.videoId)
+        val cached = if (preferDownload) offlineSession(item) else null
+        if (cached != null && suppliesChosenView(item, cached)) return cached
+        val resolved = try { resolve(item.videoId) }
+        catch (failure: VideoFailure) { if (cached != null) return cached.copy(watchFallbackFailure = failure.kind) else throw failure }
         return session(opened(item), resolved)
     }
+
+    private fun suppliesChosenView(item: VideoItem, cached: VideoSessionData): Boolean =
+        if (item.readMode || preferredAudioOnly(item, store.settings.value.videoAudioOnly)) cached.resolved.audioOnly != null
+        else cached.resolved.qualities.isNotEmpty()
 
     /**
      * The cached parsed track for a stable track identity, fetched for real only on a miss or when

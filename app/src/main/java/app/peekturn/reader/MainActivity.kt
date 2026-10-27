@@ -113,6 +113,8 @@ private fun PeekturnHome(
     val state by vm.state.collectAsStateWithLifecycle()
     val books by vm.graph.store.books.collectAsStateWithLifecycle()
     val videos by vm.graph.store.videos.collectAsStateWithLifecycle()
+    val downloads by vm.graph.videoDownloads.states.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.graph.videoDownloads.initialize() }
     val stats by vm.graph.store.stats.collectAsStateWithLifecycle()
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val context = LocalContext.current
@@ -175,11 +177,22 @@ private fun PeekturnHome(
                     onImport = { videoUrlDialog = true; urlDialog = true },
                     onDelete = { item ->
                         scope.launch {
-                            try { vm.graph.videos.delete(item) }
+                            try {
+                                if (downloads[item.id] != null) vm.graph.videoDownloads.remove(item.id)
+                                vm.graph.videos.delete(item)
+                            }
                             catch (cancelled: CancellationException) { throw cancelled }
                             catch (_: Exception) { snackbar.showSnackbar(videoDeleteFailure) }
                         }
-                    })
+                    },
+                    downloads = downloads,
+                    onDownload = {
+                        if (downloads[it.id]?.phase == app.peekturn.reader.video.VideoDownloadPhase.Failed) vm.graph.videoDownloads.retry(it.id)
+                        else vm.graph.videoDownloads.download(it,
+                            app.peekturn.reader.video.preferredAudioOnly(it, settings.videoAudioOnly), settings.videoQualityHeight)
+                    },
+                    onRemoveDownload = { vm.graph.videoDownloads.remove(it.id) },
+                    onDownloadVideo = { vm.graph.videoDownloads.download(it, false, settings.videoQualityHeight) })
                 2 -> StatisticsScreen(stats, books, videos, vm::open, { onOpenVideo(it.id) })
                 else -> SettingsScreen(
                     settings, vm::save, vm.graph.explanations::testConnection, vm.graph.speech,

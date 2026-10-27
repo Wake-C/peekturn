@@ -67,6 +67,72 @@ class VideoRepositoryTest {
         )
     }
 
+    @Test fun completedOfflineEntryOpensAndReimportsWithoutResolvingOrFetching() = runBlocking {
+        val item = store.upsertVideo(metadata)
+        store.selectVideoPresentation(item.id, audioOnly = true, readMode = true)
+        store.saveVideoPosition(item.id, 123_000)
+        val local = VideoPlaybackSource("peekturn-offline://media/opaque", "audio/mp4", videoCacheKey = "opaque")
+        val offline = VideoRepository(store, cache,
+            resolveSource = { throw AssertionError("Offline opening must not resolve YouTube") },
+            fetchCaptions = { _, _ -> throw AssertionError("Offline opening must not fetch captions") },
+            mergeGroups = { _, _, _ -> throw AssertionError("Offline opening must not call a model") },
+            offlineSession = { saved -> VideoSessionData(saved.copy(audioOnly = true),
+                ResolvedVideo(metadata, local, emptyList(), audioOnly = local), null) })
+        assertEquals(local, offline.open(item.id).resolved.audioOnly)
+        assertEquals(123_000L, offline.open(item.id).item.positionMs)
+        assertEquals(local, offline.`import`(VideoLink(VIDEO)).resolved.playback)
+        assertEquals(123_000L, store.findVideo(item.id)!!.positionMs)
+    }
+
+    @Test fun streamingCanBypassADownloadWithoutDeletingIt() = runBlocking {
+        val item = store.upsertVideo(metadata)
+        store.selectVideoPresentation(item.id, audioOnly = true, readMode = false)
+        var onlineResolutions = 0
+        val local = VideoPlaybackSource("peekturn-offline://media/opaque", "audio/mp4", videoCacheKey = "opaque")
+        val remote = VideoPlaybackSource("https://media.invalid/video.mp4", "video/mp4")
+        val repo = VideoRepository(store, cache,
+            resolveSource = { onlineResolutions++; ResolvedVideo(metadata, remote, emptyList()) },
+            fetchCaptions = { _, _ -> throw AssertionError("No tracks") }, mergeGroups = { _, _, _ -> emptyList() },
+            offlineSession = { saved -> VideoSessionData(saved, ResolvedVideo(metadata, local, emptyList(), audioOnly = local), null) })
+        assertEquals(remote, repo.open(item.id, preferDownload = false).resolved.playback)
+        assertEquals(1, onlineResolutions)
+        assertEquals(local, repo.open(item.id).resolved.playback)
+        assertEquals(1, onlineResolutions)
+    }
+
+    @Test fun savedWatchModeIsNotOverriddenByAnAudioDownload() = runBlocking {
+        val item = store.upsertVideo(metadata)
+        store.selectVideoPresentation(item.id, audioOnly = false, readMode = false)
+        val local = VideoPlaybackSource("peekturn-offline://media/opaque", "audio/mp4", videoCacheKey = "opaque")
+        val remote = VideoPlaybackSource("https://media.invalid/video.mp4", "video/mp4")
+        val repo = VideoRepository(store, cache,
+            resolveSource = { ResolvedVideo(metadata, remote, emptyList(), qualities = listOf(VideoQuality("240p", 240, remote))) },
+            fetchCaptions = { _, _ -> throw AssertionError("No tracks") }, mergeGroups = { _, _, _ -> emptyList() },
+            offlineSession = { saved -> VideoSessionData(saved.copy(audioOnly = true),
+                ResolvedVideo(metadata, local, emptyList(), audioOnly = local), null) })
+        val session = repo.open(item.id)
+        assertFalse("Reopening Watch online must not force audio-only", session.item.audioOnly!!)
+        assertEquals(remote, session.resolved.playback)
+        assertEquals(remote, repo.`import`(VideoLink(VIDEO)).resolved.playback)
+    }
+
+    @Test fun savedWatchModeFallsBackToSavedAudioWhenVideoCannotResolve() = runBlocking {
+        val item = store.upsertVideo(metadata)
+        store.selectVideoPresentation(item.id, audioOnly = false, readMode = false)
+        store.saveVideoPosition(item.id, 123_000)
+        val local = VideoPlaybackSource("peekturn-offline://media/opaque", "audio/mp4", videoCacheKey = "opaque")
+        val repo = VideoRepository(store, cache,
+            resolveSource = { throw VideoFailure(VideoFailureKind.Network) },
+            fetchCaptions = { _, _ -> throw AssertionError("No network captions") }, mergeGroups = { _, _, _ -> emptyList() },
+            offlineSession = { saved -> VideoSessionData(saved.copy(audioOnly = true),
+                ResolvedVideo(metadata, local, emptyList(), audioOnly = local), null) })
+        val session = repo.open(item.id)
+        assertEquals(local, session.resolved.playback)
+        assertEquals(123_000L, session.item.positionMs)
+        assertEquals(VideoFailureKind.Network, session.watchFallbackFailure)
+        assertEquals(false, store.findVideo(item.id)!!.audioOnly)
+    }
+
     @Test fun importingPreparesMediaWithoutWaitingForNetworkCaptions() = runBlocking {
         tracks = listOf(
             CaptionTrack("fr-manual", "fr", false, "https://captions.invalid/fr"),

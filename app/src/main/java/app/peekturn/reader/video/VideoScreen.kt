@@ -104,6 +104,7 @@ internal fun VideoScreen(
     onExitFullscreen: () -> Unit
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val downloads by vm.downloads.collectAsStateWithLifecycle()
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     LaunchedEffect(landscape) { vm.onOrientation(landscape) }
 
@@ -128,6 +129,16 @@ internal fun VideoScreen(
         if (state.resumeSaveFailed) {
             snackbar.showSnackbar(resumeFailureText)
             vm.dismissResumeSaveFailure()
+        }
+    }
+    val watchSwitchFailure = state.watchSwitchFailure
+    val watchFailureText = watchSwitchFailure?.let {
+        stringResource(R.string.video_ui_watch_switch_failed, stringResource(videoFailureMessage(it)))
+    }
+    LaunchedEffect(watchSwitchFailure, watchFailureText) {
+        if (watchFailureText != null) {
+            snackbar.showSnackbar(watchFailureText)
+            vm.dismissWatchSwitchFailure()
         }
     }
     val modeFailureText = stringResource(R.string.video_ui_audio_save_failed)
@@ -172,6 +183,7 @@ internal fun VideoScreen(
             state = state,
             vm = vm,
             onDismiss = { settingsOpen = false },
+            downloadState = downloads[state.item?.id],
             onReadingAppearance = if (state.readMode) ({ settingsOpen = false; appearanceSaveFailed = false; appearanceOpen = true }) else null
         )
     }
@@ -264,7 +276,8 @@ private fun PortraitPlayer(
                         trailingIcon = if (state.readMode) Icons.Outlined.OndemandVideo else Icons.Outlined.Fullscreen,
                         trailingDescription = stringResource(if (state.readMode) R.string.video_ui_watch_video else R.string.video_ui_fullscreen),
                         onTrailing = if (state.readMode) { { vm.setReadMode(false) } } else onFullscreen,
-                        trailingEnabled = !state.modeSaving, applySystemInsets = applyInsets)
+                        trailingEnabled = !state.modeSaving, trailingBusy = state.modeSaving,
+                        applySystemInsets = applyInsets)
                 }
                 val captions: @Composable (Modifier) -> Unit = { modifier ->
                     CaptionPanel(state, reading, vm, follow, followRequest,
@@ -359,6 +372,7 @@ internal fun VideoTopBar(
     trailingDescription: String,
     onTrailing: () -> Unit,
     trailingEnabled: Boolean = true,
+    trailingBusy: Boolean = false,
     applySystemInsets: Boolean = true
 ) {
     if (!controlsVisible) return
@@ -392,7 +406,9 @@ internal fun VideoTopBar(
                     tint = if (hasItem) foreground else foreground.copy(alpha = 0.38f))
             }
             IconButton(onClick = onTrailing, enabled = trailingEnabled, modifier = Modifier.size(48.dp)) {
-                Icon(trailingIcon, contentDescription = trailingDescription, tint = foreground)
+                if (trailingBusy) CircularProgressIndicator(
+                    Modifier.size(20.dp).semantics { contentDescription = trailingDescription }, strokeWidth = 2.dp)
+                else Icon(trailingIcon, contentDescription = trailingDescription, tint = foreground)
             }
         }
         if (!landscape) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -1252,7 +1268,8 @@ private fun VideoSettingsSheet(
     state: VideoPlaybackState,
     vm: VideoViewModel,
     onDismiss: () -> Unit,
-    onReadingAppearance: (() -> Unit)? = null
+    onReadingAppearance: (() -> Unit)? = null,
+    downloadState: VideoDownloadState? = null
 ) {
     var confirmClearAll by remember { mutableStateOf(false) }
     var tracksExpanded by remember { mutableStateOf(false) }
@@ -1276,6 +1293,15 @@ private fun VideoSettingsSheet(
                     stringResource(R.string.video_ui_shared_reading_appearance), onClick = onReadingAppearance)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
+            VideoDownloadControls(downloadState, vm::downloadCurrentVideo, vm::removeDownload, vm::downloadPicture)
+            if (state.offlinePlayback) TextButton(onClick = { onDismiss(); vm.streamInstead() }) {
+                Text(stringResource(R.string.video_download_stream_instead))
+            }
+            if (state.qualities.isEmpty() && state.audioOnly && state.phase is VideoPhase.Ready) {
+                Text(stringResource(R.string.video_download_audio_only_notice), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {

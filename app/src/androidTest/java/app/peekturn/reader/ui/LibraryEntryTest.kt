@@ -56,6 +56,14 @@ class LibraryEntryTest {
         compose.runOnIdle { assertEquals(1, opened); assertEquals(1, imported) }
     }
 
+    @Test fun emptyVideoLibraryKeepsAnAccessiblePlusWithoutImportText() {
+        var imported = 0
+        compose.setContent { PeekturnTheme { VideoLibraryScreen(emptyList(), {}, { imported++ }, {}) } }
+        compose.onNodeWithText(text(R.string.video_ui_import_video)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(text(R.string.video_ui_import_video)).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(1, imported) }
+    }
+
     @Test fun videoEntriesOpenWithoutContinueCopyWhileOptionsAndImportStaySeparate() {
         val second = video.copy(id = 2, title = "Another video", lastWatchedAt = 0)
         val opened = mutableListOf<Long>()
@@ -67,7 +75,8 @@ class LibraryEntryTest {
         noDuplicateContinueText()
         compose.onAllNodesWithText(video.title).assertCountEquals(2)[0].performClick()
         compose.onNodeWithText(second.title).performClick()
-        compose.onNodeWithText(text(R.string.video_ui_import_video)).performClick()
+        compose.onNodeWithText(text(R.string.video_ui_import_video)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(text(R.string.video_ui_import_video)).performClick()
         compose.onNodeWithContentDescription(text(R.string.video_ui_video_options, second.title)).performClick()
         compose.onNodeWithText(text(R.string.video_ui_remove)).assertIsDisplayed()
         compose.runOnIdle {

@@ -110,6 +110,10 @@ class VideoPlaybackLiveTest {
                 fail("$stage timed out; phase=${state.phase.javaClass.simpleName}; captions=${state.captionStatus}")
             }
             awaitStage("resolved", 180_000) { it.phase is VideoPhase.Ready }
+            if (onMain { vm.state.value.offlinePlayback && vm.state.value.qualities.isEmpty() }) {
+                onMain { vm.streamInstead() }
+                awaitStage("online-source", 180_000) { it.phase is VideoPhase.Ready && !it.offlinePlayback }
+            }
             awaitStage("media-ready") { onMain { vm.player.playbackState == Player.STATE_READY } }
             onMain { vm.setReadMode(false) }
             awaitStage("watch") { !it.audioOnly && !it.readMode && !it.modeSaving && onMain { vm.player.playbackState == Player.STATE_READY } }

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -43,11 +42,15 @@ import java.util.concurrent.TimeUnit
  * demo rows are ever created here; every title and position comes from the stored video entry.
  */
 @Composable
-fun VideoLibraryScreen(
+internal fun VideoLibraryScreen(
     items: List<VideoItem>,
     onOpen: (VideoItem) -> Unit,
     onImport: () -> Unit,
-    onDelete: (VideoItem) -> Unit
+    onDelete: (VideoItem) -> Unit,
+    downloads: Map<Long, VideoDownloadState> = emptyMap(),
+    onDownload: (VideoItem) -> Unit = {},
+    onRemoveDownload: (VideoItem) -> Unit = {},
+    onDownloadVideo: (VideoItem) -> Unit = {}
 ) {
     val ordered = remember(items) {
         items.sortedWith(compareByDescending<VideoItem> { it.lastWatchedAt }.thenBy { it.title.lowercase() })
@@ -75,20 +78,7 @@ fun VideoLibraryScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Button(
-                        onClick = onImport,
-                        modifier = Modifier.heightIn(min = 48.dp),
-                        shape = CircleShape,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.onBackground,
-                            contentColor = MaterialTheme.colorScheme.background
-                        ),
-                        contentPadding = PaddingValues(horizontal = 20.dp)
-                    ) {
-                        Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.video_ui_import_video), style = MaterialTheme.typography.labelLarge)
-                    }
+                    VideoImportButton(onImport)
                 }
             }
         } else {
@@ -111,15 +101,13 @@ fun VideoLibraryScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = onImport, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.video_ui_import_video), style = MaterialTheme.typography.labelLarge)
-                    }
+                    VideoImportButton(onImport)
                 }
             }
             items(ordered, key = { it.id }) { item ->
-                VideoRow(item, onOpen = { onOpen(item) }, onRemove = { deletingId = item.id })
+                VideoRow(item, onOpen = { onOpen(item) }, onRemove = { deletingId = item.id },
+                    download = downloads[item.id], onDownload = { onDownload(item) },
+                    onRemoveDownload = { onRemoveDownload(item) }, onDownloadVideo = { onDownloadVideo(item) })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
@@ -150,6 +138,14 @@ fun VideoLibraryScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun VideoImportButton(onImport: () -> Unit) {
+    IconButton(onClick = onImport, modifier = Modifier.size(48.dp)) {
+        Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.video_ui_import_video),
+            tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
     }
 }
 
@@ -189,7 +185,8 @@ private fun ContinueRow(item: VideoItem, onOpen: (VideoItem) -> Unit) {
 }
 
 @Composable
-private fun VideoRow(item: VideoItem, onOpen: () -> Unit, onRemove: () -> Unit) {
+private fun VideoRow(item: VideoItem, onOpen: () -> Unit, onRemove: () -> Unit,
+    download: VideoDownloadState?, onDownload: () -> Unit, onRemoveDownload: () -> Unit, onDownloadVideo: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Row(
             Modifier.weight(1f)
@@ -224,9 +221,11 @@ private fun VideoRow(item: VideoItem, onOpen: () -> Unit, onRemove: () -> Unit) 
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (download != null) Text(videoDownloadLabel(download), style = MaterialTheme.typography.bodySmall,
+                    color = if (download.phase == VideoDownloadPhase.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        VideoOptions(item, onRemove)
+        VideoOptions(item, onRemove, download, onDownload, onRemoveDownload, onDownloadVideo)
     }
 }
 
@@ -266,7 +265,8 @@ private fun positionText(item: VideoItem): String {
 }
 
 @Composable
-private fun VideoOptions(item: VideoItem, onRemove: () -> Unit) {
+private fun VideoOptions(item: VideoItem, onRemove: () -> Unit,
+    download: VideoDownloadState?, onDownload: () -> Unit, onRemoveDownload: () -> Unit, onDownloadVideo: () -> Unit) {
     var expanded by remember(item.id) { mutableStateOf(false) }
     Box {
         IconButton(onClick = { expanded = true }, modifier = Modifier.size(48.dp)) {
@@ -277,6 +277,15 @@ private fun VideoOptions(item: VideoItem, onRemove: () -> Unit) {
             )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (download == null || download.phase == VideoDownloadPhase.Failed) DropdownMenuItem(
+                text = { Text(stringResource(if (download == null) R.string.video_download_action else R.string.video_download_retry)) },
+                onClick = { expanded = false; onDownload() })
+            if (download?.phase == VideoDownloadPhase.Complete && download.audioOnly) DropdownMenuItem(
+                text = { Text(stringResource(R.string.video_download_add_video)) },
+                onClick = { expanded = false; onDownloadVideo() })
+            if (download != null && download.phase != VideoDownloadPhase.Removing) DropdownMenuItem(
+                text = { Text(stringResource(if (download.active) R.string.video_download_cancel else R.string.video_download_remove)) },
+                onClick = { expanded = false; onRemoveDownload() })
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.video_ui_remove)) },
                 onClick = { expanded = false; onRemove() }

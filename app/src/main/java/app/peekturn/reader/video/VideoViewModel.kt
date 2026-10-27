@@ -43,8 +43,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
-import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
 /** Loading is one state; a caption failure never hides an already playable video. */
@@ -79,10 +77,12 @@ internal data class VideoPlaybackState(
     val selectedQualityId: String? = null,
     val qualityChanging: Boolean = false,
     val audioOnly: Boolean = false,
+    val offlinePlayback: Boolean = false,
     val readMode: Boolean = false,
     val audioAvailable: Boolean = false,
     val modeSaving: Boolean = false,
     val modeSaveFailed: Boolean = false,
+    val watchSwitchFailure: VideoFailureKind? = null,
     val resumeSaveFailed: Boolean = false,
     val preferredHeight: Int = 1080,
     val captions: CaptionDocument? = null,
@@ -140,15 +140,32 @@ internal class VideoViewModel(
         graph.developerLog.recordFailure("learning", category, cause)
     }
     val dictionary: OfflineDictionary get() = graph.dictionary
+    val downloads get() = graph.videoDownloads.states
+    fun downloadCurrentVideo() {
+        val state = _state.value
+        state.item?.let {
+            if (graph.videoDownloads.states.value[it.id]?.phase == VideoDownloadPhase.Failed) graph.videoDownloads.retry(it.id)
+            else graph.videoDownloads.download(it, state.audioOnly,
+                state.qualities.firstOrNull { quality -> quality.id == state.selectedQualityId }?.height ?: state.preferredHeight)
+        }
+    }
+    fun downloadPicture() {
+        val state = _state.value
+        state.item?.let { graph.videoDownloads.download(it, false,
+            state.qualities.firstOrNull { quality -> quality.id == state.selectedQualityId }?.height ?: state.preferredHeight) }
+    }
+    fun removeDownload() { _state.value.item?.id?.let { graph.videoDownloads.remove(it) } }
+    fun streamInstead() {
+        val current = _state.value
+        val id = current.item?.id ?: return
+        start(id, null, force = true, autoPlay = player.playWhenReady && current.lookup == null,
+            preferDownload = false, startAtMs = lastKnownPosition())
+    }
 
-    private val httpClient = OkHttpClient.Builder()
-        .followRedirects(true)
-        .followSslRedirects(true)
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    private val httpClient get() = graph.videoMediaHttpClient
 
     val player: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
+        .setPriorityTaskManager(graph.videoTransferPriority)
         .setLoadControl(videoLoadControl())
         .build().apply {
         setAudioAttributes(
@@ -160,7 +177,7 @@ internal class VideoViewModel(
         )
     }
 
-    private data class Request(val id: Long?, val url: String?)
+    private data class Request(val id: Long?, val url: String?, val preferDownload: Boolean)
 
     private var request: Request? = null
     private var audioSource: VideoPlaybackSource? = null
@@ -176,6 +193,8 @@ internal class VideoViewModel(
     private var ticker: Job? = null
     private var foreground = false
     private var lastSavedPosition = -1L
+    private val progress = VideoProgressCheckpoint()
+    private var positionWrite: Job? = null
     private var lastLandscape: Boolean? = null
     private var track: VideoTimeTracker? = null
     private var trackerItemId: Long? = null
@@ -207,6 +226,7 @@ internal class VideoViewModel(
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                observeProgress()
                 _state.update { it.copy(isPlaying = isPlaying) }
                 if (isPlaying && firstFramePending && _state.value.audioOnly) {
                     firstFramePending = false
@@ -269,7 +289,7 @@ internal class VideoViewModel(
                 val at = player.currentPosition.coerceAtLeast(0L).takeIf { it > 0L }
                     ?: _state.value.positionMs
                 _state.update { it.copy(positionMs = at) }
-                persistPosition(at)
+                persistPosition()
                 fail(playbackFailureKind(error.errorCode))
             }
         })
@@ -281,9 +301,13 @@ internal class VideoViewModel(
      * The Activity passes either a stored entry or a shared/pasted canonical link. Repeating the
      * same request after a configuration change is a no-op so the player is never recreated.
      */
-    fun start(id: Long?, url: String?, force: Boolean = false, autoPlay: Boolean = true) {
-        val next = Request(id, url)
+    fun start(id: Long?, url: String?, force: Boolean = false, autoPlay: Boolean = true,
+        preferDownload: Boolean = true, startAtMs: Long? = null) {
+        val next = Request(id, url, preferDownload)
+        val speed = _state.value.speed.takeIf { id != null && _state.value.item?.id == id } ?: 1f
         if (!force && (request == next || id != null && _state.value.item?.id == id && _state.value.phase is VideoPhase.Ready)) return
+        persistPosition()
+        progress.begin(null) // Stop/clear callbacks still belong to the previous player timeline.
         request = next
         val token = ++sessionGeneration
         openingStartedAt = SystemClock.elapsedRealtime()
@@ -314,7 +338,8 @@ internal class VideoViewModel(
             phase = VideoPhase.Loading,
             mergeEnabled = mergeEnabled,
             toolsVisible = lastLandscape == true || graph.store.settings.value.videoAudioOnly,
-            preferredHeight = graph.store.settings.value.videoQualityHeight
+            preferredHeight = graph.store.settings.value.videoQualityHeight,
+            speed = speed
         )
         metadataJob?.cancel()
         if (id != null) {
@@ -337,14 +362,14 @@ internal class VideoViewModel(
         }
         sessionJob = viewModelScope.launch {
             try {
-                var linkStart: Long? = null
+                var linkStart: Long? = startAtMs
                 val data = if (url != null) {
                     val link = YouTubeUrls.parse(url) ?: throw VideoFailure(VideoFailureKind.InvalidLink)
                     linkStart = link.startMs
-                    graph.videos.`import`(link)
+                    graph.videos.`import`(link, preferDownload)
                 } else {
                     val videoId = id ?: throw VideoFailure(VideoFailureKind.InvalidLink)
-                    graph.videos.open(videoId)
+                    graph.videos.open(videoId, preferDownload)
                 }
                 if (token != sessionGeneration) return@launch
                 attachSession(data, linkStart, autoPlay = autoPlay, token = token)
@@ -386,7 +411,7 @@ internal class VideoViewModel(
         _state.update { it.copy(phase = VideoPhase.Loading, qualityChanging = false, modeSaving = false, modeSaveFailed = false) }
         sessionJob = viewModelScope.launch {
             try {
-                val data = graph.videos.open(item.id)
+                val data = graph.videos.open(item.id, request?.preferDownload ?: true)
                 if (token != sessionGeneration) return@launch
                 attachSession(data, startAt, autoPlay = true, token = token)
             } catch (cancelled: CancellationException) {
@@ -409,7 +434,8 @@ internal class VideoViewModel(
         data: VideoSessionData,
         requestedStartMs: Long?,
         autoPlay: Boolean,
-        token: Long
+        token: Long,
+        preserveCheckpoint: Boolean = false
     ) {
         val item = data.item
         val resolved = data.resolved
@@ -460,10 +486,12 @@ internal class VideoViewModel(
                 selectedQualityId = qualityId,
                 qualityChanging = false,
                 audioOnly = audioOnly,
+                offlinePlayback = playback.videoUrl.startsWith("peekturn-offline://"),
                 readMode = item.readMode,
                 audioAvailable = audioSource != null,
                 modeSaving = false,
                 modeSaveFailed = false,
+                watchSwitchFailure = data.watchFallbackFailure,
                 preferredHeight = preferences.videoQualityHeight,
                 toolsVisible = if (item.readMode) false else it.toolsVisible || audioOnly,
                 captions = sessionDocument,
@@ -481,7 +509,10 @@ internal class VideoViewModel(
                 aspectRatio = videoAspectRatio(0, 0)
             )
         }
-        lastSavedPosition = start
+        if (!preserveCheckpoint) {
+            lastSavedPosition = item.positionMs
+            progress.begin(item.id)
+        }
         if (foreground) rememberForegroundVideo()
         val itemTracker = trackerFor(item)
         if (foreground) itemTracker.foreground(true)
@@ -529,7 +560,9 @@ internal class VideoViewModel(
                 if (mime.isNotBlank()) setMimeType(mime)
                 setCustomCacheKey(cacheKey)
             }.build()
-            return ProgressiveMediaSource.Factory(graph.videoMediaCache.factory(upstream, cacheable = cacheKey != null))
+            val factory = if (url.startsWith("peekturn-offline://")) graph.videoDownloads.playbackFactory()
+                else graph.videoMediaCache.factory(upstream, cacheable = cacheKey != null)
+            return ProgressiveMediaSource.Factory(factory)
                 .createMediaSource(item)
         }
         val videoMime = source.videoMimeType
@@ -618,6 +651,7 @@ internal class VideoViewModel(
     fun togglePlay() {
         if (_state.value.item == null) return
         if (_state.value.ended || player.playbackState == Player.STATE_ENDED) {
+            progress.seek()
             player.seekTo(0L)
             _state.update { it.copy(positionMs = 0L, ended = false) }
             player.play()
@@ -708,12 +742,62 @@ internal class VideoViewModel(
         false
     }
 
-    fun setAudioOnly(enabled: Boolean) = setPresentation(enabled, readMode = false)
+    fun setAudioOnly(enabled: Boolean) {
+        if (!enabled && _state.value.qualities.isEmpty()) requestWatchSource()
+        else setPresentation(enabled, readMode = false)
+    }
 
     fun setReadMode(enabled: Boolean) {
         if (enabled && (_state.value.displayedCues.isEmpty() || !_state.value.audioAvailable)) return
-        setPresentation(audioOnly = enabled, readMode = enabled)
+        if (!enabled && _state.value.qualities.isEmpty()) requestWatchSource()
+        else setPresentation(audioOnly = enabled, readMode = enabled)
     }
+
+    /** A saved audio stream is a playback source, not a permanent limit on this video's modes. */
+    private fun requestWatchSource() {
+        val current = _state.value
+        val item = current.item ?: return
+        if (current.modeSaving || current.phase !is VideoPhase.Ready && current.phase !is VideoPhase.Failed) return
+        val token = sessionGeneration
+        _state.update { it.copy(modeSaving = true, watchSwitchFailure = null) }
+        viewModelScope.launch {
+            try {
+                // The picture may have completed downloading since this Read session opened.
+                // Keep the current audio/player untouched while a missing picture resolves online.
+                val local = graph.videoDownloads.session(item)
+                val data = local?.takeIf { it.resolved.qualities.isNotEmpty() }
+                    ?: graph.videos.open(item.id, preferDownload = false)
+                if (token != sessionGeneration || _state.value.item?.id != item.id) return@launch
+                val cachedAudio = audioSource?.takeIf {
+                    it.videoUrl.startsWith("peekturn-offline://") && it.videoCacheKey?.startsWith("media-") == true &&
+                        it.videoCacheKey == data.resolved.audioOnly?.videoCacheKey
+                }
+                val resolved = if (cachedAudio == null) data.resolved else {
+                    fun pair(source: VideoPlaybackSource): VideoPlaybackSource =
+                        if (source.audioCacheKey == cachedAudio.videoCacheKey) source.copy(
+                            audioUrl = cachedAudio.videoUrl, audioMimeType = cachedAudio.videoMimeType,
+                            audioCacheKey = cachedAudio.videoCacheKey
+                        ) else source
+                    data.resolved.copy(audioOnly = cachedAudio, playback = pair(data.resolved.playback),
+                        qualities = data.resolved.qualities.map { it.copy(source = pair(it.source)) })
+                }
+                graph.store.selectVideoPresentation(item.id, audioOnly = false, readMode = false)
+                if (token != sessionGeneration) return@launch
+                val at = lastKnownPosition()
+                val resume = player.playWhenReady && _state.value.lookup == null
+                val document = data.captions ?: _state.value.captions
+                attachSession(data.copy(item = data.item.copy(audioOnly = false, readMode = false),
+                    resolved = resolved, captions = document), at, autoPlay = resume, token = token, preserveCheckpoint = true)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                graph.developerLog.recordFailure("video", "watch-switch", failure)
+                if (token == sessionGeneration) _state.update { it.copy(modeSaving = false,
+                    watchSwitchFailure = (failure as? VideoFailure)?.kind ?: VideoFailureKind.Storage) }
+            }
+        }
+    }
+
+    fun dismissWatchSwitchFailure() { _state.update { it.copy(watchSwitchFailure = null) } }
 
     private fun setPresentation(audioOnly: Boolean, readMode: Boolean) {
         val enabled = audioOnly
@@ -756,14 +840,14 @@ internal class VideoViewModel(
 
     fun dismissModeSaveFailure() { _state.update { it.copy(modeSaveFailed = false) } }
 
-    /** A user seek is a real position change; it saves at once and never counts as learning time. */
+    /** A seek changes the live clock, not durable progress, until its own playback qualifies. */
     fun seekTo(positionMs: Long) {
         val duration = _state.value.durationMs
         val target = positionMs.coerceAtLeast(0L).let { if (duration > 0L) it.coerceAtMost(duration) else it }
         graph.developerLog.recordEvent("video", "seek-ms:${player.currentPosition.coerceAtLeast(0L)}:$target:buffered=${player.bufferedPosition.coerceAtLeast(0L)}")
+        progress.seek()
         player.seekTo(target)
         _state.update { it.copy(positionMs = target, ended = false) }
-        persistPosition(target)
     }
 
     fun playCue(index: Int) {
@@ -1442,8 +1526,9 @@ internal class VideoViewModel(
                 val position = player.currentPosition.coerceAtLeast(0L)
                 val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0L } ?: current.durationMs
                 _state.update { it.copy(positionMs = position, durationMs = duration) }
+                val eligible = observeProgress() ?: continue
                 val saved = lastSavedPosition
-                if (saved < 0L || position - saved >= POSITION_SAVE_INTERVAL_MS) persistPosition(position)
+                if (saved < 0L || kotlin.math.abs(eligible - saved) >= POSITION_SAVE_INTERVAL_MS) persistPosition()
             }
         }
     }
@@ -1475,19 +1560,31 @@ internal class VideoViewModel(
         return player.currentPosition.coerceAtLeast(0L)
     }
 
-    private fun persistPosition(position: Long? = null) {
+    private fun observeProgress(): Long? {
+        val current = _state.value
+        val item = current.item ?: return null
+        return progress.observe(item.id, player.currentPosition, SystemClock.elapsedRealtime(),
+            current.phase is VideoPhase.Ready && player.playbackState == Player.STATE_READY && player.isPlaying)
+    }
+
+    private fun persistPosition() {
         val item = _state.value.item ?: return
+        observeProgress()
+        val eligible = progress.position(item.id) ?: return
         val duration = _state.value.durationMs
-        val value = (position ?: lastKnownPosition()).coerceAtLeast(0L)
-            .let { if (duration > 0L) it.coerceAtMost(duration) else it }
+        val value = eligible.let { if (duration > 0L) it.coerceAtMost(duration) else it }
+        if (value == lastSavedPosition) return
         lastSavedPosition = value
-        viewModelScope.launch {
-            try {
-                graph.store.saveVideoPosition(item.id, value)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
+        // Serial app-scoped writes outlive Activity/service teardown, without letting an older
+        // checkpoint complete after a newer one and rewind the library's resume position.
+        val previous = positionWrite
+        positionWrite = graph.scope.launch {
+            previous?.join()
+            try { graph.store.saveVideoPosition(item.id, value) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
                 graph.developerLog.recordFailure("video", "position", failure)
+                if (_state.value.item?.id == item.id && lastSavedPosition == value) lastSavedPosition = -1L
             }
         }
     }
@@ -1604,22 +1701,8 @@ internal class VideoViewModel(
 
     override fun onCleared() {
         sessionGeneration++ // Invalidate any app-scoped preference completion before releasing audio.
-        val item = _state.value.item
-        val finalPosition = lastKnownPosition()
-        if (item != null) {
-            val duration = _state.value.durationMs
-            val value = finalPosition.coerceAtLeast(0L)
-                .let { if (duration > 0L) it.coerceAtMost(duration) else it }
-            graph.scope.launch {
-                try {
-                    graph.store.saveVideoPosition(item.id, value)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (failure: Exception) {
-                    graph.developerLog.recordFailure("video", "position", failure)
-                }
-            }
-        }
+        persistPosition()
+        progress.begin(null)
         stopTicker()
         narrationStop?.cancel()
         sessionJob?.cancel()

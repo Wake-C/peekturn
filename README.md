@@ -17,7 +17,7 @@ Switching between a dictionary, translator and player can make you lose your pla
 - **Books and articles**: import EPUBs, or save web articles through a link or Android sharing. Keep your reading position.
 - **Words in context**: select a word or phrase for dictionary meanings, an explanation of its use in the sentence, examples and pronunciation.
 - **Read and listen**: start continuous narration from the current sentence, move between sentences, change speed and listen with the screen locked.
-- **Video and audio**: import public YouTube links, follow captions, look up words and replay subtitle groups. Switch to audio only when you do not need the picture.
+- **Video and audio**: import public YouTube links, follow captions, look up words and replay subtitle groups. Switch to audio only when you do not need the picture, or download audio/video and available captions for offline playback.
 - **Reading preferences**: choose a font, one of four text sizes, three spacing levels and five themes. Reading and viewing positions are saved.
 
 <p align="center"><img src="assets/video/peekturn-intro.gif" width="58%" alt="Reading, narration, word lookup and web import demo"></p>
@@ -36,6 +36,6 @@ The book or video stays central. Help should be brief, useful and easy to leave.
 
 Books, captions, positions and learning statistics stay on your device. AI explanations send the selected text and a short surrounding context to your configured service. Online pronunciation and narration send the text to the chosen speech service. API keys are encrypted on the device.
 
-Video and caption availability depends on the source. Media buffering is not an offline-video library. Grouping cannot fix transcription errors, and model explanations can be wrong.
+Video and caption availability depends on the source. Only completed downloads are available offline; temporary media buffering is not a saved download. Download only content you have permission to save. Grouping cannot fix transcription errors, and model explanations can be wrong.
 
 [Third-party notices](THIRD_PARTY_NOTICES.md) · [Source license](LICENSE) · [Development and delivery](agent-doc/essential/DELIVERY.md)

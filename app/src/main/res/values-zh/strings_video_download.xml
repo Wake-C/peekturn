@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="video_download_title">离线播放</string>
+    <string name="video_download_action">下载</string>
+    <string name="video_download_detail">阅读或仅音频模式保存音频，观看模式保存所选清晰度的视频，并保存可用字幕。请仅下载你有权保存的内容。</string>
+    <string name="video_download_channel">视频下载</string>
+    <string name="video_download_notification">正在保存媒体以供离线播放</string>
+    <string name="video_download_audio_saved">音频已下载</string>
+    <string name="video_download_video_saved">视频已下载</string>
+    <string name="video_download_failed">下载失败</string>
+    <string name="video_download_removing">正在移除下载…</string>
+    <string name="video_download_queued">等待下载</string>
+    <string name="video_download_downloading">正在下载…</string>
+    <string name="video_download_percent">正在下载 · %1$d%%</string>
+    <string name="video_download_no_captions">未保存字幕，仍可离线观看或收听。</string>
+    <string name="video_download_cancel">取消下载</string>
+    <string name="video_download_retry">重试下载</string>
+    <string name="video_download_remove">移除下载</string>
+    <string name="video_download_stream_instead">改为在线播放</string>
+    <string name="video_download_add_video">下载视频</string>
+    <string name="video_download_audio_only_notice">仅保存了音频，观看画面需要联网或已完成的视频下载。</string>
+</resources>
