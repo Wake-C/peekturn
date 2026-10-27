@@ -8,6 +8,7 @@ val releaseStoreFile = providers.environmentVariable("PEEKTURN_STORE_FILE").orNu
 val releaseStorePassword = providers.environmentVariable("PEEKTURN_STORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("PEEKTURN_KEY_ALIAS").orNull
 val releaseKeyPassword = providers.environmentVariable("PEEKTURN_KEY_PASSWORD").orNull
+val downloadTestBuild = providers.gradleProperty("peekturnDownloadTest").orNull == "true"
 
 android {
     namespace = "app.peekturn.reader"
@@ -19,6 +20,7 @@ android {
         versionCode = 26
         versionName = "2.1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["applicationLabel"] = "@string/shell_app_name"
     }
     signingConfigs {
         if (releaseStoreFile != null && releaseStorePassword != null && releaseKeyAlias != null && releaseKeyPassword != null) {
@@ -34,6 +36,11 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            if (downloadTestBuild) {
+                applicationIdSuffix = ".debug.downloads"
+                versionNameSuffix = "-download-test"
+                manifestPlaceholders["applicationLabel"] = "Peekturn Downloads"
+            }
         }
         release {
             isDebuggable = false

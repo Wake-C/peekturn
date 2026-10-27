@@ -1,27 +1,21 @@
 package app.peekturn.reader.video
 
 import android.content.Context
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.cache.Cache
-import androidx.media3.datasource.cache.CacheDataSink
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
-import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.offline.DefaultDownloadIndex
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
-import androidx.media3.exoplayer.offline.Downloader
 import androidx.media3.exoplayer.offline.DownloaderFactory
-import androidx.media3.exoplayer.offline.ProgressiveDownloader
 import app.peekturn.reader.AppGraph
 import com.google.gson.Gson
 import kotlinx.coroutines.CancellationException
@@ -33,7 +27,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -48,6 +41,10 @@ internal class VideoDownloads(private val context: Context, private val graph: A
     private val mutableStates = MutableStateFlow<Map<Long, VideoDownloadState>>(emptyMap())
     val states = mutableStates.asStateFlow()
     private var poll: Job? = null
+    private val http = graph.videoMediaHttpClient.newBuilder()
+        .eventListenerFactory(VideoHttpDiagnostics { event ->
+            graph.developerLog.recordEvent("video-download-http", event)
+        }).build()
 
     private val cache: Cache by lazy {
         val disk = SimpleCache(File(root, "media"), NoOpCacheEvictor(), database)
@@ -61,7 +58,17 @@ internal class VideoDownloads(private val context: Context, private val graph: A
 
     val manager: DownloadManager by lazy {
         DownloadManager(context, DefaultDownloadIndex(database, "PeekturnOffline"),
-            DownloaderFactory { request -> BundleDownloader(requireNotNull(VideoDownloadSpec.parse(request.uri))) }
+            DownloaderFactory { request ->
+                val spec = requireNotNull(VideoDownloadSpec.parse(request.uri))
+                VideoBundleDownloader(cache, http,
+                    prepare = { prepareParts(spec) },
+                    removeParts = {
+                        readManifest(spec.itemId)?.keys?.forEach { cache.removeResource(it) }
+                        android.util.AtomicFile(manifestFile(spec.itemId)).delete()
+                    },
+                    onEvent = { event -> graph.developerLog.recordEvent("video-download", "d${spec.itemId}:$event") },
+                    onFailure = { failure -> graph.developerLog.recordFailure("video", "download-attempt", failure) })
+            }
         ).apply {
             maxParallelDownloads = 1
             addListener(object : DownloadManager.Listener {
@@ -117,11 +124,13 @@ internal class VideoDownloads(private val context: Context, private val graph: A
         poll?.cancel()
         poll = scope.launch {
             do {
+                val active = manager.currentDownloads.associateBy { it.request.id }
                 val updated = withContext(Dispatchers.IO) {
                     buildMap {
                         manager.downloadIndex.getDownloads().use { cursor ->
                             while (cursor.moveToNext()) {
-                                val download = cursor.download
+                                val stored = cursor.download
+                                val download = active[stored.request.id] ?: stored
                                 val spec = VideoDownloadSpec.parse(download.request.uri) ?: continue
                                 val phase = when (download.state) {
                                     Download.STATE_COMPLETED -> VideoDownloadPhase.Complete
@@ -201,87 +210,42 @@ internal class VideoDownloads(private val context: Context, private val graph: A
         catch (failure: Exception) { file.failWrite(output); throw failure }
     }
 
-    private inner class BundleDownloader(private val spec: VideoDownloadSpec) : Downloader {
-        @Volatile private var cancelled = false
-        @Volatile private var resolving: Job? = null
-        @Volatile private var current: ProgressiveDownloader? = null
-
-        override fun download(listener: Downloader.ProgressListener?) {
-            if (cancelled) throw InterruptedException()
-            val job = Job()
-            resolving = job
+    private suspend fun prepareParts(spec: VideoDownloadSpec): List<VideoDownloadPart> {
+        val item = graph.store.findVideo(spec.itemId) ?: throw IOException("Video entry unavailable")
+        val resolved = graph.videoSource.resolve(item.videoId)
+        val audioSource = resolved.audioOnly
+        val quality = if (spec.audioOnly) null else {
+            preferredQuality(resolved.qualities, spec.height) ?: throw IOException("Video quality unavailable")
+        }
+        if (spec.audioOnly && audioSource == null) throw IOException("Independent audio unavailable")
+        val downloads = linkedMapOf<String, VideoDownloadPart>()
+        fun part(url: String, mime: String, key: String?): Part {
+            val part = Part(key ?: "session-${UUID.randomUUID()}", mime)
+            downloads[part.key] = VideoDownloadPart(part.key, url, mime)
+            return part
+        }
+        val audio = audioSource?.let { part(it.videoUrl, it.videoMimeType, it.videoCacheKey) }
+        val video = quality?.source?.let { part(it.videoUrl, it.videoMimeType, it.videoCacheKey) }
+        val videoAudio = quality?.source?.let { source -> source.audioUrl?.let {
+            part(it, source.audioMimeType.orEmpty(), source.audioCacheKey)
+        } }
+        val previous = readManifest(item.id)
+        val selected = selectInitialTrack(resolved.tracks, item.selectedTrackId, item.trackExplicit)
+        val captions = selected?.let { track ->
             try {
-                if (cancelled) job.cancel()
-                val parts = runBlocking(job) {
-                    val item = graph.store.findVideo(spec.itemId) ?: throw IOException("Video entry unavailable")
-                    val resolved = graph.videoSource.resolve(item.videoId)
-                    val audioSource = resolved.audioOnly
-                    val quality = if (spec.audioOnly) null else {
-                        preferredQuality(resolved.qualities, spec.height) ?: throw IOException("Video quality unavailable")
-                    }
-                    if (spec.audioOnly && audioSource == null) throw IOException("Independent audio unavailable")
-                    val downloads = linkedMapOf<String, Pair<Part, String>>()
-                    fun part(url: String, mime: String, key: String?): Part {
-                        val part = Part(key ?: "session-${UUID.randomUUID()}", mime)
-                        downloads[part.key] = part to url
-                        return part
-                    }
-                    val audio = audioSource?.let { part(it.videoUrl, it.videoMimeType, it.videoCacheKey) }
-                    val video = quality?.source?.let { part(it.videoUrl, it.videoMimeType, it.videoCacheKey) }
-                    val videoAudio = quality?.source?.let { source -> source.audioUrl?.let {
-                        part(it, source.audioMimeType.orEmpty(), source.audioCacheKey)
-                    } }
-                    val previous = readManifest(item.id)
-                    val selected = selectInitialTrack(resolved.tracks, item.selectedTrackId, item.trackExplicit)
-                    val captions = selected?.let { track ->
-                        try {
-                            graph.videoCaptions.original(item.videoId, track.id)
-                                ?: previous?.captions?.takeIf { it.videoId == item.videoId && it.trackId == track.id }
-                                ?: graph.videoSource.captions(item.videoId, track)
-                        } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (failure: Exception) {
-                            graph.developerLog.recordFailure("video", "download-captions", failure)
-                            null // Audio/video completion never claims missing captions exist.
-                        }
-                    }
-                    ensureActive()
-                    val previousKeys = previous?.keys.orEmpty()
-                    val manifest = Manifest(item.videoId, audio, video, videoAudio, quality?.height ?: 0,
-                        captions, (previousKeys + downloads.keys).distinct())
-                    writeManifest(item.id, manifest)
-                    downloads.values.toList()
-                }
-                resolving = null
-                val http = graph.videoMediaHttpClient
-                var finishedBytes = 0L
-                parts.forEachIndexed { index, (part, url) ->
-                    if (cancelled) throw InterruptedException()
-                    val media = MediaItem.Builder().setUri(url).setMimeType(part.mime).setCustomCacheKey(part.key).build()
-                    val factory = CacheDataSource.Factory().setCache(cache)
-                        .setUpstreamPriorityTaskManager(graph.videoTransferPriority)
-                        .setCacheKeyFactory { dataSpec -> requireNotNull(dataSpec.key) }
-                        .setUpstreamDataSourceFactory(OkHttpDataSource.Factory(http).setDefaultRequestProperties(playbackHeaders(url)))
-                        .setCacheWriteDataSinkFactory(CacheDataSink.Factory().setCache(cache))
-                    val downloader = ProgressiveDownloader(media, factory)
-                    current = downloader
-                    var partBytes = 0L
-                    downloader.download { _, bytes, percent ->
-                        partBytes = bytes
-                        listener?.onProgress(C.LENGTH_UNSET.toLong(), finishedBytes + bytes,
-                            if (percent < 0) C.PERCENTAGE_UNSET.toFloat() else (index * 100f + percent) / parts.size)
-                    }
-                    finishedBytes += partBytes
-                }
-                current = null
-                listener?.onProgress(finishedBytes, finishedBytes, 100f)
-            } catch (cancelled: CancellationException) { throw InterruptedException() }
-            finally { resolving = null; current = null; job.cancel() }
+                graph.videoCaptions.original(item.videoId, track.id)
+                    ?: previous?.captions?.takeIf { it.videoId == item.videoId && it.trackId == track.id }
+                    ?: graph.videoSource.captions(item.videoId, track)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                graph.developerLog.recordFailure("video", "download-captions", failure)
+                null // Audio/video completion never claims missing captions exist.
+            }
         }
-
-        override fun cancel() { cancelled = true; resolving?.cancel(); current?.cancel() }
-        override fun remove() {
-            readManifest(spec.itemId)?.keys?.forEach { cache.removeResource(it) }
-            android.util.AtomicFile(manifestFile(spec.itemId)).delete()
-        }
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        val manifest = Manifest(item.videoId, audio, video, videoAudio, quality?.height ?: 0,
+            captions, (previous?.keys.orEmpty() + downloads.keys).distinct())
+        writeManifest(item.id, manifest)
+        return downloads.values.toList()
     }
 }

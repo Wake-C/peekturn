@@ -39,7 +39,9 @@ jobs:
           printf '%s' "$DEBUG_KEYSTORE" | base64 --decode > "$HOME/.android/debug.keystore"
 
       - name: Test, lint and build Debug APK
-        run: ./gradlew --console=plain :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        env:
+          DOWNLOAD_TEST_BUILD: ${{ github.event_name == 'pull_request' && github.head_ref == 'poc/youtube-verification' }}
+        run: ./gradlew --console=plain -PpeekturnDownloadTest="$DOWNLOAD_TEST_BUILD" :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 
       - name: Collect APK and checksum
         run: |

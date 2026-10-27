@@ -165,7 +165,6 @@ internal class VideoViewModel(
     private val httpClient get() = graph.videoMediaHttpClient
 
     val player: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
-        .setPriorityTaskManager(graph.videoTransferPriority)
         .setLoadControl(videoLoadControl())
         .build().apply {
         setAudioAttributes(

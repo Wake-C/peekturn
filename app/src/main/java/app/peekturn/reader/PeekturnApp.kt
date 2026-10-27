@@ -81,12 +81,11 @@ class AppGraph(
     }
     val captionMerger = CaptionMergeClient()
     // Media bodies may take much longer than source-resolution calls. Bound connection/idle
-    // reads, not the total transfer; Media3 owns cancellation, retry and playback priority.
+    // reads, not the total transfer; Media3 owns cancellation and retries. Playback and
+    // explicit downloads run independently, without a shared priority gate.
     internal val videoMediaHttpClient = okhttp3.OkHttpClient.Builder()
         .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS).build()
-    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-    internal val videoTransferPriority = androidx.media3.common.PriorityTaskManager()
     internal val videoDownloads by lazy { VideoDownloads(context.applicationContext, this, scope) }
     val videos = VideoRepository(store, videoSource, videoCaptions, captionMerger,
         offlineSession = { item -> videoDownloads.session(item) })
