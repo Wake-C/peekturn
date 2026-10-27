@@ -390,6 +390,9 @@ internal class VideoViewModel(
     }
 
     /** One explicit retry for the visible failure. No background or unbounded retries exist. */
+    fun verificationVideoId(): String? = _state.value.item?.videoId
+        ?: request?.url?.let { YouTubeUrls.parse(it)?.videoId }
+
     fun retryLoad() {
         val failed = _state.value.phase as? VideoPhase.Failed ?: return
         if (failed.kind == VideoFailureKind.InvalidLink) return

@@ -13,6 +13,32 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VideoSessionCookiesTest {
+    @Test fun webVerificationOnlyImportsAnonymousChallengeCookies() {
+        val jar = VideoSessionCookies(now = { 1_800_000_000_000L })
+        assertFalse(jar.importVerificationCookies("VISITOR_INFO1_LIVE=ordinary; SID=secret", null))
+        assertTrue(jar.loadForRequest("https://www.youtube.com/".toHttpUrl()).isEmpty())
+
+        assertTrue(jar.importVerificationCookies(
+            "SID=secret; SAPISID=secret2; VISITOR_INFO1_LIVE=visitor; GOOGLE_ABUSE_EXEMPTION=proof",
+            "HSID=login; s_gl=challenge"
+        ))
+        val youtube = jar.loadForRequest("https://www.youtube.com/watch".toHttpUrl())
+        val google = jar.loadForRequest("https://www.google.com/".toHttpUrl())
+        assertEquals(setOf("VISITOR_INFO1_LIVE", "GOOGLE_ABUSE_EXEMPTION"), youtube.map { it.name }.toSet())
+        assertEquals(listOf("s_gl"), google.map { it.name })
+        assertFalse((youtube + google).any { it.name in setOf("SID", "SAPISID", "HSID") })
+        assertTrue(jar.loadForRequest("https://evil-youtube.com/".toHttpUrl()).isEmpty())
+    }
+
+    @Test fun importedVerificationExpiresAndDoesNotEscapeTheSession() {
+        var time = 1_800_000_000_000L
+        val jar = VideoSessionCookies(now = { time })
+        assertTrue(jar.importVerificationCookies("GOOGLE_ABUSE_EXEMPTION=proof", null))
+        assertTrue(VideoSessionCookies().loadForRequest("https://www.youtube.com/".toHttpUrl()).isEmpty())
+        time += 30L * 60 * 1000
+        assertTrue(jar.loadForRequest("https://www.youtube.com/".toHttpUrl()).isEmpty())
+    }
+
     @Test fun domainPathSecureAndHostOnlyRulesAreRespected() {
         val jar = VideoSessionCookies()
         val origin = "https://www.youtube.com/start".toHttpUrl()

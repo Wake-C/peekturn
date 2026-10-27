@@ -37,6 +37,12 @@
     <string name="video_ui_error_unsupported">此设备不支持这个视频格式。</string>
     <string name="video_ui_error_captions">字幕加载失败。</string>
     <string name="video_ui_error_provider">请求失败，请重试。</string>
+    <string name="video_ui_error_verification">YouTube 限制了此请求。可以尝试验证，但可能仍需要登录或更换网络。</string>
+    <string name="video_ui_verify_youtube">尝试 YouTube 验证</string>
+    <string name="video_ui_verify_title">YouTube 验证</string>
+    <string name="video_ui_verify_detail">如果 YouTube 显示人机验证，请在这里完成，再返回 Peekturn 重试。不会导入 Google 登录 Cookie。</string>
+    <string name="video_ui_verify_retry">返回 Peekturn 重试</string>
+    <string name="video_ui_verify_no_cookies">未找到匿名验证 Cookie。此限制可能无法在这里解除。</string>
     <string name="video_ui_error_storage">视频无法保存，请重试。</string>
     <string name="video_ui_error_generic">出了问题，请重试。</string>
 

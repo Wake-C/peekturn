@@ -1,5 +1,7 @@
 package app.peekturn.reader.video
 
+import android.app.Activity
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.SystemClock
 import android.view.ViewGroup
@@ -32,6 +34,8 @@ import androidx.compose.material.icons.outlined.OndemandVideo
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -42,6 +46,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -497,10 +502,10 @@ private fun FailureContent(
         }
         if (cues.isEmpty()) {
             Spacer(Modifier.weight(1f))
-            FailureMessage(kind, vm::retryLoad)
+            FailureMessage(kind, vm)
             Spacer(Modifier.weight(1f))
         } else {
-            FailureMessage(kind, vm::retryLoad)
+            FailureMessage(kind, vm)
             Spacer(Modifier.height(20.dp))
             Text(
                 stringResource(R.string.video_ui_cached_captions_notice),
@@ -551,7 +556,11 @@ private fun FailureContent(
 }
 
 @Composable
-private fun FailureMessage(kind: VideoFailureKind, onRetry: () -> Unit) {
+private fun FailureMessage(kind: VideoFailureKind, vm: VideoViewModel) {
+    val context = LocalContext.current
+    val verify = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) vm.retryLoad()
+    }
     Text(
         stringResource(videoFailureMessage(kind)),
         style = MaterialTheme.typography.bodyLarge,
@@ -559,7 +568,17 @@ private fun FailureMessage(kind: VideoFailureKind, onRetry: () -> Unit) {
     )
     if (kind != VideoFailureKind.InvalidLink) {
         Spacer(Modifier.height(16.dp))
-        TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
+        if (kind == VideoFailureKind.Verification) {
+            TextButton(
+                onClick = {
+                    verify.launch(Intent(context, VideoVerificationActivity::class.java).apply {
+                        putExtra(VideoVerificationActivity.EXTRA_VIDEO_ID, vm.verificationVideoId())
+                    })
+                },
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) { Text(stringResource(R.string.video_ui_verify_youtube)) }
+        }
+        TextButton(onClick = vm::retryLoad, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(R.string.video_ui_retry))
         }
     }
@@ -574,6 +593,7 @@ internal fun videoFailureMessage(kind: VideoFailureKind): Int = when (kind) {
     VideoFailureKind.Captions -> R.string.video_ui_error_captions
     VideoFailureKind.Provider -> R.string.video_ui_error_provider
     VideoFailureKind.Storage -> R.string.video_ui_error_storage
+    VideoFailureKind.Verification -> R.string.video_ui_error_verification
 }
 
 @Composable
