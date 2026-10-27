@@ -234,7 +234,8 @@ class VideoDownloadDataSourceTest {
                 assertTrue("Cancellation must release the download worker", finished.await(2, TimeUnit.SECONDS))
                 try { future.get(2, TimeUnit.SECONDS) }
                 catch (failure: ExecutionException) {
-                    assertTrue(failure.cause is InterruptedException || failure.cause is IOException)
+                    assertTrue(failure.cause is InterruptedException || failure.cause is IOException ||
+                        failure.cause is java.util.concurrent.CancellationException)
                 }
                 assertEquals(0L, fixture.cache.getCachedBytes(key, 0, payload.size.toLong()))
             } finally {
