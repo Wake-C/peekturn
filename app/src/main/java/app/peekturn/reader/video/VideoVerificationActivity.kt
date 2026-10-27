@@ -50,8 +50,8 @@ class VideoVerificationActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val graph = (application as PeekturnApp).graph
-        val settings = graph.store.settings.value
-        AppLanguage.apply(this, settings.uiLanguage)
+        val appSettings = graph.store.settings.value
+        AppLanguage.apply(this, appSettings.uiLanguage)
         val videoId = intent.getStringExtra(EXTRA_VIDEO_ID)?.takeIf(YouTubeUrls::isVideoId)
         val startUrl = videoId?.let { "https://www.youtube.com/watch?v=$it" }
             ?: "https://www.youtube.com/"
@@ -78,7 +78,7 @@ class VideoVerificationActivity : AppCompatActivity() {
                 }
             }
             var noVerificationCookie by remember { mutableStateOf(false) }
-            PeekturnTheme(theme = settings.appTheme) {
+            PeekturnTheme(theme = appSettings.appTheme) {
                 Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
                     Text(stringResource(R.string.video_ui_verify_title), style = MaterialTheme.typography.titleLarge)
                     Text(
