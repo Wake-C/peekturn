@@ -165,7 +165,6 @@ internal class VideoViewModel(
     private val httpClient get() = graph.videoMediaHttpClient
 
     val player: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
-        .setPriorityTaskManager(graph.videoTransferPriority)
         .setLoadControl(videoLoadControl())
         .build().apply {
         setAudioAttributes(
@@ -390,6 +389,9 @@ internal class VideoViewModel(
     }
 
     /** One explicit retry for the visible failure. No background or unbounded retries exist. */
+    fun verificationVideoId(): String? = _state.value.item?.videoId
+        ?: request?.url?.let { YouTubeUrls.parse(it)?.videoId }
+
     fun retryLoad() {
         val failed = _state.value.phase as? VideoPhase.Failed ?: return
         if (failed.kind == VideoFailureKind.InvalidLink) return
@@ -764,7 +766,7 @@ internal class VideoViewModel(
             try {
                 // The picture may have completed downloading since this Read session opened.
                 // Keep the current audio/player untouched while a missing picture resolves online.
-                val local = graph.videoDownloads.session(item)
+                val local = graph.videoDownloads.session(item.copy(audioOnly = false, readMode = false))
                 val data = local?.takeIf { it.resolved.qualities.isNotEmpty() }
                     ?: graph.videos.open(item.id, preferDownload = false)
                 if (token != sessionGeneration || _state.value.item?.id != item.id) return@launch

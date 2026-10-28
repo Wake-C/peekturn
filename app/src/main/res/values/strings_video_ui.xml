@@ -37,6 +37,12 @@
     <string name="video_ui_error_unsupported">This video format is not supported on this device.</string>
     <string name="video_ui_error_captions">Subtitles could not be loaded.</string>
     <string name="video_ui_error_provider">The request failed. Try again.</string>
+    <string name="video_ui_error_verification">YouTube has restricted this request. You can try verification, but it may still require sign-in or a different network.</string>
+    <string name="video_ui_verify_youtube">Try YouTube verification</string>
+    <string name="video_ui_verify_title">YouTube verification</string>
+    <string name="video_ui_verify_detail">If YouTube shows a verification challenge, complete it here. Then try again in Peekturn. Google sign-in cookies will not be imported.</string>
+    <string name="video_ui_verify_retry">Try again in Peekturn</string>
+    <string name="video_ui_verify_no_cookies">No anonymous verification cookies were found. This restriction may not be solvable here.</string>
     <string name="video_ui_error_storage">The video could not be saved. Try again.</string>
     <string name="video_ui_error_generic">Something went wrong. Try again.</string>
 

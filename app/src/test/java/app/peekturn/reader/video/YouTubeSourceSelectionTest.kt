@@ -178,11 +178,11 @@ class YouTubeSourceSelectionTest {
     fun `extractor failures map to distinguishable categories`() {
         assertEquals(VideoFailureKind.Network, videoFailureFor(IOException("offline")).kind)
         assertEquals(
-            VideoFailureKind.Network,
+            VideoFailureKind.Verification,
             videoFailureFor(ReCaptchaException("challenge", "https://example.invalid")).kind
         )
         assertEquals(
-            VideoFailureKind.Provider,
+            VideoFailureKind.Verification,
             videoFailureFor(SignInConfirmNotBotException("bot check")).kind
         )
         assertEquals(VideoFailureKind.Restricted, videoFailureFor(PrivateContentException("private")).kind)

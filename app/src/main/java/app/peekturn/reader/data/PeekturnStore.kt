@@ -340,7 +340,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
             accent = if (settings.accent == "UK") "UK" else "US",
             appTheme = when (settings.appTheme) {
                 "dark", "light", "warm", "oled", "sage" -> settings.appTheme
-                else -> "dark"
+                else -> DEFAULT_APP_THEME
             },
             uiLanguage = when (settings.uiLanguage) { "en", "zh" -> settings.uiLanguage; else -> "system" },
             // Readium accepts letter spacing in em from 0 to 1; anything else is repaired rather

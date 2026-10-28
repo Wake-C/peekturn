@@ -1,5 +1,7 @@
 package app.peekturn.reader.video
 
+import android.app.Activity
+import android.content.Intent
 import android.content.res.Configuration
 import android.os.SystemClock
 import android.view.ViewGroup
@@ -32,6 +34,8 @@ import androidx.compose.material.icons.outlined.OndemandVideo
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -42,6 +46,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -72,6 +77,7 @@ import app.peekturn.reader.reader.ReaderTextMetrics
 import app.peekturn.reader.reader.readerTextMetrics
 import app.peekturn.reader.reader.rememberReaderFontFamily
 import app.peekturn.reader.ui.SettingsDisclosure
+import app.peekturn.reader.ui.activeSentenceBackground
 import app.peekturn.reader.reader.readerTransportPrevious
 import app.peekturn.reader.reader.readerTransportNext
 import app.peekturn.reader.reader.readerTransportPlay
@@ -497,10 +503,10 @@ private fun FailureContent(
         }
         if (cues.isEmpty()) {
             Spacer(Modifier.weight(1f))
-            FailureMessage(kind, vm::retryLoad)
+            FailureMessage(kind, vm)
             Spacer(Modifier.weight(1f))
         } else {
-            FailureMessage(kind, vm::retryLoad)
+            FailureMessage(kind, vm)
             Spacer(Modifier.height(20.dp))
             Text(
                 stringResource(R.string.video_ui_cached_captions_notice),
@@ -551,7 +557,11 @@ private fun FailureContent(
 }
 
 @Composable
-private fun FailureMessage(kind: VideoFailureKind, onRetry: () -> Unit) {
+private fun FailureMessage(kind: VideoFailureKind, vm: VideoViewModel) {
+    val context = LocalContext.current
+    val verify = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) vm.retryLoad()
+    }
     Text(
         stringResource(videoFailureMessage(kind)),
         style = MaterialTheme.typography.bodyLarge,
@@ -559,7 +569,17 @@ private fun FailureMessage(kind: VideoFailureKind, onRetry: () -> Unit) {
     )
     if (kind != VideoFailureKind.InvalidLink) {
         Spacer(Modifier.height(16.dp))
-        TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
+        if (kind == VideoFailureKind.Verification) {
+            TextButton(
+                onClick = {
+                    verify.launch(Intent(context, VideoVerificationActivity::class.java).apply {
+                        putExtra(VideoVerificationActivity.EXTRA_VIDEO_ID, vm.verificationVideoId())
+                    })
+                },
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) { Text(stringResource(R.string.video_ui_verify_youtube)) }
+        }
+        TextButton(onClick = vm::retryLoad, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(R.string.video_ui_retry))
         }
     }
@@ -574,6 +594,7 @@ internal fun videoFailureMessage(kind: VideoFailureKind): Int = when (kind) {
     VideoFailureKind.Captions -> R.string.video_ui_error_captions
     VideoFailureKind.Provider -> R.string.video_ui_error_provider
     VideoFailureKind.Storage -> R.string.video_ui_error_storage
+    VideoFailureKind.Verification -> R.string.video_ui_error_verification
 }
 
 @Composable
@@ -991,7 +1012,7 @@ private fun CaptionPanel(
                         Modifier.fillMaxWidth()
                             .padding(horizontal = 4.dp, vertical = 2.dp)
                             .background(
-                                if (current) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
+                                if (current) MaterialTheme.colorScheme.activeSentenceBackground else Color.Transparent,
                                 RoundedCornerShape(8.dp)
                             )
                             .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
@@ -1009,7 +1030,7 @@ private fun CaptionPanel(
                             Text(
                                 (if (cue.timingApproximate) "~ " else "") + formatClock(cue.startMs),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (current) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         CaptionText(
@@ -1145,7 +1166,7 @@ internal fun VideoReadingParagraph(
         fontSize = metrics.fontSizeSp.sp,
         lineHeight = metrics.lineHeightSp.sp,
         letterSpacing = metrics.letterSpacingEm.em,
-        activeBackground = if (current) MaterialTheme.colorScheme.surfaceVariant else Color.Unspecified,
+        activeBackground = if (current) MaterialTheme.colorScheme.activeSentenceBackground else Color.Unspecified,
         modifier = Modifier.fillMaxWidth(),
         onLookup = { flowing.toSource(it)?.let(onLookup) },
         onBlankTap = onBlankTap

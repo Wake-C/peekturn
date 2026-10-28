@@ -43,7 +43,8 @@ data class CaptionDocument(val videoId: String, val trackId: String, val languag
 data class CaptionGroup(val firstCueId: Int, val lastCueId: Int)
 
 enum class VideoFailureKind {
-    InvalidLink, Network, Unavailable, Restricted, Unsupported, Captions, Provider, Storage
+    InvalidLink, Network, Unavailable, Restricted, Unsupported, Captions, Provider, Storage,
+    Verification
 }
 
 class VideoFailure(val kind: VideoFailureKind, cause: Throwable? = null) : Exception(kind.name, cause)

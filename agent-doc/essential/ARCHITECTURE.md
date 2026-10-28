@@ -18,7 +18,7 @@ Read only the section relevant to the change. Current behavior and ownership liv
 
 ## YouTube and Media3
 
-- Google challenge redirects can loop if server-issued anonymous cookies are discarded. Preserve the source client's bounded memory-only cookie handling; do not import browser/login cookies or persist cookie values.
+- Google challenge redirects can loop if server-issued anonymous cookies are discarded. Preserve the source client's bounded memory-only cookie handling. The experimental verification screen may transfer only allowlisted anonymous challenge cookies from its WebView; never transfer login credentials, browser profiles or persist cookie values.
 - Source resolution, playable media and captions can fail independently. Subtitle HTTP 429 does not establish media failure.
 - Opaque cache keys alone do not protect signed URLs: Media3 also persists redirect URIs in cache metadata and request URIs in DownloadIndex. Keep temporary addresses out of both.
 - A custom CacheDataSink factory needs the same cache instance as CacheDataSource; it is not injected automatically. Cached fragments do not prove a complete offline download.

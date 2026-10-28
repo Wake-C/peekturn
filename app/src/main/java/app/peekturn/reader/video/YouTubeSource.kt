@@ -97,6 +97,15 @@ class YouTubeSource(private val http: OkHttpClient = defaultVideoHttpClient()) {
     private val downloader = OkHttpDownloader(http) { activeExtraction }
 
     /**
+     * A user may finish an anonymous YouTube challenge in WebView. Transfer only the short-lived
+     * challenge cookies to this source session; never import Google sign-in credentials. This is
+     * an experimental handoff, not proof that YouTube has removed an IP/account restriction.
+     */
+    fun acceptWebVerificationCookies(youtubeCookies: String?, googleCookies: String?): Boolean =
+        (http.cookieJar as? VideoSessionCookies)
+            ?.importVerificationCookies(youtubeCookies, googleCookies) == true
+
+    /**
      * @throws VideoFailure with [VideoFailureKind.InvalidLink] for a malformed id and a typed
      * provider/network/content failure for everything the extractor cannot return. Cancelling the
      * caller cancels the in-flight extractor request so no work continues after the user leaves.
@@ -742,8 +751,8 @@ private fun visionOsUserAgent(): String = try {
  */
 internal fun videoFailureFor(error: Throwable): VideoFailure = when (error) {
     is VideoFailure -> error
-    is ReCaptchaException -> VideoFailure(VideoFailureKind.Network, error)
-    is SignInConfirmNotBotException -> VideoFailure(VideoFailureKind.Provider, error)
+    is ReCaptchaException,
+    is SignInConfirmNotBotException -> VideoFailure(VideoFailureKind.Verification, error)
     is GeographicRestrictionException,
     is AgeRestrictedContentException,
     is PrivateContentException,

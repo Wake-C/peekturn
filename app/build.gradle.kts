@@ -8,6 +8,7 @@ val releaseStoreFile = providers.environmentVariable("PEEKTURN_STORE_FILE").orNu
 val releaseStorePassword = providers.environmentVariable("PEEKTURN_STORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("PEEKTURN_KEY_ALIAS").orNull
 val releaseKeyPassword = providers.environmentVariable("PEEKTURN_KEY_PASSWORD").orNull
+val downloadTestBuild = providers.gradleProperty("peekturnDownloadTest").orNull == "true"
 
 android {
     namespace = "app.peekturn.reader"
@@ -16,9 +17,10 @@ android {
         applicationId = "app.peekturn.reader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "2.1.2"
+        versionCode = 27
+        versionName = "2.1.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["applicationLabel"] = "@string/shell_app_name"
     }
     signingConfigs {
         if (releaseStoreFile != null && releaseStorePassword != null && releaseKeyAlias != null && releaseKeyPassword != null) {
@@ -34,6 +36,11 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            if (downloadTestBuild) {
+                applicationIdSuffix = ".debug.downloads"
+                versionNameSuffix = "-download-test"
+                manifestPlaceholders["applicationLabel"] = "Peekturn Downloads"
+            }
         }
         release {
             isDebuggable = false
@@ -83,6 +90,7 @@ dependencies {
     implementation("org.jsoup:jsoup:1.18.3")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
