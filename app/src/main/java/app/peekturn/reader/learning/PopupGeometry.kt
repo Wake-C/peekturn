@@ -52,3 +52,18 @@ internal fun centeredLearningPopupGeometry(
         height = height
     )
 }
+
+/** Leave the video visible around a compact answer, even when the answer needs to scroll. */
+internal fun compactLearningPopupGeometry(
+    windowWidth: Int,
+    windowHeight: Int,
+    maxWidth: Int,
+    maxHeight: Int,
+    inset: Int,
+    bottomInset: Int = 0
+): PopupGeometry {
+    val available = centeredLearningPopupGeometry(windowWidth, windowHeight, maxWidth,
+        windowHeight, inset, bottomInset)
+    val height = minOf(maxHeight, (available.height * .82).toInt()).coerceAtLeast(1)
+    return centeredLearningPopupGeometry(windowWidth, windowHeight, maxWidth, height, inset, bottomInset)
+}

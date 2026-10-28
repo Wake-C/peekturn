@@ -3,6 +3,8 @@
 package app.peekturn.reader.reader
 
 import app.peekturn.reader.model.ReaderPreferences
+import app.peekturn.reader.model.DEFAULT_APP_THEME
+import org.readium.r2.navigator.preferences.Theme
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -10,6 +12,15 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ReaderPreferencesTest {
+    @Test fun `default and unknown appearances keep Readium light while explicit dark remains dark`() {
+        val reading = ReaderPreferences()
+        assertEquals(Theme.LIGHT, reading.toEpub(DEFAULT_APP_THEME).theme)
+        assertEquals(Theme.LIGHT, reading.toEpub("unknown").theme)
+        assertEquals(Theme.DARK, reading.toEpub("dark").theme)
+        assertEquals(Theme.DARK, reading.toEpub("oled").theme)
+        assertEquals(Theme.SEPIA, reading.toEpub("warm").theme)
+    }
+
     @Test fun `stored percentage becomes Readium multiplier without mutating persistence`() {
         val preferences = ReaderPreferences(fontSize = 180.0)
         assertEquals(1.8, preferences.toEpub("dark").fontSize!!, 0.0001)

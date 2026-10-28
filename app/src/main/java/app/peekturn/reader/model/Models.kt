@@ -68,6 +68,9 @@ enum class SentenceSpeechProvider {
     }
 }
 
+/** Appearance for a new installation or a missing/invalid saved choice. */
+const val DEFAULT_APP_THEME = "light"
+
 data class AppSettings(
     val quickExplain: Boolean = false,
     val autoPronounce: Boolean = false,
@@ -76,11 +79,11 @@ data class AppSettings(
     val profiles: List<LlmProfile> = listOf(LlmProfile("default", ModelConfig())),
     val activeProfileId: String = "default",
     val reading: ReaderPreferences = ReaderPreferences(),
-    val appTheme: String = "dark",
+    val appTheme: String = DEFAULT_APP_THEME,
     /** "system", "en" or "zh"; stored as the in-app choice, never inferred from the current locale. */
     val uiLanguage: String = "system",
     val volumeKeysNarration: Boolean = false,
-    val videoMergeCaptions: Boolean = false,
+    val videoMergeCaptions: Boolean = true,
     /** A height preference, never an expiring stream id. */
     val videoQualityHeight: Int = 1080,
     /** Compatibility default for videos without an explicit per-video playback mode. */

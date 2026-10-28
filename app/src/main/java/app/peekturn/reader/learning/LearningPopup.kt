@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
@@ -246,13 +247,14 @@ fun LearningPopup(
     }
     val configuration = LocalConfiguration.current
     val windowSize = LocalWindowInfo.current.containerSize
+    val compact = placement == LearningPopupPlacement.Center
     val geometry = with(density) {
         val windowWidth = windowSize.width.takeIf { it > 0 } ?: configuration.screenWidthDp.dp.roundToPx()
         val windowHeight = windowSize.height.takeIf { it > 0 } ?: configuration.screenHeightDp.dp.roundToPx()
         if (placement == LearningPopupPlacement.Center) {
-            // A screen-owned layer: fixed maximum width and available height, never the video's
-            // remaining width, so the picture and caption geometry cannot change under the answer.
-            centeredLearningPopupGeometry(windowWidth, windowHeight, 480.dp.roundToPx(), windowHeight,
+            // Bound the answer independently from the video. Long answers scroll without filling
+            // the landscape window or changing the picture and caption geometry behind them.
+            compactLearningPopupGeometry(windowWidth, windowHeight, 420.dp.roundToPx(), 420.dp.roundToPx(),
                 inset, bottomInset)
         } else {
             learningPopupGeometry(windowWidth, windowHeight, 440.dp.roundToPx(), (windowHeight * .82f).roundToInt(),
@@ -261,12 +263,15 @@ fun LearningPopup(
     }
     val width = with(density) { geometry.width.toDp() }
     val height = with(density) { geometry.height.toDp() }
+    val selectionHeight = if (compact) {
+        maxOf(height * .2f, with(density) { 26.sp.toDp() })
+    } else height * .2f
     fun close() { speech.stop(); onClose() }
     // An outside touch or Back is reported separately from the Close button so the reader can tell
     // which dismissal happened; both still close the popup and clear the selection.
     Popup(popupPositionProvider = position, onDismissRequest = { speech.stop(); onCancel() },
         properties = PopupProperties(focusable = true, clippingEnabled = true)) {
-        Surface(modifier = Modifier.width(width).heightIn(max = height).pointerInput(activity) {
+        Surface(modifier = Modifier.testTag("learning-popup").width(width).heightIn(max = height).pointerInput(activity) {
             awaitPointerEventScope {
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -282,9 +287,10 @@ fun LearningPopup(
             val loading = if (dictionaryTab) dictionaryLoading else explanation.loading
             val error = if (dictionaryTab) dictionaryError else explanationErrorMessage
             Column {
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp),
+                Row(Modifier.fillMaxWidth().padding(start = if (compact) 12.dp else 16.dp, end = 4.dp,
+                    top = if (compact) 2.dp else 6.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text(context.selection, modifier = Modifier.weight(1f).heightIn(max = height * .2f)
+                    Text(context.selection, modifier = Modifier.weight(1f).heightIn(max = selectionHeight)
                         .verticalScroll(rememberScrollState()), fontSize = 21.sp, lineHeight = 26.sp,
                         fontFamily = FontFamily.Serif)
                     SpeakButton(context.selection, speech, playback.text, playback.playing) {
@@ -295,90 +301,104 @@ fun LearningPopup(
                             modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                val details = listOf(phonetic.takeIf { it.isNotBlank() }, partOfSpeech.takeIf { it.isNotBlank() })
-                    .filterNotNull().joinToString(" · ")
-                if (details.isNotEmpty()) Text(details, modifier = Modifier.padding(horizontal = 16.dp),
-                    fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth().selectableGroup()) {
-                    LookupTab(stringResource(R.string.reader_lookup_tab_explain), !dictionaryTab, Modifier.weight(1f)) {
-                        explanationRequested = true; dictionaryTab = false
+                // The compact answer has one scroll area below its persistent close/speech row.
+                // Fixed tabs and a fixed footer can otherwise consume the whole short landscape
+                // viewport at large system font sizes, leaving no room to read or retry.
+                val contentScroll = rememberScrollState()
+                Column(Modifier.weight(1f, fill = false).then(if (compact) {
+                    Modifier.testTag("learning-popup-scroll").verticalScroll(contentScroll)
+                } else Modifier)) {
+                    val details = listOf(phonetic.takeIf { it.isNotBlank() }, partOfSpeech.takeIf { it.isNotBlank() })
+                        .filterNotNull().joinToString(" · ")
+                    if (details.isNotEmpty()) Text(details, modifier = Modifier.padding(horizontal = 16.dp),
+                        fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth().selectableGroup()) {
+                        LookupTab(stringResource(R.string.reader_lookup_tab_explain), !dictionaryTab, Modifier.weight(1f)) {
+                            explanationRequested = true; dictionaryTab = false
+                        }
+                        LookupTab(stringResource(R.string.reader_lookup_tab_dictionary), dictionaryTab, Modifier.weight(1f)) { dictionaryTab = true }
                     }
-                    LookupTab(stringResource(R.string.reader_lookup_tab_dictionary), dictionaryTab, Modifier.weight(1f)) { dictionaryTab = true }
-                }
-                HorizontalDivider()
-                key(context, dictionaryTab) {
-                    Column(Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        val meaning = if (dictionaryTab) entry?.meaning.orEmpty() else answer.meaning
-                        if (meaning.isNotBlank()) Text(meaning, fontFamily = FontFamily.Serif,
-                            fontSize = 17.sp, lineHeight = 26.sp)
-                        if (!dictionaryTab) {
-                            if (answer.context.isNotBlank()) Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Text(stringResource(R.string.reader_lookup_section_context),
-                                    fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold,
-                                    letterSpacing = 0.2.sp, color = MaterialTheme.colorScheme.primary)
-                                Text(answer.context, fontSize = 15.sp, lineHeight = 21.sp)
-                            }
-                            if (answer.examples.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(stringResource(R.string.reader_lookup_section_examples),
-                                    fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold,
-                                    letterSpacing = 0.2.sp, color = MaterialTheme.colorScheme.primary)
-                                answer.examples.forEachIndexed { exampleIndex, example ->
-                                    val active = playback.playing && playback.text == example.spokenText
-                                    ExplanationExampleRow(example, language, active) {
-                                        if (active) speech.stop()
-                                        else speech.speakExample(example.spokenText, accent, sentenceProvider)
-                                    }
-                                    if (exampleIndex < answer.examples.lastIndex) {
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                    }
+                    HorizontalDivider()
+                    key(context, dictionaryTab) {
+                        val bodyScroll = rememberScrollState()
+                        Column((if (compact) Modifier else Modifier.weight(1f, fill = false).verticalScroll(bodyScroll))
+                            .fillMaxWidth().padding(horizontal = if (compact) 12.dp else 16.dp,
+                                vertical = if (compact) 8.dp else 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
+                            val meaning = if (dictionaryTab) entry?.meaning.orEmpty() else answer.meaning
+                            if (meaning.isNotBlank()) Text(meaning, fontFamily = FontFamily.Serif,
+                                fontSize = 17.sp, lineHeight = 26.sp)
+                            if (!dictionaryTab) {
+                                if (answer.context.isNotBlank()) Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(stringResource(R.string.reader_lookup_section_context),
+                                        fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold,
+                                        letterSpacing = 0.2.sp, color = MaterialTheme.colorScheme.primary)
+                                    Text(answer.context, fontSize = 15.sp, lineHeight = 21.sp)
                                 }
-                                ExplanationRelations(answer, explanation.complete)
+                                if (answer.examples.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(stringResource(R.string.reader_lookup_section_examples),
+                                        fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold,
+                                        letterSpacing = 0.2.sp, color = MaterialTheme.colorScheme.primary)
+                                    answer.examples.forEachIndexed { exampleIndex, example ->
+                                        val active = playback.playing && playback.text == example.spokenText
+                                        ExplanationExampleRow(example, language, active) {
+                                            if (active) speech.stop()
+                                            else speech.speakExample(example.spokenText, accent, sentenceProvider)
+                                        }
+                                        if (exampleIndex < answer.examples.lastIndex) {
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                        }
+                                    }
+                                    ExplanationRelations(answer, explanation.complete)
+                                }
+                            }
+                            if (loading) Row(verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Text(stringResource(if (dictionaryTab) R.string.reader_lookup_loading_dictionary else R.string.reader_lookup_loading_explanation), fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (dictionaryTab && !loading && entry == null && error == null) {
+                                Text(stringResource(R.string.reader_lookup_empty_dictionary), fontSize = 15.sp)
+                            }
+                            error?.let {
+                                Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
+                                TextButton(onClick = {
+                                    if (dictionaryTab) dictionaryRetry++
+                                    else session.retry(context, latestSettings.activeProfileId, latestSettings.model, language)
+                                }, enabled = !loading) { Text(stringResource(R.string.reader_lookup_retry)) }
+                            }
+                            LookupSpeechFailure(playback, speech::dismissFailure)
+                        }
+                    }
+                    HorizontalDivider()
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val replay = onReplay
+                        val adjust = onAdjust
+                        when {
+                            replay != null -> TextButton(onClick = { speech.stop(); replay() }, modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.learning_popup_replay_sentence), fontSize = 13.sp,
+                                    maxLines = if (compact) Int.MAX_VALUE else 1)
+                            }
+                            adjust != null -> TextButton(onClick = { speech.stop(); adjust() }, modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.reader_lookup_adjust), fontSize = 13.sp,
+                                    maxLines = if (compact) Int.MAX_VALUE else 1)
                             }
                         }
-                        if (loading) Row(verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                            Text(stringResource(if (dictionaryTab) R.string.reader_lookup_loading_dictionary else R.string.reader_lookup_loading_explanation), fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (dictionaryTab && !loading && entry == null && error == null) {
-                            Text(stringResource(R.string.reader_lookup_empty_dictionary), fontSize = 15.sp)
-                        }
-                        error?.let {
-                            Text(it, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 20.sp)
-                            TextButton(onClick = {
-                                if (dictionaryTab) dictionaryRetry++
-                                else session.retry(context, latestSettings.activeProfileId, latestSettings.model, language)
-                            }, enabled = !loading) { Text(stringResource(R.string.reader_lookup_retry)) }
-                        }
-                        LookupSpeechFailure(playback, speech::dismissFailure)
-                    }
-                }
-                HorizontalDivider()
-                Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val replay = onReplay
-                    val adjust = onAdjust
-                    when {
-                        replay != null -> TextButton(onClick = { speech.stop(); replay() }, modifier = Modifier.weight(1f)) {
-                            Text(stringResource(R.string.learning_popup_replay_sentence), fontSize = 13.sp, maxLines = 1)
-                        }
-                        adjust != null -> TextButton(onClick = { speech.stop(); adjust() }, modifier = Modifier.weight(1f)) {
-                            Text(stringResource(R.string.reader_lookup_adjust), fontSize = 13.sp, maxLines = 1)
-                        }
-                    }
-                    // X and outside/Back stay cancellations: only this explicit action resumes.
-                    val resume = onResume
-                    if (resume != null) {
-                        TextButton(onClick = { speech.stop(); resume() }, modifier = Modifier.weight(1f)) {
-                            Text(stringResource(R.string.learning_popup_continue_watching), fontSize = 13.sp,
-                                maxLines = 1, fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary)
-                        }
-                    } else {
-                        TextButton(onClick = { close() }, modifier = Modifier.weight(1f)) {
-                            Text(stringResource(R.string.reader_lookup_close), fontSize = 13.sp, maxLines = 1)
+                        // X and outside/Back stay cancellations: only this explicit action resumes.
+                        val resume = onResume
+                        if (resume != null) {
+                            TextButton(onClick = { speech.stop(); resume() }, modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.learning_popup_continue_watching), fontSize = 13.sp,
+                                    maxLines = if (compact) Int.MAX_VALUE else 1, fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary)
+                            }
+                        } else {
+                            TextButton(onClick = { close() }, modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.reader_lookup_close), fontSize = 13.sp,
+                                    maxLines = if (compact) Int.MAX_VALUE else 1)
+                            }
                         }
                     }
                 }
@@ -411,7 +431,7 @@ private fun LookupTab(label: String, selected: Boolean, modifier: Modifier, onCl
     Column(modifier.selectable(selected = selected, role = Role.Tab, onClick = onClick)
         .heightIn(min = 48.dp), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center) {
-        Box(Modifier.weight(1f, fill = false).padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
             Text(label, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1,
                 fontWeight = if (selected) FontWeight.SemiBold else null,
                 color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)

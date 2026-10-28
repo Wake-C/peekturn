@@ -9,6 +9,7 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.SystemBarStyle
 import androidx.activity.OnBackPressedCallback
@@ -31,6 +32,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import app.peekturn.reader.AppLanguage
 import app.peekturn.reader.MainActivity
 import app.peekturn.reader.PeekturnApp
+import app.peekturn.reader.reader.NarrationVolumeKeyAction
 import app.peekturn.reader.reader.readerSystemBars
 import app.peekturn.reader.ui.PeekturnTheme
 import app.peekturn.reader.ui.isDarkTheme
@@ -48,6 +50,7 @@ class VideoActivity : AppCompatActivity() {
     private lateinit var vm: VideoViewModel
     private var resumed = false
     private var bound = false
+    private val readVolumeKeys = VideoReadVolumeKeys()
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val service = (binder as VideoPlaybackService.LocalBinder).service
@@ -70,6 +73,23 @@ class VideoActivity : AppCompatActivity() {
     }
     /** A shared/imported link must return to the Video list, not to whatever was below it. */
     private var openedFromShare = false
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val action = readVolumeKeys.action(
+            foreground = resumed && hasWindowFocus(),
+            state = if (::vm.isInitialized) vm.state.value else null,
+            keyCode = event.keyCode,
+            eventAction = event.action,
+            repeatCount = event.repeatCount
+        ) ?: return super.dispatchKeyEvent(event)
+        // The same seek-only commands as the visible transport preserve playing or paused state.
+        when (action) {
+            NarrationVolumeKeyAction.PREVIOUS -> vm.previousCue()
+            NarrationVolumeKeyAction.NEXT -> vm.nextCue()
+            NarrationVolumeKeyAction.CONSUME -> Unit
+        }
+        return true
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -155,6 +175,7 @@ class VideoActivity : AppCompatActivity() {
 
     override fun onStop() {
         resumed = false
+        readVolumeKeys.clear()
         if (!isChangingConfigurations && ::vm.isInitialized) {
             graph.speech.stop()
             vm.onBackground()

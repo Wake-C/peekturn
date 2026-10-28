@@ -9,6 +9,8 @@ import app.peekturn.reader.model.LlmProfile
 import app.peekturn.reader.model.ReaderPreferences
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -24,6 +26,37 @@ class ThemePreferencesTest {
         context = ApplicationProvider.getApplicationContext()
         context.getSharedPreferences("peekturn", Context.MODE_PRIVATE).edit().clear().commit()
         context.deleteDatabase("peekturn.db")
+    }
+
+    @Test fun newSettingsDefaultToWhiteAndGroupedVideoSentences() {
+        val defaults = AppSettings()
+        val stored = PeekturnStore(context).settings.value
+        assertEquals("light", defaults.appTheme)
+        assertTrue(defaults.videoMergeCaptions)
+        assertEquals("light", stored.appTheme)
+        assertTrue(stored.videoMergeCaptions)
+    }
+
+    @Test fun explicitDarkAndUngroupedChoicesSurviveReloadAndUnrelatedEdits() = runBlocking {
+        val store = PeekturnStore(context)
+        store.updateSettings { it.copy(appTheme = "dark", videoMergeCaptions = false) }
+        val restored = PeekturnStore(context)
+        assertEquals("dark", restored.settings.value.appTheme)
+        assertFalse(restored.settings.value.videoMergeCaptions)
+
+        restored.updateSettings { it.copy(quickExplain = true) }
+        val reloaded = PeekturnStore(context).settings.value
+        assertEquals("dark", reloaded.appTheme)
+        assertFalse(reloaded.videoMergeCaptions)
+        assertTrue(reloaded.quickExplain)
+    }
+
+    @Test fun invalidAppearanceUsesWhiteWithoutResettingOtherChoices() = runBlocking {
+        val store = PeekturnStore(context)
+        store.updateSettings { it.copy(appTheme = "unknown", videoMergeCaptions = false) }
+        val restored = PeekturnStore(context).settings.value
+        assertEquals("light", restored.appTheme)
+        assertFalse(restored.videoMergeCaptions)
     }
 
     @Test fun oneAppAppearancePersistsWithoutReplacingReadingOrModelPreferences() = runBlocking {
@@ -59,13 +92,14 @@ class ThemePreferencesTest {
         assertEquals("system", PeekturnStore(context).settings.value.uiLanguage)
     }
 
-    @Test fun existingSettingsWithoutAppAppearanceKeepFocusAndIgnoreObsoleteReaderPaper() {
+    @Test fun existingSettingsWithoutAppearanceOrGroupingUseDefaultsAndIgnoreObsoleteReaderPaper() {
         context.getSharedPreferences("peekturn", Context.MODE_PRIVATE).edit().putString(
             "settings",
             """{"quickExplain":true,"accent":"UK","model":{"name":"Existing provider","model":"existing-model"},"reading":{"theme":"light","fontSize":125}}"""
         ).commit()
         val restored = PeekturnStore(context).settings.value
-        assertEquals("dark", restored.appTheme)
+        assertEquals("light", restored.appTheme)
+        assertTrue(restored.videoMergeCaptions)
         assertEquals(ReaderPreferences(fontSize = 125.0), restored.reading)
         assertEquals(ModelConfig(name = "Existing provider", model = "existing-model"), restored.model)
         assertEquals(true, restored.quickExplain)

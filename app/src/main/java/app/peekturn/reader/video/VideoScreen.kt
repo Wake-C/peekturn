@@ -77,6 +77,7 @@ import app.peekturn.reader.reader.ReaderTextMetrics
 import app.peekturn.reader.reader.readerTextMetrics
 import app.peekturn.reader.reader.rememberReaderFontFamily
 import app.peekturn.reader.ui.SettingsDisclosure
+import app.peekturn.reader.ui.activeSentenceBackground
 import app.peekturn.reader.reader.readerTransportPrevious
 import app.peekturn.reader.reader.readerTransportNext
 import app.peekturn.reader.reader.readerTransportPlay
@@ -1011,7 +1012,7 @@ private fun CaptionPanel(
                         Modifier.fillMaxWidth()
                             .padding(horizontal = 4.dp, vertical = 2.dp)
                             .background(
-                                if (current) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
+                                if (current) MaterialTheme.colorScheme.activeSentenceBackground else Color.Transparent,
                                 RoundedCornerShape(8.dp)
                             )
                             .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
@@ -1029,7 +1030,7 @@ private fun CaptionPanel(
                             Text(
                                 (if (cue.timingApproximate) "~ " else "") + formatClock(cue.startMs),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (current) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         CaptionText(
@@ -1165,7 +1166,7 @@ internal fun VideoReadingParagraph(
         fontSize = metrics.fontSizeSp.sp,
         lineHeight = metrics.lineHeightSp.sp,
         letterSpacing = metrics.letterSpacingEm.em,
-        activeBackground = if (current) MaterialTheme.colorScheme.surfaceVariant else Color.Unspecified,
+        activeBackground = if (current) MaterialTheme.colorScheme.activeSentenceBackground else Color.Unspecified,
         modifier = Modifier.fillMaxWidth(),
         onLookup = { flowing.toSource(it)?.let(onLookup) },
         onBlankTap = onBlankTap

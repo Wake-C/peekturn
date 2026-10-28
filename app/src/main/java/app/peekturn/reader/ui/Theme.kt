@@ -9,6 +9,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.peekturn.reader.model.DEFAULT_APP_THEME
 
 /**
  * A-direction chrome tokens: a neutral paper canvas, one blue accent, and hairline rules instead of
@@ -25,7 +26,7 @@ object FocusColors {
 }
 
 /**
- * Charcoal, the default dark theme. Canvas 1D1E20 and surface 292B2E are two quiet paper stocks;
+ * Charcoal, the standard dark theme. Canvas 1D1E20 and surface 292B2E are two quiet paper stocks;
  * ink D5D6D3 clears 11:1 on both, and the muted A2A6A8 still clears 4.5:1 on the soft fill.
  */
 private val focusScheme = darkColorScheme(
@@ -136,12 +137,12 @@ private val oledScheme = darkColorScheme(
     surfaceContainer = Color(0xFF16181A), surfaceContainerHigh = Color(0xFF1E2022), surfaceContainerHighest = Color(0xFF26292C)
 )
 
-internal fun peekturnColorScheme(theme: String): ColorScheme = when (theme) {
-    "light" -> classicScheme
+internal fun peekturnColorScheme(theme: String = DEFAULT_APP_THEME): ColorScheme = when (theme) {
+    "dark" -> focusScheme
     "warm" -> warmScheme
     "oled" -> oledScheme
     "sage" -> sageScheme
-    else -> focusScheme
+    else -> classicScheme
 }
 
 /** Themes whose canvas is dark; system bar icons and reader chrome invert against these. */
@@ -176,6 +177,6 @@ private val peekturnShapes = Shapes(
     extraLarge = RoundedCornerShape(28.dp)
 )
 
-@Composable fun PeekturnTheme(theme: String = "dark", content: @Composable () -> Unit) {
+@Composable fun PeekturnTheme(theme: String = DEFAULT_APP_THEME, content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = peekturnColorScheme(theme), typography = focusTypography, shapes = peekturnShapes, content = content)
 }

@@ -36,7 +36,7 @@ import java.util.UUID
 @androidx.annotation.OptIn(UnstableApi::class)
 internal class VideoDownloads(private val context: Context, private val graph: AppGraph, private val scope: CoroutineScope) {
     private val root = File(context.noBackupFilesDir, "video-downloads")
-    private val gson = Gson()
+    private val manifests = VideoDownloadManifestStore(root)
     private val database = StandaloneDatabaseProvider(context)
     private val mutableStates = MutableStateFlow<Map<Long, VideoDownloadState>>(emptyMap())
     val states = mutableStates.asStateFlow()
@@ -62,10 +62,7 @@ internal class VideoDownloads(private val context: Context, private val graph: A
                 val spec = requireNotNull(VideoDownloadSpec.parse(request.uri))
                 VideoBundleDownloader(cache, http,
                     prepare = { prepareParts(spec) },
-                    removeParts = {
-                        readManifest(spec.itemId)?.keys?.forEach { cache.removeResource(it) }
-                        android.util.AtomicFile(manifestFile(spec.itemId)).delete()
-                    },
+                    removeParts = { manifests.remove(spec.itemId) { keys -> keys.forEach(cache::removeResource) } },
                     onEvent = { event -> graph.developerLog.recordEvent("video-download", "d${spec.itemId}:$event") },
                     onFailure = { failure -> graph.developerLog.recordFailure("video", "download-attempt", failure) })
             }
@@ -141,7 +138,7 @@ internal class VideoDownloads(private val context: Context, private val graph: A
                                 }
                                 put(spec.itemId, VideoDownloadState(phase, spec.audioOnly,
                                     download.percentDownloaded.takeIf { it >= 0 }?.toInt()?.coerceIn(0, 100),
-                                    download.bytesDownloaded, readManifest(spec.itemId)?.captions != null))
+                                    download.bytesDownloaded, manifests.read(spec.itemId)?.captions != null))
                             }
                         }
                     }
@@ -162,52 +159,29 @@ internal class VideoDownloads(private val context: Context, private val graph: A
         return withContext(Dispatchers.IO) {
             val download = index.getDownload("video-${item.id}") ?: return@withContext null
             if (download.state == Download.STATE_REMOVING) return@withContext null
-            val manifest = readManifest(item.id) ?: return@withContext null
+            val manifest = manifests.read(item.id) ?: return@withContext null
             if (manifest.videoId != item.videoId) return@withContext null
             // A video upgrade can fail while its already-completed audio remains usable. Never
             // present a partial stream as offline: every selected byte range must be in this cache.
-            fun complete(part: Part?): Boolean {
-                if (part == null) return false
+            fun complete(part: VideoDownloadStoredPart): Boolean {
                 val length = ContentMetadata.getContentLength(cache.getContentMetadata(part.key))
                 return length > 0 && cache.isCached(part.key, 0, length)
             }
-            val audio = manifest.audio?.takeIf { complete(it) }?.source()
-            val picture = manifest.video?.takeIf { complete(it) && (manifest.videoAudio == null || complete(manifest.videoAudio)) }
-                ?.source(manifest.videoAudio)
+            val audioRequired = item.readMode || preferredAudioOnly(item, graph.store.settings.value.videoAudioOnly)
+            val saved = manifest.playableSnapshot(audioRequired, ::complete) ?: return@withContext null
+            val audio = saved.audio?.source()
+            val picture = saved.video?.source(saved.videoAudio)
             val playback = picture ?: audio ?: return@withContext null
-            val document = manifest.captions?.takeIf { !item.trackExplicit || it.trackId == item.selectedTrackId }
+            val document = saved.captions?.takeIf { !item.trackExplicit || it.trackId == item.selectedTrackId }
             val track = document?.let { CaptionTrack(it.trackId, it.language, it.automatic, "") }
             val localItem = if (picture == null) item.copy(audioOnly = true) else item
             VideoSessionData(localItem, ResolvedVideo(
                 metadata = VideoMetadata(item.videoId, item.title, item.author, item.durationMs, item.thumbnailUrl),
                 playback = playback, tracks = listOfNotNull(track), audioOnly = audio,
-                qualities = picture?.let { listOf(VideoQuality("${manifest.height}p", manifest.height, it)) }.orEmpty(),
-                selectedQualityId = picture?.let { "${manifest.height}p" }
+                qualities = picture?.let { listOf(VideoQuality("${saved.height}p", saved.height, it)) }.orEmpty(),
+                selectedQualityId = picture?.let { "${saved.height}p" }
             ), document)
         }
-    }
-
-    private data class Part(val key: String, val mime: String) {
-        fun source(audio: Part? = null) = VideoPlaybackSource(uri(key), mime,
-            audioUrl = audio?.let { uri(it.key) }, audioMimeType = audio?.mime,
-            videoCacheKey = key, audioCacheKey = audio?.key)
-        companion object { fun uri(key: String) = "peekturn-offline://media/$key" }
-    }
-    private data class Manifest(
-        val videoId: String, val audio: Part?, val video: Part?, val videoAudio: Part?, val height: Int,
-        val captions: CaptionDocument?, val keys: List<String>
-    )
-    private fun manifestFile(id: Long) = File(root, "entry-$id.json")
-    private fun readManifest(id: Long): Manifest? = try {
-        val file = manifestFile(id)
-        if (file.isFile) gson.fromJson(file.readText(), Manifest::class.java) else null
-    } catch (_: Exception) { null }
-    private fun writeManifest(id: Long, value: Manifest) {
-        root.mkdirs()
-        val file = android.util.AtomicFile(manifestFile(id))
-        val output = file.startWrite()
-        try { output.write(gson.toJson(value).toByteArray()); file.finishWrite(output) }
-        catch (failure: Exception) { file.failWrite(output); throw failure }
     }
 
     private suspend fun prepareParts(spec: VideoDownloadSpec): List<VideoDownloadPart> {
@@ -219,8 +193,8 @@ internal class VideoDownloads(private val context: Context, private val graph: A
         }
         if (spec.audioOnly && audioSource == null) throw IOException("Independent audio unavailable")
         val downloads = linkedMapOf<String, VideoDownloadPart>()
-        fun part(url: String, mime: String, key: String?): Part {
-            val part = Part(key ?: "session-${UUID.randomUUID()}", mime)
+        fun part(url: String, mime: String, key: String?): VideoDownloadStoredPart {
+            val part = VideoDownloadStoredPart(key ?: "session-${UUID.randomUUID()}", mime)
             downloads[part.key] = VideoDownloadPart(part.key, url, mime)
             return part
         }
@@ -229,7 +203,7 @@ internal class VideoDownloads(private val context: Context, private val graph: A
         val videoAudio = quality?.source?.let { source -> source.audioUrl?.let {
             part(it, source.audioMimeType.orEmpty(), source.audioCacheKey)
         } }
-        val previous = readManifest(item.id)
+        val previous = manifests.read(item.id)
         val selected = selectInitialTrack(resolved.tracks, item.selectedTrackId, item.trackExplicit)
         val captions = selected?.let { track ->
             try {
@@ -243,9 +217,100 @@ internal class VideoDownloads(private val context: Context, private val graph: A
             }
         }
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
-        val manifest = Manifest(item.videoId, audio, video, videoAudio, quality?.height ?: 0,
-            captions, (previous?.keys.orEmpty() + downloads.keys).distinct())
-        writeManifest(item.id, manifest)
+        val manifest = VideoDownloadManifest(item.videoId, audio, video, videoAudio, quality?.height ?: 0,
+            captions, (previous?.keys.orEmpty() + downloads.keys).distinct()).preservingCompleted(previous) { part ->
+            val length = ContentMetadata.getContentLength(cache.getContentMetadata(part.key))
+            length > 0 && cache.isCached(part.key, 0, length)
+        }
+        manifests.write(item.id, manifest)
         return downloads.values.toList()
+    }
+}
+
+/** Only opaque cache keys and format metadata are persisted, never temporary media addresses. */
+internal data class VideoDownloadStoredPart(val key: String, val mime: String) {
+    fun source(audio: VideoDownloadStoredPart? = null) = VideoPlaybackSource(uri(key), mime,
+        audioUrl = audio?.let { uri(it.key) }, audioMimeType = audio?.mime,
+        videoCacheKey = key, audioCacheKey = audio?.key)
+
+    private companion object { fun uri(key: String) = "peekturn-offline://media/$key" }
+}
+
+/** A non-recursive, complete fallback keeps an interrupted replacement from hiding saved media. */
+internal data class VideoDownloadSnapshot(
+    val audio: VideoDownloadStoredPart?, val video: VideoDownloadStoredPart?,
+    val videoAudio: VideoDownloadStoredPart?, val height: Int, val captions: CaptionDocument?
+) {
+    fun completeParts(complete: (VideoDownloadStoredPart) -> Boolean): VideoDownloadSnapshot {
+        val picture = video?.takeIf { complete(it) && (videoAudio == null || complete(videoAudio)) }
+        return copy(audio = audio?.takeIf(complete), video = picture,
+            videoAudio = videoAudio.takeIf { picture != null }, height = if (picture == null) 0 else height)
+    }
+}
+
+/** A saved Read track can belong to a different completed snapshot from the available picture. */
+internal data class VideoDownloadAudioSnapshot(val audio: VideoDownloadStoredPart, val captions: CaptionDocument?) {
+    fun snapshot() = VideoDownloadSnapshot(audio, null, null, 0, captions)
+}
+
+internal data class VideoDownloadManifest(
+    val videoId: String, val audio: VideoDownloadStoredPart?, val video: VideoDownloadStoredPart?,
+    val videoAudio: VideoDownloadStoredPart?, val height: Int,
+    val captions: CaptionDocument?, val keys: List<String>, val fallback: VideoDownloadSnapshot? = null,
+    val audioFallback: VideoDownloadAudioSnapshot? = null
+) {
+    /** Select one coherent bundle: never pair a new picture with an older audio revision. */
+    fun playableSnapshot(
+        audioRequired: Boolean = false,
+        complete: (VideoDownloadStoredPart) -> Boolean
+    ): VideoDownloadSnapshot? {
+        val current = VideoDownloadSnapshot(audio, video, videoAudio, height, captions).completeParts(complete)
+        val previous = fallback?.completeParts(complete)
+        val previousAudio = audioFallback?.snapshot()?.completeParts(complete)
+        val candidates = listOfNotNull(current, previous, previousAudio).filter { !audioRequired || it.audio != null }
+        return candidates.firstOrNull { it.video != null } ?: candidates.firstOrNull { it.audio != null }
+    }
+
+    /** Keep at most one picture bundle and one independent audio snapshot, never a history chain. */
+    fun preservingCompleted(
+        previous: VideoDownloadManifest?,
+        complete: (VideoDownloadStoredPart) -> Boolean
+    ): VideoDownloadManifest {
+        if (previous == null || previous.videoId != videoId) return copy(fallback = null, audioFallback = null)
+        val pictureOrAudio = previous.playableSnapshot(complete = complete)
+        val read = previous.playableSnapshot(audioRequired = true, complete = complete)
+        // Usually one coherent fallback serves both modes. Only store a second caption document
+        // when Read needs a different saved audio snapshot; never attach newer captions to it.
+        val separateAudio = read?.let { snapshot ->
+            snapshot.audio?.takeUnless {
+                it == pictureOrAudio?.audio && snapshot.captions == pictureOrAudio?.captions
+            }?.let { VideoDownloadAudioSnapshot(it, snapshot.captions) }
+        }
+        return copy(fallback = pictureOrAudio, audioFallback = separateAudio)
+    }
+}
+
+/** AtomicFile recovery and writes share a lock, including Android 26–28's backup-file protocol. */
+internal class VideoDownloadManifestStore(private val root: File) {
+    private val gson = Gson()
+    private fun file(id: Long) = android.util.AtomicFile(File(root, "entry-$id.json"))
+
+    @Synchronized fun read(id: Long): VideoDownloadManifest? = try {
+        file(id).openRead().bufferedReader(Charsets.UTF_8).use { gson.fromJson(it, VideoDownloadManifest::class.java) }
+    } catch (_: Exception) { null }
+
+    @Synchronized fun write(id: Long, value: VideoDownloadManifest) {
+        root.mkdirs()
+        val file = file(id)
+        val output = file.startWrite()
+        try {
+            output.write(gson.toJson(value).toByteArray(Charsets.UTF_8))
+            file.finishWrite(output)
+        } catch (failure: Exception) { file.failWrite(output); throw failure }
+    }
+
+    @Synchronized fun remove(id: Long, removeKeys: (List<String>) -> Unit) {
+        read(id)?.let { removeKeys(it.keys) }
+        file(id).delete()
     }
 }

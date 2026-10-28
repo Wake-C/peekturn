@@ -447,6 +447,7 @@ class ReaderActivity : AppCompatActivity() {
             configuration = EpubNavigatorFragment.Configuration(
                 // Packaged face files are served at https://readium/assets/fonts/...
                 servedAssets = ReaderFonts.servedAssetPatterns,
+                decorationTemplates = readerNarrationDecorationTemplates(),
                 // Readium 3.1 quotes every family in --USER__fontFamily, including generic
                 // "serif"/"sans-serif", which would ask for fonts literally named that. The
                 // resolved bundled family plus an unquoted generic fallback is applied to the root
@@ -666,7 +667,7 @@ class ReaderActivity : AppCompatActivity() {
                         Decoration(
                             NARRATION_DECORATION_ID,
                             locator,
-                            Decoration.Style.Highlight(NARRATION_HIGHLIGHT)
+                            Decoration.Style.Highlight(NARRATION_HIGHLIGHT_TINT)
                         )
                     ),
                     NARRATION_DECORATION_GROUP
@@ -1289,7 +1290,6 @@ class ReaderActivity : AppCompatActivity() {
         private val LOOKUP_RESUME_REASONS = setOf("popup close", "popup outside dismissal", "back")
         private const val NARRATION_DECORATION_ID = "narration-utterance"
         private const val NARRATION_DECORATION_GROUP = "narration"
-        private val NARRATION_HIGHLIGHT = 0x2EFFC107.toInt()
 
         // Readium's release-time selection read is a JavaScript round trip into the WebView, so a
         // released selection is confirmed by agreeing reads instead of trusting one asynchronous value.

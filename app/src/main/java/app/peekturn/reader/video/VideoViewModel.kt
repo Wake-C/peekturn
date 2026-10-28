@@ -766,7 +766,7 @@ internal class VideoViewModel(
             try {
                 // The picture may have completed downloading since this Read session opened.
                 // Keep the current audio/player untouched while a missing picture resolves online.
-                val local = graph.videoDownloads.session(item)
+                val local = graph.videoDownloads.session(item.copy(audioOnly = false, readMode = false))
                 val data = local?.takeIf { it.resolved.qualities.isNotEmpty() }
                     ?: graph.videos.open(item.id, preferDownload = false)
                 if (token != sessionGeneration || _state.value.item?.id != item.id) return@launch

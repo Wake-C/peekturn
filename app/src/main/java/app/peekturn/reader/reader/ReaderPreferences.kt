@@ -31,8 +31,8 @@ internal fun ReaderPreferences.toEpub(appTheme: String) = EpubPreferences(
     textColor = Color(peekturnColorScheme(appTheme).onBackground.toArgb()),
     theme = when (appTheme) {
         "warm" -> Theme.SEPIA
-        "light", "sage" -> Theme.LIGHT
-        else -> Theme.DARK
+        "dark", "oled" -> Theme.DARK
+        else -> Theme.LIGHT
     }
 )
 
