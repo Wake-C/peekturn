@@ -9,13 +9,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildEpub,
+  builderScripts,
   fixtureHtml,
   launchBrowser,
-  vendorScripts,
   withFixture
 } from './harness.mjs';
-
-const builderScripts = [...vendorScripts, 'saveEbook.js', 'peekturn-import.js'];
 
 const xMarker = 'ARTICLE_AUTHOR_X_END';
 const cardMarker = 'ARTICLE_AUTHOR_CARD_END';

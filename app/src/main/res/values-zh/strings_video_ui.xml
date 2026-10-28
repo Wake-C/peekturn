@@ -55,6 +55,8 @@
     <string name="video_ui_read">阅读</string>
     <string name="video_ui_captions">字幕</string>
     <string name="video_ui_follow">跟随</string>
+    <string name="video_ui_following">正在跟随播放</string>
+    <string name="video_ui_follow_paused">已暂停自动跟随</string>
     <string name="video_ui_follow_description">跟随当前字幕</string>
     <string name="video_ui_no_captions">此视频没有可用字幕。</string>
     <string name="video_ui_no_english_captions">没有可用的英文字幕。请在播放设置中选择其他字幕轨。</string>

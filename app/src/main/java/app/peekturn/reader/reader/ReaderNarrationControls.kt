@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.peekturn.reader.R
+import app.peekturn.reader.ui.PeekturnIcons
 import app.peekturn.reader.narration.NarrationState
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -125,7 +126,7 @@ internal fun ReaderNarrationCard(
             ) {
                 IconButton(onClick = onPrevious, modifier = Modifier.size(42.dp)) {
                     Icon(
-                        readerTransportPrevious,
+                        PeekturnIcons.Previous,
                         contentDescription = stringResource(R.string.reader_narration_previous),
                         modifier = Modifier.size(22.dp)
                     )
@@ -137,7 +138,7 @@ internal fun ReaderNarrationCard(
                     )
                     IconButton(onClick = onPlayPause, modifier = Modifier.size(42.dp)) {
                         Icon(
-                            if (state.playing) readerTransportPause else readerTransportPlay,
+                            if (state.playing) PeekturnIcons.Pause else PeekturnIcons.Play,
                             contentDescription = stringResource(
                                 if (state.playing) R.string.reader_narration_pause
                                 else R.string.reader_narration_play
@@ -149,14 +150,14 @@ internal fun ReaderNarrationCard(
                 }
                 IconButton(onClick = onNext, modifier = Modifier.size(42.dp)) {
                     Icon(
-                        readerTransportNext,
+                        PeekturnIcons.Next,
                         contentDescription = stringResource(R.string.reader_narration_next),
                         modifier = Modifier.size(22.dp)
                     )
                 }
                 IconButton(onClick = onNextParagraph, modifier = Modifier.size(42.dp)) {
                     Icon(
-                        readerTransportNextParagraph,
+                        PeekturnIcons.NextParagraph,
                         contentDescription = stringResource(R.string.reader_narration_next_paragraph),
                         modifier = Modifier.size(22.dp)
                     )
@@ -176,7 +177,7 @@ internal fun ReaderNarrationCard(
                 Spacer(Modifier.width(2.dp))
                 IconButton(onClick = onStop, modifier = Modifier.size(42.dp)) {
                     Icon(
-                        toolbarClose,
+                        PeekturnIcons.Close,
                         contentDescription = stringResource(R.string.reader_narration_stop),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp)

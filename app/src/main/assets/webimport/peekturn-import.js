@@ -60,6 +60,8 @@
     // The content script registers one message listener; the first response is the page record.
     function extractPage() {
         return new Promise(function (resolve, reject) {
+            var refusal = window.PeekturnArticleAdapters && window.PeekturnArticleAdapters.refusal();
+            if (refusal) { reject(failure(refusal)); return; }
             var listeners = window.__peekturnListeners || [];
             if (listeners.length === 0) { reject(failure('no-article')); return; }
             var settled = false;

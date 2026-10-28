@@ -1,5 +1,11 @@
 # Third-party notices
 
+## Lucide interface icons
+
+The in-app icon family uses selected [Lucide](https://github.com/lucide-icons/lucide) SVGs from revision `c2dd25753da3f25d9ddc351ddb0ee72332189692`, converted to native Compose vectors in `PeekturnIcons.kt`. The rounded strokes are adapted from 2 to 1.8 units on the original 24-unit grid. Navigation arrows support RTL mirroring. No Lucide runtime dependency is included.
+
+Lucide is licensed under ISC; icons derived from Feather also retain its MIT notice. The complete upstream license and both copyright notices are bundled at [app/src/main/assets/licenses/LICENSE-Lucide.txt](app/src/main/assets/licenses/LICENSE-Lucide.txt). The Peekturn launcher artwork is separate and unchanged.
+
 ## ECDICT offline dictionary
 
 Peekturn includes a transformed SQLite edition of [ECDICT](https://github.com/skywind3000/ECDICT), independently downloaded from its upstream repository, not copied from another application.
@@ -96,7 +102,8 @@ statistics keep working on one format. The conversion runs on the device inside 
   `app/src/main/assets/webimport/`: `extractHtml.js`, `sanitizeHtml.js`, `cssSanitizer.js`,
   `utils.js`, `saveEbook.js`. Upstream revision `8a8c030db758efdfedb09d675eceab76d7836d86`.
   Peekturn does not modify these files; `peekturn-shim.js` supplies the small extension host they expect
-  and `peekturn-import.js` sequences their extraction and build calls.
+  and `peekturn-import.js` sequences their extraction and build calls. `peekturn-article-adapters.js`
+  selects article bodies in common blog templates before the same sanitization and EPUB pipeline.
 - [Mozilla Readability](https://github.com/mozilla/readability), Apache-2.0, vendored as
   `readability.js` from the same upstream (its `libs/readability.js`).
 - [JSZip](https://stuk.github.io/jszip/), MIT, vendored as `jszip.js` from the same upstream

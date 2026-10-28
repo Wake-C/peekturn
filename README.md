@@ -32,6 +32,10 @@ The book or video stays central. Help should be brief, useful and easy to leave.
 2. Paste a YouTube link in Video, or share it from another app.
 3. The offline dictionary works without setup. For AI context explanations, add your own model service, model name and API key in Settings. Your provider may charge for requests.
 
+Article import supports common Substack, WordPress, Ghost and static blog layouts, including custom
+domains. X, Anthropic, OpenAI and other pages keep the general article extractor. If a page shows only
+a paid preview, open the full article or sign in inside the import browser before importing.
+
 ## Privacy and limits
 
 Books, captions, positions and learning statistics stay on your device. AI explanations send the selected text and a short surrounding context to your configured service. Online pronunciation and narration send the text to the chosen speech service. API keys are encrypted on the device.

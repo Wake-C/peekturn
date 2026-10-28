@@ -81,13 +81,14 @@ class PortraitToolsTest {
 
     @Test fun readingToolsHaveNoClockOrSeekAndFollowStaysLeftOfCenteredTransport() {
         var follows = 0
+        var following by mutableStateOf(false)
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
                 PeekturnTheme(theme = "dark") {
                     Box(Modifier.width(320.dp)) {
                         PortraitTools(fixture.copy(readMode = true, audioOnly = true), {}, {}, {}, {}, {},
-                            Modifier.testTag("tools"), following = false, onFollow = { follows++ })
+                            Modifier.testTag("tools"), following = following, onFollow = { follows++; following = true })
                     }
                 }
             }
@@ -96,13 +97,32 @@ class PortraitToolsTest {
         compose.onNodeWithText("00:40").assertDoesNotExist()
         compose.onNodeWithText("02:00").assertDoesNotExist()
         val panel = compose.onNodeWithTag("tools").fetchSemanticsNode().boundsInRoot
-        val follow = compose.onNodeWithText(description(R.string.video_ui_follow)).fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithText(description(R.string.video_ui_follow)).assertDoesNotExist()
+        val followButton = compose.onNodeWithContentDescription(description(R.string.video_ui_follow))
+        followButton.assertIsNotSelected()
+        followButton.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
+            description(R.string.video_ui_follow_paused)))
+        val follow = followButton.fetchSemanticsNode().boundsInRoot
         val previous = compose.onNodeWithContentDescription(description(R.string.video_ui_previous_subtitle)).fetchSemanticsNode().boundsInRoot
         val play = compose.onNodeWithContentDescription(description(R.string.video_ui_play)).fetchSemanticsNode().boundsInRoot
         assertEquals(panel.center.x, play.center.x, 1f)
         assertTrue("follow=$follow previous=$previous", follow.right <= previous.left)
-        compose.onNodeWithText(description(R.string.video_ui_follow)).performClick()
+        followButton.performClick()
+        followButton.assertIsSelected()
+        followButton.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
+            description(R.string.video_ui_following)))
+        assertEquals(follow, followButton.fetchSemanticsNode().boundsInRoot)
         compose.runOnIdle { assertEquals(1, follows) }
+    }
+
+    @Test fun followWithoutCaptionsIsDisabled() {
+        compose.setContent {
+            PeekturnTheme {
+                PortraitTools(VideoPlaybackState(readMode = true), {}, {}, {}, {}, {},
+                    onFollow = { fail("No captions to follow") })
+            }
+        }
+        compose.onNodeWithContentDescription(description(R.string.video_ui_follow)).assertIsNotEnabled()
     }
 
     @Test fun readingParagraphIsTextWithoutTimestampAndWordLookupDoesNotSeek() {

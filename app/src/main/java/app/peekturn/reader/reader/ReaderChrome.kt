@@ -12,12 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.PathBuilder
-import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -28,6 +23,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.peekturn.reader.R
+import app.peekturn.reader.ui.PeekturnIcons
 import app.peekturn.reader.narration.NarrationState
 import app.peekturn.reader.ui.isDarkTheme
 import app.peekturn.reader.ui.peekturnColorScheme
@@ -172,13 +168,13 @@ private const val SELECTION_ALPHA = 0.32f
             horizontalArrangement = Arrangement.Center
         ) {
             CompactTransportButton(
-                icon = readerTransportPrevious,
+                icon = PeekturnIcons.Previous,
                 contentDescription = stringResource(R.string.reader_narration_previous),
                 accent = false,
                 onClick = onPrevious
             )
             CompactTransportButton(
-                icon = if (state.playing) readerTransportPause else readerTransportPlay,
+                icon = if (state.playing) PeekturnIcons.Pause else PeekturnIcons.Play,
                 contentDescription = stringResource(
                     if (state.playing) R.string.reader_narration_pause else R.string.reader_narration_play
                 ),
@@ -186,7 +182,7 @@ private const val SELECTION_ALPHA = 0.32f
                 onClick = onPlayPause
             )
             CompactTransportButton(
-                icon = readerTransportNext,
+                icon = PeekturnIcons.Next,
                 contentDescription = stringResource(R.string.reader_narration_next),
                 accent = false,
                 onClick = onNext
@@ -265,10 +261,10 @@ private const val SELECTION_ALPHA = 0.32f
     onClick: () -> Unit
 ) {
     val icon = when (entry) {
-        ReaderToolbarEntry.CONTENTS -> toolbarContents
-        ReaderToolbarEntry.TYPOGRAPHY -> toolbarTypography
-        ReaderToolbarEntry.OPTIONS -> toolbarOptions
-        ReaderToolbarEntry.READ_ALOUD -> toolbarSpeaker
+        ReaderToolbarEntry.CONTENTS -> PeekturnIcons.Contents
+        ReaderToolbarEntry.TYPOGRAPHY -> PeekturnIcons.Typography
+        ReaderToolbarEntry.OPTIONS -> PeekturnIcons.Settings
+        ReaderToolbarEntry.READ_ALOUD -> PeekturnIcons.Speaker
     }
     Column(
         modifier = modifier
@@ -305,152 +301,3 @@ private const val SELECTION_ALPHA = 0.32f
         Spacer(Modifier.height(12.dp))
     }
 }
-
-// The stock outlined set mixes thick bars with the text mark, which read as different families
-// beside the hairline magnifier. Every glyph the reader draws shares one hairline weight on
-// Material's 24dp grid, so the rail, top bar and transport carry the same stroke and optical size.
-private const val RAIL_STROKE = 1.6f
-
-private fun railPath(builder: ImageVector.Builder, pathBuilder: PathBuilder.() -> Unit): ImageVector.Builder =
-    builder.path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = RAIL_STROKE,
-        strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, pathBuilder = pathBuilder)
-
-private fun PathBuilder.ring(centerX: Float, centerY: Float, radius: Float) {
-    moveTo(centerX - radius, centerY)
-    arcToRelative(radius, radius, 0f, isMoreThanHalf = true, isPositiveArc = true, dx1 = radius * 2, dy1 = 0f)
-    arcToRelative(radius, radius, 0f, isMoreThanHalf = true, isPositiveArc = true, dx1 = -radius * 2, dy1 = 0f)
-    close()
-}
-
-/** "Aa" is the reading-app mark for typography, drawn at the toolbar's stroke weight. */
-private val toolbarTypography: ImageVector = ImageVector.Builder(
-    name = "PeekturnToolbarTypography", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).apply {
-    // Cap height 6.4-18.4 keeps the letters from crowding the neighbouring hairline magnifier.
-    railPath(this) { moveTo(9.2f, 6.4f); lineTo(4.4f, 18.4f) }
-    railPath(this) { moveTo(9.2f, 6.4f); lineTo(14f, 18.4f) }
-    railPath(this) { moveTo(6.2f, 14f); lineTo(12.2f, 14f) }
-    // The small "a" is a bowl with a stem starting at the bowl's own top edge, not above it: a stem
-    // that rises past the bowl is a "d", which is how this mark used to read.
-    val bowlRadius = 2.15f
-    val bowlCenterX = 19f
-    val bowlCenterY = 16.35f
-    railPath(this) { ring(bowlCenterX, bowlCenterY, bowlRadius) }
-    railPath(this) {
-        moveTo(bowlCenterX + bowlRadius, bowlCenterY - bowlRadius)
-        lineTo(bowlCenterX + bowlRadius, 18.4f)
-    }
-}.build()
-
-/** The read-aloud speaker shares the menu's hairline weight and optical size. */
-private val toolbarSpeaker: ImageVector = ImageVector.Builder(
-    name = "PeekturnToolbarSpeaker", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).apply {
-    railPath(this) {
-        moveTo(4f, 9f)
-        lineTo(8f, 9f)
-        lineTo(13f, 5f)
-        lineTo(13f, 19f)
-        lineTo(8f, 15f)
-        lineTo(4f, 15f)
-        close()
-    }
-    railPath(this) {
-        moveTo(16.5f, 8.5f)
-        arcToRelative(5f, 5f, 0f, isMoreThanHalf = false, isPositiveArc = true, dx1 = 0f, dy1 = 7f)
-    }
-    railPath(this) {
-        moveTo(19f, 5.5f)
-        arcToRelative(9f, 9f, 0f, isMoreThanHalf = false, isPositiveArc = true, dx1 = 0f, dy1 = 13f)
-    }
-}.build()
-
-/** The contents mark is a three-line list with a small leading bullet per row. */
-private val toolbarContents: ImageVector = ImageVector.Builder(
-    name = "PeekturnToolbarContents", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).apply {
-    railPath(this) { moveTo(9.5f, 6.5f); lineTo(20f, 6.5f) }
-    railPath(this) { moveTo(9.5f, 12f); lineTo(20f, 12f) }
-    railPath(this) { moveTo(9.5f, 17.5f); lineTo(20f, 17.5f) }
-    railPath(this) { ring(4.8f, 6.5f, 0.8f) }
-    railPath(this) { ring(4.8f, 12f, 0.8f) }
-    railPath(this) { ring(4.8f, 17.5f, 0.8f) }
-}.build()
-
-/** Two slider tracks with their handles, drawn on the same hairline as the rest of the rail. */
-private val toolbarOptions: ImageVector = ImageVector.Builder(
-    name = "PeekturnToolbarOptions", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).apply {
-    railPath(this) { moveTo(4f, 8.5f); lineTo(20f, 8.5f) }
-    railPath(this) { moveTo(4f, 15.5f); lineTo(20f, 15.5f) }
-    railPath(this) { ring(9f, 8.5f, 2.1f) }
-    railPath(this) { ring(15f, 15.5f, 2.1f) }
-}.build()
-
-/** The close mark used by the top bar and the contents header. */
-internal val toolbarClose: ImageVector = ImageVector.Builder(
-    name = "PeekturnToolbarClose", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).apply {
-    railPath(this) { moveTo(6f, 6f); lineTo(18f, 18f) }
-    railPath(this) { moveTo(18f, 6f); lineTo(6f, 18f) }
-}.build()
-
-/** Transport glyphs: outlined on the same grid so the compact footer and card agree. */
-internal val readerTransportPrevious: ImageVector = ImageVector.Builder(
-    name = "PeekturnTransportPrevious", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).apply {
-    railPath(this) { moveTo(7f, 5.5f); lineTo(7f, 18.5f) }
-    railPath(this) { moveTo(18.5f, 5.5f); lineTo(9.5f, 12f); lineTo(18.5f, 18.5f); close() }
-}.build()
-
-internal val readerTransportNext: ImageVector = ImageVector.Builder(
-    name = "PeekturnTransportNext", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).apply {
-    railPath(this) { moveTo(17f, 5.5f); lineTo(17f, 18.5f) }
-    railPath(this) { moveTo(5.5f, 5.5f); lineTo(14.5f, 12f); lineTo(5.5f, 18.5f); close() }
-}.build()
-
-internal val readerTransportPlay: ImageVector = ImageVector.Builder(
-    name = "PeekturnTransportPlay", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).apply {
-    railPath(this) { moveTo(8f, 5.5f); lineTo(18.5f, 12f); lineTo(8f, 18.5f); close() }
-}.build()
-
-internal val readerTransportPause: ImageVector = ImageVector.Builder(
-    name = "PeekturnTransportPause", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).apply {
-    railPath(this) { moveTo(9.5f, 5.5f); lineTo(9.5f, 18.5f) }
-    railPath(this) { moveTo(14.5f, 5.5f); lineTo(14.5f, 18.5f) }
-}.build()
-
-/** A double chevron stays distinct from the single-skip mark at the card's icon size. */
-internal val readerTransportNextParagraph: ImageVector = ImageVector.Builder(
-    name = "PeekturnTransportNextParagraph", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).apply {
-    railPath(this) { moveTo(6.5f, 5.5f); lineTo(12.5f, 12f); lineTo(6.5f, 18.5f) }
-    railPath(this) { moveTo(12.5f, 5.5f); lineTo(18.5f, 12f); lineTo(12.5f, 18.5f) }
-}.build()
-
-/** Binoculars mark the whole-book search entry inside the contents header. */
-internal val toolbarBinoculars: ImageVector = ImageVector.Builder(
-    name = "PeekturnToolbarBinoculars", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).apply {
-    railPath(this) { moveTo(3f, 13f); lineTo(6f, 5f); lineTo(9f, 5f); lineTo(10f, 14f) }
-    railPath(this) { moveTo(21f, 13f); lineTo(18f, 5f); lineTo(15f, 5f); lineTo(14f, 14f) }
-    railPath(this) { moveTo(10f, 11f); lineTo(14f, 11f) }
-    railPath(this) { moveTo(7f, 5f); lineTo(7f, 3f) }
-    railPath(this) { moveTo(17f, 5f); lineTo(17f, 3f) }
-    railPath(this) { ring(6.5f, 15.5f, 4.5f) }
-    railPath(this) { ring(17.5f, 15.5f, 4.5f) }
-}.build()

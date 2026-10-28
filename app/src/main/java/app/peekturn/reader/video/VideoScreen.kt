@@ -22,18 +22,6 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Fullscreen
-import androidx.compose.material.icons.outlined.FullscreenExit
-import androidx.compose.material.icons.outlined.OndemandVideo
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SkipNext
-import androidx.compose.material.icons.outlined.SkipPrevious
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.*
@@ -68,6 +56,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import app.peekturn.reader.R
+import app.peekturn.reader.ui.PeekturnIcons
+import app.peekturn.reader.ui.PeekturnIconButton
 import app.peekturn.reader.learning.LearningPopup
 import app.peekturn.reader.learning.LearningPopupPlacement
 import app.peekturn.reader.model.AppSettings
@@ -78,10 +68,6 @@ import app.peekturn.reader.reader.readerTextMetrics
 import app.peekturn.reader.reader.rememberReaderFontFamily
 import app.peekturn.reader.ui.SettingsDisclosure
 import app.peekturn.reader.ui.activeSentenceBackground
-import app.peekturn.reader.reader.readerTransportPrevious
-import app.peekturn.reader.reader.readerTransportNext
-import app.peekturn.reader.reader.readerTransportPlay
-import app.peekturn.reader.reader.readerTransportPause
 import app.peekturn.reader.speech.PronunciationPlayer
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
@@ -254,7 +240,7 @@ private fun PortraitPlayer(
                 Column(Modifier.fillMaxSize()) {
                     VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true,
                         hasItem = state.item != null, landscape = false,
-                        trailingIcon = Icons.Outlined.Fullscreen,
+                        trailingIcon = PeekturnIcons.Fullscreen,
                         trailingDescription = stringResource(R.string.video_ui_fullscreen),
                         onTrailing = onFullscreen)
                     LoadingPanel(Modifier.weight(1f).fillMaxWidth())
@@ -264,7 +250,7 @@ private fun PortraitPlayer(
                 Column(Modifier.fillMaxSize()) {
                     VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true,
                         hasItem = state.item != null, landscape = false,
-                        trailingIcon = Icons.Outlined.Fullscreen,
+                        trailingIcon = PeekturnIcons.Fullscreen,
                         trailingDescription = stringResource(R.string.video_ui_fullscreen),
                         onTrailing = onFullscreen)
                     FailureContent(state, phase.kind, vm, landscape = false, Modifier.weight(1f).fillMaxWidth())
@@ -279,7 +265,7 @@ private fun PortraitPlayer(
                 val topBar: @Composable (Boolean) -> Unit = { applyInsets ->
                     VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true,
                         hasItem = state.item != null, landscape = false,
-                        trailingIcon = if (state.readMode) Icons.Outlined.OndemandVideo else Icons.Outlined.Fullscreen,
+                        trailingIcon = if (state.readMode) PeekturnIcons.Watch else PeekturnIcons.Fullscreen,
                         trailingDescription = stringResource(if (state.readMode) R.string.video_ui_watch_video else R.string.video_ui_fullscreen),
                         onTrailing = if (state.readMode) { { vm.setReadMode(false) } } else onFullscreen,
                         trailingEnabled = !state.modeSaving, trailingBusy = state.modeSaving,
@@ -359,7 +345,7 @@ private fun LandscapePlayer(
         if (state.phase !is VideoPhase.Ready) {
             VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true,
                 hasItem = state.item != null, landscape = true,
-                trailingIcon = Icons.Outlined.FullscreenExit,
+                trailingIcon = PeekturnIcons.ExitFullscreen,
                 trailingDescription = stringResource(R.string.video_ui_exit_fullscreen),
                 onTrailing = onExitFullscreen)
         }
@@ -394,7 +380,7 @@ internal fun VideoTopBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack,
+                Icon(PeekturnIcons.Back,
                     contentDescription = stringResource(R.string.video_ui_back),
                     tint = foreground)
             }
@@ -407,7 +393,7 @@ internal fun VideoTopBar(
                 overflow = TextOverflow.Ellipsis
             )
             IconButton(onClick = onSettings, enabled = hasItem, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Outlined.Settings,
+                Icon(PeekturnIcons.Settings,
                     contentDescription = stringResource(R.string.video_ui_settings),
                     tint = if (hasItem) foreground else foreground.copy(alpha = 0.38f))
             }
@@ -632,26 +618,27 @@ internal fun PortraitTools(
             }
             // Absolute centring keeps the transport still when the speed label changes width.
             Box(Modifier.fillMaxWidth().height(if (state.readMode) ReadingToolsHeight else 48.dp)) {
-                TextButton(
+                PeekturnIconButton(
+                    icon = PeekturnIcons.Follow,
+                    description = stringResource(R.string.video_ui_follow),
                     onClick = onFollow,
                     enabled = state.displayedCues.isNotEmpty(),
-                    contentPadding = PaddingValues(horizontal = 2.dp),
-                    modifier = Modifier.align(Alignment.CenterStart).widthIn(min = 48.dp)
-                ) {
-                    Text(stringResource(R.string.video_ui_follow),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (following) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                    selected = following,
+                    stateDescription = stringResource(
+                        if (following) R.string.video_ui_following else R.string.video_ui_follow_paused
+                    ),
+                    modifier = Modifier.align(Alignment.CenterStart)
+                )
                 Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
                     CueButton(
-                        readerTransportPrevious,
+                        PeekturnIcons.Previous,
                         stringResource(R.string.video_ui_previous_subtitle),
                         enabled = previousCueIndex(state.displayedCues, state.positionMs) != null,
                         onClick = onPrevious
                     )
                     PlayButton(state, onTogglePlay, size = 48.dp)
                     CueButton(
-                        readerTransportNext,
+                        PeekturnIcons.Next,
                         stringResource(R.string.video_ui_next_subtitle),
                         enabled = nextCueIndex(state.displayedCues, state.positionMs) != null,
                         onClick = onNext
@@ -673,10 +660,10 @@ internal fun VideoCompactTransport(
     onNext: () -> Unit
 ) {
     Row(Modifier.padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        CueButton(readerTransportPrevious, stringResource(R.string.video_ui_previous_subtitle),
+        CueButton(PeekturnIcons.Previous, stringResource(R.string.video_ui_previous_subtitle),
             enabled = previousCueIndex(state.displayedCues, state.positionMs) != null, onClick = onPrevious)
         PlayButton(state, onTogglePlay, size = 48.dp)
-        CueButton(readerTransportNext, stringResource(R.string.video_ui_next_subtitle),
+        CueButton(PeekturnIcons.Next, stringResource(R.string.video_ui_next_subtitle),
             enabled = nextCueIndex(state.displayedCues, state.positionMs) != null, onClick = onNext)
     }
 }
@@ -700,7 +687,7 @@ private fun LandscapeChrome(
                 controlsVisible = true,
                 hasItem = state.item != null,
                 landscape = true,
-                trailingIcon = Icons.Outlined.FullscreenExit,
+                trailingIcon = PeekturnIcons.ExitFullscreen,
                 trailingDescription = stringResource(R.string.video_ui_exit_fullscreen),
                 onTrailing = onExitFullscreen
             )
@@ -711,14 +698,14 @@ private fun LandscapeChrome(
             verticalAlignment = Alignment.CenterVertically
         ) {
             CueButton(
-                Icons.Outlined.SkipPrevious,
+                PeekturnIcons.Previous,
                 stringResource(R.string.video_ui_previous_subtitle),
                 enabled = previousCueIndex(state.displayedCues, state.positionMs) != null,
                 onDark = true
             ) { vm.previousCue() }
             PlayButton(state, vm::togglePlay, size = LandscapeTransportSize, overlay = true)
             CueButton(
-                Icons.Outlined.SkipNext,
+                PeekturnIcons.Next,
                 stringResource(R.string.video_ui_next_subtitle),
                 enabled = nextCueIndex(state.displayedCues, state.positionMs) != null,
                 onDark = true
@@ -846,7 +833,7 @@ private fun SpeedControl(speed: Float, onSpeed: (Float) -> Unit, light: Boolean 
                     text = { Text(speedText(option)) },
                     onClick = { open = false; onSpeed(option) },
                     trailingIcon = if (option == speed) {
-                        { Icon(Icons.Outlined.Check, contentDescription = null) }
+                        { Icon(PeekturnIcons.Check, contentDescription = null) }
                     } else null
                 )
             }
@@ -863,7 +850,12 @@ private fun CueButton(
     onClick: () -> Unit
 ) {
     val base = if (onDark) Color.White else MaterialTheme.colorScheme.onSurface
-    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(48.dp)) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(48.dp)
+            .then(if (onDark) Modifier.background(VideoScrim, CircleShape) else Modifier)
+    ) {
         Icon(
             icon,
             contentDescription = description,
@@ -876,11 +868,7 @@ private fun CueButton(
 private fun PlayButton(state: VideoPlaybackState, onTogglePlay: () -> Unit, size: Dp, overlay: Boolean = false) {
     val ended = state.ended
     val playing = state.playRequested && !ended
-    val icon = if (overlay) {
-        if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow
-    } else {
-        if (playing) readerTransportPause else readerTransportPlay
-    }
+    val icon = if (playing) PeekturnIcons.Pause else PeekturnIcons.Play
     val description = stringResource(
         when {
             ended -> R.string.video_ui_replay
@@ -944,17 +932,12 @@ private fun CaptionPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.weight(1f))
-            TextButton(
+            PeekturnIconButton(
+                icon = PeekturnIcons.BookOpen,
+                description = stringResource(R.string.video_ui_read),
                 onClick = { vm.setReadMode(true) },
-                enabled = cues.isNotEmpty() && state.audioAvailable && !state.modeSaving,
-                modifier = Modifier.heightIn(min = 48.dp)
-            ) {
-                Text(
-                    stringResource(R.string.video_ui_read),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
+                enabled = cues.isNotEmpty() && state.audioAvailable && !state.modeSaving
+            )
         }
         if (!state.readMode) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         when {

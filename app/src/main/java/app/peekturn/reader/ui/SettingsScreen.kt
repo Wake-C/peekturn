@@ -9,16 +9,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.VolumeUp
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.BugReport
-import androidx.compose.material.icons.outlined.ExpandLess
-import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.GraphicEq
-import androidx.compose.material.icons.outlined.Headphones
-import androidx.compose.material.icons.outlined.Stop
-import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -101,7 +91,7 @@ fun SettingsScreen(
                 addingProfile = true
                 editingProfile = LlmProfile(UUID.randomUUID().toString(), ModelConfig(name = ""))
             }, modifier = Modifier.heightIn(min = 48.dp)) {
-                Icon(Icons.Outlined.Add, contentDescription = null)
+                Icon(PeekturnIcons.Add, contentDescription = null)
                 Spacer(Modifier.width(4.dp))
                 Text(stringResource(R.string.settings_add))
             }
@@ -132,25 +122,25 @@ fun SettingsScreen(
             SettingsDisclosure(
                 stringResource(R.string.settings_pronunciation),
                 stringResource(if (settings.accent == "US") R.string.settings_us_english else R.string.settings_uk_english),
-                icon = Icons.Outlined.Headphones
+                icon = PeekturnIcons.Headphones
             ) { pronunciationOpen = true }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SettingsDisclosure(
                 stringResource(R.string.settings_explanation_cache),
                 stringResource(R.string.settings_explanation_cache_summary),
-                icon = Icons.Outlined.Storage
+                icon = PeekturnIcons.Storage
             ) { explanationCacheOpen = true }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SettingsDisclosure(
                 stringResource(R.string.settings_narration_cache),
                 stringResource(R.string.settings_narration_cache_summary),
-                icon = Icons.Outlined.GraphicEq
+                icon = PeekturnIcons.Audio
             ) { narrationCacheOpen = true }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SettingsDisclosure(
                 stringResource(R.string.developer_logs_title),
                 stringResource(R.string.developer_logs_summary),
-                icon = Icons.Outlined.BugReport
+                icon = PeekturnIcons.Diagnostics
             ) { developerLogsOpen = true }
         }
         Spacer(Modifier.height(8.dp))
@@ -602,7 +592,7 @@ private fun PronunciationSection(
         playback.diagnostic?.let { report -> SpeechReport(report) }
         playback.credit?.let { AudioAttribution(it) }
         TextButton(onClick = { details = !details }, modifier = Modifier.heightIn(min = 48.dp)) {
-            Icon(if (details) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null)
+            Icon(if (details) PeekturnIcons.ChevronUp else PeekturnIcons.ChevronDown, contentDescription = null)
             Spacer(Modifier.width(8.dp))
             Text(stringResource(if (details) R.string.settings_hide_audio_details else R.string.settings_audio_details))
         }
@@ -640,7 +630,7 @@ private fun SentenceProviderChoice(
 private fun PreviewAction(label: String, playing: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     OutlinedButton(onClick = onClick, modifier = modifier.heightIn(min = 48.dp),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
-        Icon(if (playing) Icons.Outlined.Stop else Icons.AutoMirrored.Outlined.VolumeUp,
+        Icon(if (playing) PeekturnIcons.Stop else PeekturnIcons.Speaker,
             contentDescription = null, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(6.dp))
         Text(if (playing) stringResource(R.string.settings_stop) else label, textAlign = TextAlign.Center, maxLines = 2)

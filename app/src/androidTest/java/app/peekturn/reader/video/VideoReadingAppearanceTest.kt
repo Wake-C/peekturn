@@ -3,8 +3,6 @@ package app.peekturn.reader.video
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.OndemandVideo
 import androidx.test.platform.app.InstrumentationRegistry
 import app.peekturn.reader.R
 import androidx.compose.ui.Modifier
@@ -19,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import app.peekturn.reader.model.ReaderPreferences
 import app.peekturn.reader.reader.ReaderFonts
 import app.peekturn.reader.ui.PeekturnTheme
+import app.peekturn.reader.ui.PeekturnIcons
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -89,7 +88,7 @@ class VideoReadingAppearanceTest {
             PeekturnTheme {
                 Box(Modifier.width(280.dp)) {
                     VideoTopBar("Reading sample", {}, {}, true, true, false,
-                        Icons.Outlined.OndemandVideo, label, { clicks++ }, trailingEnabled = enabled)
+                        PeekturnIcons.Watch, label, { clicks++ }, trailingEnabled = enabled)
                 }
             }
         }

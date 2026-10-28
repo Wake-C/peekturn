@@ -24,6 +24,10 @@ export const vendorScripts = [
   'extractHtml.js'
 ];
 
+export const builderScripts = [
+  ...vendorScripts, 'saveEbook.js', 'peekturn-article-adapters.js', 'peekturn-import.js'
+];
+
 export function fixtureHtml(name) {
   return readFileSync(join(here, name), 'utf8');
 }
@@ -51,10 +55,15 @@ export async function launchBrowser() {
   return chromium.launch({ headless: true });
 }
 
-export async function withFixture(browser, html, scripts, action) {
+export async function withFixture(browser, html, scripts, action, url) {
   const tab = await browser.newPage();
   try {
-    await tab.setContent(html, { waitUntil: 'load' });
+    if (url) {
+      await tab.route(url, route => route.fulfill({ contentType: 'text/html', body: html }));
+      await tab.goto(url, { waitUntil: 'load' });
+    } else {
+      await tab.setContent(html, { waitUntil: 'load' });
+    }
     for (const name of scripts) {
       const source = readFileSync(join(assets, name), 'utf8');
       await tab.evaluate(`${source}\n;true`);
@@ -94,14 +103,14 @@ export async function extractCapturedText(tab, marker) {
   }), marker);
 }
 
-export async function buildEpub(tab, marker) {
-  return await tab.evaluate(async (markerText) => {
+export async function buildEpub(tab, marker, reviewResult = 'import') {
+  return await tab.evaluate(async ({ markerText, reviewResult }) => {
     const chunks = [];
     window.__peekturnToken = 'test';
     window.PeekturnBridge = {
       status: function () { },
       fullArticle: function () { },
-      review: function () { return 'import'; },
+      review: function () { return reviewResult; },
       pushChunk: function (index, chunk) { chunks[index] = chunk; },
       finish: function (name) { window.__peekturnFinish({ name: name }); },
       fail: function (code) { window.__peekturnFinish({ error: code }); }
@@ -149,7 +158,8 @@ export async function buildEpub(tab, marker) {
         name: name,
         length: text.length,
         title: decode(chapterTitle),
-        h1: decode(chapterH1)
+        h1: decode(chapterH1),
+        content: text
       };
       break;
     }
@@ -163,5 +173,5 @@ export async function buildEpub(tab, marker) {
       chapter: chapter,
       hasMarker: chapter !== null
     };
-  }, marker);
+  }, { markerText: marker, reviewResult });
 }

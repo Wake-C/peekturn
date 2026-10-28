@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.unit.dp
 import app.peekturn.reader.R
+import app.peekturn.reader.ui.PeekturnIcons
 import app.peekturn.reader.model.AppSettings
 import app.peekturn.reader.model.ReaderPreferences
 import app.peekturn.reader.ui.SettingsDisclosure
@@ -224,14 +225,14 @@ private val readerSheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.
                 )
                 IconButton(onClick = onSearch, modifier = Modifier.size(48.dp)) {
                     Icon(
-                        toolbarBinoculars,
+                        PeekturnIcons.Search,
                         contentDescription = stringResource(R.string.reader_contents_search),
                         modifier = Modifier.size(21.dp)
                     )
                 }
                 IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
                     Icon(
-                        toolbarClose,
+                        PeekturnIcons.Close,
                         contentDescription = stringResource(R.string.reader_close),
                         modifier = Modifier.size(20.dp)
                     )

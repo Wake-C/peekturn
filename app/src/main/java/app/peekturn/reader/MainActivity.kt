@@ -11,11 +11,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AutoStories
-import androidx.compose.material.icons.outlined.BarChart
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -29,6 +24,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.peekturn.reader.R
+import app.peekturn.reader.ui.PeekturnIcons
 import app.peekturn.reader.model.AppSettings
 import app.peekturn.reader.narration.NarrationService
 import app.peekturn.reader.reader.ReaderActivity
@@ -159,7 +155,7 @@ private fun PeekturnHome(
                         stringResource(R.string.settings_title)
                     ).forEachIndexed { index, label ->
                         NavigationBarItem(selected = state.tab == index, onClick = { vm.tab(index) },
-                            icon = { Icon(when(index) { 0 -> Icons.Outlined.AutoStories; 1 -> Icons.Outlined.VideoLibrary; 2 -> Icons.Outlined.BarChart; else -> Icons.Outlined.Settings }, label) },
+                            icon = { Icon(when(index) { 0 -> PeekturnIcons.BookOpen; 1 -> PeekturnIcons.Video; 2 -> PeekturnIcons.Statistics; else -> PeekturnIcons.Settings }, label) },
                             label = { Text(label) },
                             colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.surfaceVariant,
                                 selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary))

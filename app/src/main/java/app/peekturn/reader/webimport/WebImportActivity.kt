@@ -18,8 +18,6 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import app.peekturn.reader.PeekturnApp
 import app.peekturn.reader.R
+import app.peekturn.reader.ui.PeekturnIcons
 import app.peekturn.reader.reader.ReaderActivity
 import app.peekturn.reader.ui.PeekturnTheme
 import com.google.gson.JsonParser
@@ -538,6 +537,7 @@ class WebImportActivity : AppCompatActivity() {
             "sanitizeHtml.js",
             "extractHtml.js",
             "saveEbook.js",
+            "peekturn-article-adapters.js",
             "peekturn-import.js"
         )
 
@@ -562,7 +562,7 @@ private fun WebImportScreen(
                 title = { Text(ui.title.ifBlank { stringResource(R.string.web_import_title) }, maxLines = 1) },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.web_import_close))
+                        Icon(PeekturnIcons.Close, contentDescription = stringResource(R.string.web_import_close))
                     }
                 }
             )

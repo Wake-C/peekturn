@@ -5,11 +5,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.LightMode
-import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -48,7 +43,7 @@ internal fun SettingsDisclosure(
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(12.dp))
-        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null,
+        Icon(PeekturnIcons.ChevronRight, contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f))
     }
@@ -60,7 +55,7 @@ internal fun AppearancePreference(selected: String, onSelect: (String) -> Unit) 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Surface(Modifier.size(34.dp), shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.LightMode, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Icon(PeekturnIcons.Appearance, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                 }
             }
             Text(stringResource(R.string.settings_appearance), Modifier.padding(start = 12.dp), style = MaterialTheme.typography.titleMedium)
@@ -79,7 +74,7 @@ internal fun LanguagePreference(selected: String, onSelect: (String) -> Unit) {
     )
     SettingsDisclosure(stringResource(R.string.settings_language),
         stringResource(choices.firstOrNull { it.first == selected }?.second ?: R.string.settings_language_follow),
-        icon = Icons.Outlined.Language) {
+        icon = PeekturnIcons.Language) {
         choosing = true
     }
     if (choosing) {
@@ -128,7 +123,7 @@ internal fun ProfilePreference(
         }
         Box(Modifier.padding(end = 2.dp)) {
             IconButton(onClick = { menu = true }, modifier = Modifier.size(44.dp)) {
-                Icon(Icons.Outlined.MoreHoriz, contentDescription = stringResource(R.string.settings_edit_profile, title),
+                Icon(PeekturnIcons.More, contentDescription = stringResource(R.string.settings_edit_profile, title),
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }

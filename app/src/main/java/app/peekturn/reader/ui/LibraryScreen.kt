@@ -13,10 +13,6 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.MoreHoriz
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -86,7 +82,7 @@ fun LibraryScreen(
                                 contentColor = MaterialTheme.colorScheme.background
                             ),
                             contentPadding = PaddingValues(horizontal = 18.dp)) {
-                            Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(PeekturnIcons.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(stringResource(R.string.shell_add_book), style = MaterialTheme.typography.labelLarge)
                         }
@@ -122,7 +118,7 @@ fun LibraryScreen(
                         modifier = Modifier.weight(1f))
                     ImportSourceMenu(onImportFile, onImportUrl) { openMenu ->
                         IconButton(onClick = openMenu, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Outlined.Add,
+                            Icon(PeekturnIcons.Add,
                                 contentDescription = stringResource(R.string.shell_add_book))
                         }
                     }
@@ -132,7 +128,7 @@ fun LibraryScreen(
                 TextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 14.dp),
                     placeholder = { Text(stringResource(R.string.shell_search_books_hint), style = MaterialTheme.typography.bodyMedium) },
                     singleLine = true, shape = RoundedCornerShape(10.dp),
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = stringResource(R.string.shell_search_books_description)) },
+                    leadingIcon = { Icon(PeekturnIcons.Search, contentDescription = stringResource(R.string.shell_search_books_description)) },
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -245,7 +241,7 @@ private fun BookActions(book: Book, onRemove: () -> Unit, modifier: Modifier = M
     var expanded by remember(book.id) { mutableStateOf(false) }
     Box(modifier) {
         IconButton(onClick = { expanded = true }, modifier = Modifier.size(48.dp)) {
-            Icon(Icons.Outlined.MoreHoriz, contentDescription = stringResource(R.string.shell_book_options, book.title),
+            Icon(PeekturnIcons.More, contentDescription = stringResource(R.string.shell_book_options, book.title),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {

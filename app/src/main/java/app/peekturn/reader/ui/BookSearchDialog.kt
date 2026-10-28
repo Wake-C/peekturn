@@ -19,9 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Toc
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -196,7 +193,7 @@ internal fun BookSearchDialog(
                             if (onBack != null) {
                                 IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
                                     Icon(
-                                        Icons.Outlined.Toc,
+                                        PeekturnIcons.Contents,
                                         contentDescription = stringResource(R.string.reader_contents_back)
                                     )
                                 }
@@ -218,7 +215,7 @@ internal fun BookSearchDialog(
                             keyboardActions = KeyboardActions(onSearch = { if (state.query.isNotBlank()) onSearch() }),
                             trailingIcon = {
                                 IconButton(onClick = onSearch, enabled = state.query.isNotBlank()) {
-                                    Icon(Icons.Outlined.Search, contentDescription = stringResource(R.string.shell_search_this_book))
+                                    Icon(PeekturnIcons.Search, contentDescription = stringResource(R.string.shell_search_this_book))
                                 }
                             }
                         )

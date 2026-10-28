@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildEpub,
+  builderScripts,
   extractCapturedText,
   fixtureHtml,
   launchBrowser,
@@ -25,7 +26,7 @@ test('display: contents article survives the real vendored capture only with the
   const browser = await launchBrowser();
   try {
     const baseline = await withFixture(browser, fixture, vendorScripts, (tab) => extractCapturedText(tab, finalMarker));
-    const fixed = await withFixture(browser, fixture, [...vendorScripts, 'peekturn-import.js'], (tab) => extractCapturedText(tab, finalMarker));
+    const fixed = await withFixture(browser, fixture, builderScripts, (tab) => extractCapturedText(tab, finalMarker));
 
     // The vendored helper measures boxes, so the unpatched run loses the wrapper and its article.
     assert.equal(baseline.error, null);
@@ -47,7 +48,7 @@ test('the full article end paragraph survives the real EPUB build', { timeout: 1
     const built = await withFixture(
       browser,
       fixture,
-      [...vendorScripts, 'saveEbook.js', 'peekturn-import.js'],
+      builderScripts,
       (tab) => buildEpub(tab, finalMarker)
     );
     assert.equal(built.error, undefined);

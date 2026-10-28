@@ -55,6 +55,8 @@
     <string name="video_ui_read">Read</string>
     <string name="video_ui_captions">Subtitles</string>
     <string name="video_ui_follow">Follow</string>
+    <string name="video_ui_following">Following playback</string>
+    <string name="video_ui_follow_paused">Auto-follow paused</string>
     <string name="video_ui_follow_description">Follow the current subtitle</string>
     <string name="video_ui_no_captions">No subtitles are available for this video.</string>
     <string name="video_ui_no_english_captions">No English subtitles are available. Choose another subtitle track in playback settings.</string>

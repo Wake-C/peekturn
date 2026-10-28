@@ -10,19 +10,11 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.VolumeUp
-import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -43,6 +35,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.peekturn.reader.R
+import app.peekturn.reader.ui.PeekturnIcons
 import app.peekturn.reader.data.OfflineDictionary
 import app.peekturn.reader.model.*
 import app.peekturn.reader.speech.PronunciationPlayer
@@ -83,7 +76,7 @@ internal fun ExplanationExampleRow(
         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides actionSize) {
             IconButton(onClick = onSpeech, modifier = Modifier.width(48.dp).height(actionSize)) {
                 Box(Modifier.fillMaxSize(), contentAlignment = if (centerShortLine) Alignment.Center else Alignment.TopCenter) {
-                    Icon(if (playing) Icons.Outlined.Stop else Icons.AutoMirrored.Outlined.VolumeUp,
+                    Icon(if (playing) PeekturnIcons.Stop else PeekturnIcons.Speaker,
                         contentDescription = stringResource(if (playing) R.string.reader_lookup_stop_pronouncing else R.string.reader_lookup_pronounce),
                         modifier = Modifier.size(20.dp),
                         tint = if (playing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -297,7 +290,7 @@ fun LearningPopup(
                         speech.speakSelection(context.selection, accent, sentenceProvider)
                     }
                     IconButton(onClick = { close() }, modifier = Modifier.size(48.dp)) {
-                        Icon(popupClose, contentDescription = stringResource(R.string.reader_lookup_close_description),
+                        Icon(PeekturnIcons.Close, contentDescription = stringResource(R.string.reader_lookup_close_description),
                             modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -464,26 +457,10 @@ private fun SpeakButton(
     IconButton(onClick = { if (active) speech.stop() else onSpeak() }, modifier = Modifier.size(48.dp)) {
         Box(Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center) {
-            Icon(if (active) Icons.Outlined.Stop else Icons.AutoMirrored.Outlined.VolumeUp,
+            Icon(if (active) PeekturnIcons.Stop else PeekturnIcons.Speaker,
                 contentDescription = stringResource(if (active) R.string.reader_lookup_stop_pronouncing else R.string.reader_lookup_pronounce),
                 modifier = Modifier.size(20.dp),
                 tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
-
-/**
- * Material's Close is the same filled cross in every style, so the popup draws its own hairline
- * cross on the rail's 24dp grid instead of importing a glyph that reads heavier than the rest.
- */
-private val popupClose: ImageVector = ImageVector.Builder(
-    name = "PeekturnPopupClose", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f
-).path(
-    fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 1.6f,
-    strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round,
-    pathBuilder = {
-        moveTo(6.4f, 6.4f); lineTo(17.6f, 17.6f)
-        moveTo(17.6f, 6.4f); lineTo(6.4f, 17.6f)
-    }
-).build()

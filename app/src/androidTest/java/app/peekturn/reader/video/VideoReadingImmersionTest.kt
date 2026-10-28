@@ -63,7 +63,7 @@ class VideoReadingImmersionTest {
         assertTrue(compose.onNodeWithTag("page").fetchSemanticsNode().boundsInRoot.bottom <= play.fetchSemanticsNode().boundsInRoot.top)
         play.performClick()
         compose.runOnIdle { assertEquals(1, plays); assertFalse(visible) }
-        compose.onNodeWithText(label(R.string.video_ui_follow)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(label(R.string.video_ui_follow)).assertDoesNotExist()
         for (useImmersive in listOf(true, false)) {
             compose.runOnIdle { immersive = useImmersive }
             val before = compose.onNodeWithText(cue.text).fetchSemanticsNode().boundsInRoot

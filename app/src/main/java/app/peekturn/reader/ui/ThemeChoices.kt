@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -64,7 +62,7 @@ internal fun ThemeChoices(selected: String, onSelect: (String) -> Unit, modifier
                                     color = MaterialTheme.colorScheme.primary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary
                                 ) {
-                                    Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.padding(2.dp))
+                                    Icon(PeekturnIcons.Check, contentDescription = null, modifier = Modifier.padding(2.dp))
                                 }
                             }
                             Text(label, modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.labelSmall,

@@ -11,10 +11,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -31,6 +27,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.peekturn.reader.R
+import app.peekturn.reader.ui.PeekturnIcons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -144,7 +141,7 @@ internal fun VideoLibraryScreen(
 @Composable
 private fun VideoImportButton(onImport: () -> Unit) {
     IconButton(onClick = onImport, modifier = Modifier.size(48.dp)) {
-        Icon(Icons.Outlined.Add, contentDescription = stringResource(R.string.video_ui_import_video),
+        Icon(PeekturnIcons.Add, contentDescription = stringResource(R.string.video_ui_import_video),
             tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
     }
 }
@@ -271,7 +268,7 @@ private fun VideoOptions(item: VideoItem, onRemove: () -> Unit,
     Box {
         IconButton(onClick = { expanded = true }, modifier = Modifier.size(48.dp)) {
             Icon(
-                Icons.Outlined.MoreVert,
+                PeekturnIcons.More,
                 contentDescription = stringResource(R.string.video_ui_video_options, item.title),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -315,7 +312,7 @@ private fun VideoThumbnail(url: String?, durationMs: Long, modifier: Modifier) {
         } else {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(
-                    Icons.Outlined.PlayArrow,
+                    PeekturnIcons.Play,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
