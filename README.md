@@ -1,45 +1,43 @@
-# Peekturn
+# 憩页 · Peekturn
 
-<p align="center"><img src="assets/images/icon.png" width="96" alt="Peekturn app icon"></p>
+<p align="center"><img src="assets/images/icon.png" width="96" alt="憩页应用图标"></p>
 
-Read English books and watch English videos, with help where you get stuck.
+读英文原书，看英文视频，卡住时得到一点帮助，然后继续。
 
-**[Download the Android APK](https://github.com/Wake-C/peekturn/releases/latest)** · [简体中文](README.zh-CN.md) · Android 8.0+
+**[下载 Android APK](https://github.com/Wake-C/peekturn/releases/latest)** · [English](README.en.md) · Android 8.0+
 
-## Who it is for
+## 适合谁
 
-Peekturn is for people who know some English and want to learn through real content. New words and long sentences interrupt your reading. Speech moves too fast, or you need to hear a line again.
+憩页面向已有一定英语基础、想通过真实内容继续提升的人：能读懂一些英文，却常被生词和长句打断；想看感兴趣的英文视频，却跟不上声音，或需要反复听一句。
 
-Switching between a dictionary, translator and player can make you lose your place. Peekturn keeps word lookup, context explanations and pronunciation beside the book or subtitles, so you can get help and return to the content.
+反复切换词典、翻译软件和播放器，很容易忘记刚才读到了哪里。憩页把查词、语境解释和发音放在书页与字幕旁边，查完就回到内容里。
 
-## Core features
+## 核心功能
 
-- **Books and articles**: import EPUBs, or save web articles through a link or Android sharing. Keep your reading position.
-- **Words in context**: select a word or phrase for dictionary meanings, an explanation of its use in the sentence, examples and pronunciation.
-- **Read and listen**: start continuous narration from the current sentence, move between sentences, change speed and listen with the screen locked.
-- **Video and audio**: import public YouTube links, follow captions, look up words and replay subtitle groups. Switch to audio only when you do not need the picture, or download audio/video and available captions for offline playback.
-- **Reading preferences**: choose a font, one of four text sizes, three spacing levels and five themes. Reading and viewing positions are saved.
+- **读书和文章**：导入 EPUB，或从链接、Android 分享导入网页文章，保存阅读位置。
+- **在语境中查词**：选中单词或短语，查看词典释义、当前句子里的意思和例句，并听发音。
+- **边读边听**：从当前句子开启连续朗读，切换句子、调整倍速，锁屏后继续听。
+- **看视频、听字幕**：导入公开 YouTube 链接，跟随字幕、点词解释，按字幕播放分组回听，也可以切成仅音频模式，或下载音频、视频及可用字幕，离线收听和观看。
+- **按习惯阅读**：多种字体，小、中、大、特大四档字号，三档间距和五种主题；阅读与观看进度自动保存。
 
-<p align="center"><img src="assets/video/peekturn-intro.gif" width="58%" alt="Reading, narration, word lookup and web import demo"></p>
+<p align="center"><img src="assets/video/peekturn-intro-zh.gif" width="58%" alt="阅读、朗读、查词和网页导入演示"></p>
 
-## Design goal
+## 设计目标
 
-The book or video stays central. Help should be brief, useful and easy to leave. Peekturn aims to reduce interruptions so you can meet words and sentences in context, finish a book or video, and do more than collect definitions.
+书和视频始终是主体，帮助应该简短、够用、容易离开。憩页希望减少查词和切换工具带来的打断，让你在真实语境里反复遇见词句，逐渐读完一本书、看完一段视频，而不只收集更多释义。
 
-## Get started
+## 开始使用
 
-1. Install the APK. Start with the included *The Prophet* by Kahlil Gibran, or import your own EPUB or article.
-2. Paste a YouTube link in Video, or share it from another app.
-3. The offline dictionary works without setup. For AI context explanations, add your own model service, model name and API key in Settings. Your provider may charge for requests.
+1. 下载并安装 APK。首次打开可直接阅读内置的纪伯伦《先知》，也可以导入自己的 EPUB 或文章。
+2. 在「视频」中粘贴 YouTube 链接，或从其他 App 分享过来。
+3. 离线词典可以直接用。需要 AI 语境解释时，在「设置」中添加自己的模型服务、模型名和 API Key，服务商可能收费。
 
-Article import supports common Substack, WordPress, Ghost and static blog layouts, including custom
-domains. X, Anthropic, OpenAI and other pages keep the general article extractor. If a page shows only
-a paid preview, open the full article or sign in inside the import browser before importing.
+文章导入支持 Substack、WordPress、Ghost 和静态博客的常见排版，也支持独立域名。X、Anthropic、OpenAI 等网页继续使用通用文章提取。如果网页只显示付费预览，请先在导入浏览器中打开全文或登录，再导入。
 
-## Privacy and limits
+## 隐私与使用边界
 
-Books, captions, positions and learning statistics stay on your device. AI explanations send the selected text and a short surrounding context to your configured service. Online pronunciation and narration send the text to the chosen speech service. API keys are encrypted on the device.
+书籍、字幕、进度和学习统计保存在设备上。请求 AI 解释时，会把选中文字和少量上下文发送给你配置的服务；在线发音与朗读会把要读的文字发送给相应语音服务。API Key 在设备上加密保存。
 
-Video and caption availability depends on the source. Only completed downloads are available offline; temporary media buffering is not a saved download. Download only content you have permission to save. Grouping cannot fix transcription errors, and model explanations can be wrong.
+视频和字幕的可用性取决于来源，只有已完成的下载才能离线播放，临时缓冲不等于已保存的下载。请仅下载你有权保存的内容。字幕里的识别错误不会通过分组自动变正确，模型解释也可能出错。
 
-[Third-party notices](THIRD_PARTY_NOTICES.md) · [Source license](LICENSE) · [Development and delivery](agent-doc/essential/DELIVERY.md)
+[第三方声明](THIRD_PARTY_NOTICES.md) · [源码许可](LICENSE) · [开发与交付](agent-doc/essential/DELIVERY.md)
