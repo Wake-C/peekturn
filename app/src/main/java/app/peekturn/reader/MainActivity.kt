@@ -3,7 +3,12 @@ package app.peekturn.reader
 import android.content.Intent
 import android.content.Context
 import android.graphics.drawable.ColorDrawable
+import android.media.projection.MediaProjectionConfig
+import android.media.projection.MediaProjectionManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -26,6 +31,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.peekturn.reader.R
 import app.peekturn.reader.ui.PeekturnIcons
 import app.peekturn.reader.model.AppSettings
+import app.peekturn.reader.learning.FloatingLookupService
 import app.peekturn.reader.narration.NarrationService
 import app.peekturn.reader.reader.ReaderActivity
 import app.peekturn.reader.ui.*
@@ -41,14 +47,42 @@ class MainActivity : AppCompatActivity() {
     private val graph get() = (application as PeekturnApp).graph
     private val vm: MainViewModel by viewModels { MainViewModel.Factory(graph) }
     private val pickEpub = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importBook) }
+    private val overlayGrant = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (Settings.canDrawOverlays(this)) requestScreenCapture()
+    }
+    private val captureGrant = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null && Settings.canDrawOverlays(this)) {
+            startForegroundService(FloatingLookupService.startIntent(this, result.resultCode, result.data!!))
+        }
+    }
+
+    private fun toggleFloatingLookup() {
+        if (FloatingLookupService.active.value) {
+            startService(FloatingLookupService.stopIntent(this))
+        } else if (!Settings.canDrawOverlays(this)) {
+            overlayGrant.launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")))
+        } else requestScreenCapture()
+    }
+
+    private fun requestScreenCapture() {
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        // On Android 14+ require the full display, not app-window sharing: OCR hit coordinates
+        // must match the screen coordinate where the user released the icon.
+        val request = if (Build.VERSION.SDK_INT >= 34)
+            manager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
+        else manager.createScreenCaptureIntent()
+        captureGrant.launch(request)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppLanguage.apply(this, graph.store.settings.value.uiLanguage)
         applyAppTheme(graph.store.settings.value.appTheme)
         val videoEntry = intent.getBooleanExtra(EXTRA_VIDEO_TAB, false)
-        if (videoEntry) vm.showVideos()
-        vm.initialize(reopen = savedInstanceState == null && !videoEntry)
+        val settingsEntry = intent.getBooleanExtra(EXTRA_SETTINGS_TAB, false)
+        if (settingsEntry) vm.tab(3) else if (videoEntry) vm.showVideos()
+        vm.initialize(reopen = savedInstanceState == null && !videoEntry && !settingsEntry)
         setContent {
             val settings by graph.store.settings.collectAsStateWithLifecycle()
             LaunchedEffect(settings.uiLanguage) { AppLanguage.apply(this@MainActivity, settings.uiLanguage) }
@@ -65,7 +99,8 @@ class MainActivity : AppCompatActivity() {
                     },
                     onOpen = { id -> startActivity(ReaderActivity.intent(this, id)) },
                     onOpenVideo = { id -> startActivity(VideoActivity.intent(this, id)) },
-                    onResumeVideo = { id -> startActivity(VideoActivity.intent(this, id, resumeOnLaunch = true)) }
+                    onResumeVideo = { id -> startActivity(VideoActivity.intent(this, id, resumeOnLaunch = true)) },
+                    onFloatingLookup = ::toggleFloatingLookup
                 )
             }
         }
@@ -85,11 +120,16 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_VIDEO_TAB, false)) vm.showVideos()
+        if (intent.getBooleanExtra(EXTRA_SETTINGS_TAB, false)) vm.tab(3)
+        else if (intent.getBooleanExtra(EXTRA_VIDEO_TAB, false)) vm.showVideos()
     }
 
     companion object {
         private const val EXTRA_VIDEO_TAB = "video_tab"
+        private const val EXTRA_SETTINGS_TAB = "settings_tab"
+        fun settingsIntent(context: Context): Intent = Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(EXTRA_SETTINGS_TAB, true)
         fun videoIntent(context: Context): Intent = Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(EXTRA_VIDEO_TAB, true)
@@ -104,12 +144,14 @@ private fun PeekturnHome(
     onImportUrl: (String) -> Unit,
     onOpen: (Long) -> Unit,
     onOpenVideo: (Long) -> Unit,
-    onResumeVideo: (Long) -> Unit
+    onResumeVideo: (Long) -> Unit,
+    onFloatingLookup: () -> Unit
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val books by vm.graph.store.books.collectAsStateWithLifecycle()
     val videos by vm.graph.store.videos.collectAsStateWithLifecycle()
     val downloads by vm.graph.videoDownloads.states.collectAsStateWithLifecycle()
+    val floatingLookupActive by FloatingLookupService.active.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.graph.videoDownloads.initialize() }
     val stats by vm.graph.store.stats.collectAsStateWithLifecycle()
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
@@ -204,7 +246,9 @@ private fun PeekturnHome(
                     },
                     vm.graph.developerLog::export,
                     vm.graph.developerLog::clear,
-                    vm.graph.developerLog.updates
+                    vm.graph.developerLog.updates,
+                    floatingLookupActive,
+                    onFloatingLookup
                 )
             }
             if (state.busy) Surface(color = MaterialTheme.colorScheme.background.copy(alpha = .96f), modifier = Modifier.fillMaxSize()) {

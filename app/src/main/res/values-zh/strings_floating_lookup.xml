@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="floating_lookup_title">悬浮查词</string>
+    <string name="floating_lookup_off">把图标拖到其他应用中的单词上</string>
+    <string name="floating_lookup_on">正在共享屏幕 · 点击停止</string>
+    <string name="floating_lookup_notification">把图标拖到单词上查看解释</string>
+    <string name="floating_lookup_stop">停止</string>
+    <string name="floating_lookup_consent">每次拖动后，Peekturn 才会读取一帧屏幕画面，文字识别在本机完成。「解释」会把单词和附近文字发给你选用的模型；「词典」离线使用。屏幕共享会持续到你主动停止。返回键可关闭卡片；卡片打开时，部分应用可能暂停播放。受保护的屏幕可能显示为空白，部分应用也会隐藏悬浮控件。</string>
+    <string name="floating_lookup_open_settings">打开设置</string>
+    <string name="floating_lookup_start">开始</string>
+    <string name="floating_lookup_drag">拖到单词上</string>
+    <string name="floating_lookup_no_word">该位置没有识别到单词，请重试。</string>
+    <string name="floating_lookup_failed">无法读取此屏幕，请重试。</string>
+</resources>

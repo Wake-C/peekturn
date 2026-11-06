@@ -231,6 +231,32 @@ class CompactLearningPopupUiTest {
         }
     }
 
+    @Test fun externalConfigurationFailureOffersSettingsWithoutReplacingDictionaryOrRetry() {
+        val session = LearningSession(source = ExplanationSource { _, _, _ ->
+            flowOf(ExplanationEvent.Failure("fixture config failure", ExplanationFailureCategory.Configuration))
+        })
+        val speech = PronunciationPlayer(context)
+        var opened = 0
+        try {
+            compose.setContent {
+                ShortLandscape {
+                    LearningPopup(lookup, AppSettings(), session, OfflineDictionary(context), speech,
+                        language = ExplanationLanguage.English, onClose = {}, onCancel = {},
+                        externalOverlay = true, onOpenSettings = { opened++ })
+                }
+            }
+            compose.waitUntil(5_000) { session.state.value.failure == ExplanationFailureCategory.Configuration }
+            compose.onNodeWithText(label(R.string.reader_lookup_retry)).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText(label(R.string.floating_lookup_open_settings))
+                .performScrollTo().assertIsDisplayed().performClick()
+            compose.runOnIdle { assertEquals(1, opened) }
+            compose.onNodeWithText(label(R.string.reader_lookup_tab_dictionary)).performClick()
+            compose.onNodeWithText(label(R.string.floating_lookup_open_settings)).assertDoesNotExist()
+        } finally {
+            compose.runOnIdle { session.close(); speech.shutdown() }
+        }
+    }
+
     @Test fun errorAndRetryRemainReachableWithoutRemovingThePlaybackFooter() {
         var requests = 0
         val session = LearningSession(source = ExplanationSource { _, _, _ -> flow {
@@ -248,6 +274,7 @@ class CompactLearningPopupUiTest {
                 }
             }
             compose.waitUntil(5_000) { session.state.value.failure != null }
+            compose.onNodeWithText(label(R.string.floating_lookup_open_settings)).assertDoesNotExist()
             compose.onNodeWithText(label(R.string.reader_lookup_retry)).performScrollTo().assertIsDisplayed().performClick()
             compose.waitUntil(5_000) { session.state.value.complete }
             compose.onNodeWithText(answer.meaning).performScrollTo().assertIsDisplayed()

@@ -139,7 +139,11 @@ fun LearningPopup(
      * meaning, context or examples, or a real dictionary entry. Loading, empty and failed tabs report
      * false, as does disposal. Null keeps every existing caller unchanged.
      */
-    onReadableContent: ((Boolean) -> Unit)? = null
+    onReadableContent: ((Boolean) -> Unit)? = null,
+    /** The cross-app WindowManager host owns the window; this renders the same answer in place. */
+    externalOverlay: Boolean = false,
+    /** Only the cross-app card offers a direct route to model configuration. */
+    onOpenSettings: (() -> Unit)? = null
 ) {
     var dictionaryTab by remember(context) { mutableStateOf(initialDictionary) }
     var dictionaryRetry by remember(context) { mutableIntStateOf(0) }
@@ -171,7 +175,7 @@ fun LearningPopup(
         onDispose { lifecycle.removeObserver(observer); speech.stop() }
     }
     LaunchedEffect(context) {
-        if (latestSettings.autoPronounce) {
+        if (latestSettings.autoPronounce && !externalOverlay) {
             speech.speakSelection(context.selection, latestSettings.accent, latestSettings.sentenceSpeechProvider)
         }
     }
@@ -255,15 +259,16 @@ fun LearningPopup(
         }
     }
     val width = with(density) { geometry.width.toDp() }
-    val height = with(density) { geometry.height.toDp() }
+    val height = with(density) { geometry.height.toDp() }.let {
+        if (externalOverlay) minOf(it, 440.dp) else it
+    }
     val selectionHeight = if (compact) {
         maxOf(height * .2f, with(density) { 26.sp.toDp() })
     } else height * .2f
     fun close() { speech.stop(); onClose() }
-    // An outside touch or Back is reported separately from the Close button so the reader can tell
-    // which dismissal happened; both still close the popup and clear the selection.
-    Popup(popupPositionProvider = position, onDismissRequest = { speech.stop(); onCancel() },
-        properties = PopupProperties(focusable = true, clippingEnabled = true)) {
+    // The answer body is shared. Book/video own an Activity Popup; the cross-app service
+    // supplies a separate overlay that takes focus only while its card is visible.
+    val panel: @Composable () -> Unit = {
         Surface(modifier = Modifier.testTag("learning-popup").width(width).heightIn(max = height).pointerInput(activity) {
             awaitPointerEventScope {
                 while (true) {
@@ -361,36 +366,44 @@ fun LearningPopup(
                                     if (dictionaryTab) dictionaryRetry++
                                     else session.retry(context, latestSettings.activeProfileId, latestSettings.model, language)
                                 }, enabled = !loading) { Text(stringResource(R.string.reader_lookup_retry)) }
+                                if (!dictionaryTab && explanationFailure == ExplanationFailureCategory.Configuration &&
+                                    externalOverlay && onOpenSettings != null) {
+                                    TextButton(onClick = { speech.stop(); onOpenSettings() }) {
+                                        Text(stringResource(R.string.floating_lookup_open_settings))
+                                    }
+                                }
                             }
                             LookupSpeechFailure(playback, speech::dismissFailure)
                         }
                     }
-                    HorizontalDivider()
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val replay = onReplay
-                        val adjust = onAdjust
-                        when {
-                            replay != null -> TextButton(onClick = { speech.stop(); replay() }, modifier = Modifier.weight(1f)) {
-                                Text(stringResource(R.string.learning_popup_replay_sentence), fontSize = 13.sp,
-                                    maxLines = if (compact) Int.MAX_VALUE else 1)
+                    if (!externalOverlay || onReplay != null || onAdjust != null || onResume != null) {
+                        HorizontalDivider()
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            val replay = onReplay
+                            val adjust = onAdjust
+                            when {
+                                replay != null -> TextButton(onClick = { speech.stop(); replay() }, modifier = Modifier.weight(1f)) {
+                                    Text(stringResource(R.string.learning_popup_replay_sentence), fontSize = 13.sp,
+                                        maxLines = if (compact) Int.MAX_VALUE else 1)
+                                }
+                                adjust != null -> TextButton(onClick = { speech.stop(); adjust() }, modifier = Modifier.weight(1f)) {
+                                    Text(stringResource(R.string.reader_lookup_adjust), fontSize = 13.sp,
+                                        maxLines = if (compact) Int.MAX_VALUE else 1)
+                                }
                             }
-                            adjust != null -> TextButton(onClick = { speech.stop(); adjust() }, modifier = Modifier.weight(1f)) {
-                                Text(stringResource(R.string.reader_lookup_adjust), fontSize = 13.sp,
-                                    maxLines = if (compact) Int.MAX_VALUE else 1)
-                            }
-                        }
-                        // X and outside/Back stay cancellations: only this explicit action resumes.
-                        val resume = onResume
-                        if (resume != null) {
-                            TextButton(onClick = { speech.stop(); resume() }, modifier = Modifier.weight(1f)) {
-                                Text(stringResource(R.string.learning_popup_continue_watching), fontSize = 13.sp,
-                                    maxLines = if (compact) Int.MAX_VALUE else 1, fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary)
-                            }
-                        } else {
-                            TextButton(onClick = { close() }, modifier = Modifier.weight(1f)) {
-                                Text(stringResource(R.string.reader_lookup_close), fontSize = 13.sp,
-                                    maxLines = if (compact) Int.MAX_VALUE else 1)
+                            // X and outside/Back stay cancellations: only this explicit action resumes.
+                            val resume = onResume
+                            if (resume != null) {
+                                TextButton(onClick = { speech.stop(); resume() }, modifier = Modifier.weight(1f)) {
+                                    Text(stringResource(R.string.learning_popup_continue_watching), fontSize = 13.sp,
+                                        maxLines = if (compact) Int.MAX_VALUE else 1, fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary)
+                                }
+                            } else {
+                                TextButton(onClick = { close() }, modifier = Modifier.weight(1f)) {
+                                    Text(stringResource(R.string.reader_lookup_close), fontSize = 13.sp,
+                                        maxLines = if (compact) Int.MAX_VALUE else 1)
+                                }
                             }
                         }
                     }
@@ -398,6 +411,9 @@ fun LearningPopup(
             }
         }
     }
+    if (externalOverlay) panel() else Popup(popupPositionProvider = position,
+        onDismissRequest = { speech.stop(); onCancel() },
+        properties = PopupProperties(focusable = true, clippingEnabled = true)) { panel() }
 }
 
 /**

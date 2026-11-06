@@ -64,6 +64,8 @@ The complete upstream license is bundled in the APK at `assets/LICENSE-Readium.t
 
 AndroidX/Jetpack Compose, Kotlin/coroutines, OkHttp, Gson and the Gradle wrapper are independently obtained dependencies. Their exact versions belong to Gradle manifests. The Apache-2.0 license text is bundled at `assets/LICENSE-Apache-2.0.txt`. Jsoup uses the MIT license; its code is supplied transitively or through the build dependency, not copied from another app.
 
+Cross-app lookup uses Google's bundled ML Kit Text Recognition v2 (Latin) SDK for on-device OCR. The SDK and model are Google-provided binaries, not Peekturn-authored Apache-2.0 code. See the [ML Kit terms](https://developers.google.com/ml-kit/terms). Screen images are processed in memory and are not uploaded by the OCR step; contextual Explain requests use the reader's selected model provider.
+
 Peekturn-authored source remains Apache-2.0 where so marked. The combined application containing NewPipeExtractor is conveyed under GPL-3.0-or-later; an Apache-only description does not apply to that combined APK. Dependency and dictionary licenses remain their own. Matching project source is available in this repository, and the matching NewPipeExtractor source is linked below. Redistribution of the combined APK must provide corresponding source under the dependency terms.
 
 ## YouTube video integration

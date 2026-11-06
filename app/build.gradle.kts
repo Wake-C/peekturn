@@ -17,8 +17,8 @@ android {
         applicationId = "app.peekturn.reader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
-        versionName = "2.1.3"
+        versionCode = 28
+        versionName = "2.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["applicationLabel"] = "@string/shell_app_name"
     }
@@ -86,6 +86,8 @@ dependencies {
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
+    // Bundled on-device Latin OCR; no Play Services model download or screenshot upload.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("org.jsoup:jsoup:1.18.3")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")

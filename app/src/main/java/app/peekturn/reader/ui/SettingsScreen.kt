@@ -57,12 +57,15 @@ fun SettingsScreen(
     onClearNarrationCache: suspend () -> Unit,
     onDeveloperLogExport: suspend () -> String,
     onDeveloperLogClear: suspend () -> Unit,
-    developerLogUpdates: kotlinx.coroutines.flow.StateFlow<Long>
+    developerLogUpdates: kotlinx.coroutines.flow.StateFlow<Long>,
+    floatingLookupActive: Boolean,
+    onFloatingLookup: () -> Unit
 ) {
     var editingProfile by remember { mutableStateOf<LlmProfile?>(null) }
     var addingProfile by remember { mutableStateOf(false) }
     var deletingProfile by remember { mutableStateOf<LlmProfile?>(null) }
     var pronunciationOpen by rememberSaveable { mutableStateOf(false) }
+    var floatingLookupConsent by remember { mutableStateOf(false) }
     var explanationCacheOpen by rememberSaveable { mutableStateOf(false) }
     var narrationCacheOpen by rememberSaveable { mutableStateOf(false) }
     var developerLogsOpen by rememberSaveable { mutableStateOf(false) }
@@ -120,6 +123,13 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
         SettingsGroup {
             SettingsDisclosure(
+                stringResource(R.string.floating_lookup_title),
+                stringResource(if (floatingLookupActive) R.string.floating_lookup_on else R.string.floating_lookup_off),
+                icon = PeekturnIcons.Search,
+                onClick = { if (floatingLookupActive) onFloatingLookup() else floatingLookupConsent = true }
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SettingsDisclosure(
                 stringResource(R.string.settings_pronunciation),
                 stringResource(if (settings.accent == "US") R.string.settings_us_english else R.string.settings_uk_english),
                 icon = PeekturnIcons.Headphones
@@ -146,6 +156,18 @@ fun SettingsScreen(
         Spacer(Modifier.height(8.dp))
         Text(stringResource(R.string.settings_reading_location), Modifier.padding(horizontal = 2.dp),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (floatingLookupConsent) {
+        AlertDialog(onDismissRequest = { floatingLookupConsent = false },
+            title = { Text(stringResource(R.string.floating_lookup_title)) },
+            text = { Text(stringResource(R.string.floating_lookup_consent)) },
+            confirmButton = { TextButton(onClick = {
+                floatingLookupConsent = false
+                onFloatingLookup()
+            }) { Text(stringResource(R.string.floating_lookup_start)) } },
+            dismissButton = { TextButton(onClick = { floatingLookupConsent = false }) {
+                Text(stringResource(R.string.settings_cancel))
+            } })
     }
     if (pronunciationOpen) {
         Dialog(onDismissRequest = { pronunciationOpen = false }) {
