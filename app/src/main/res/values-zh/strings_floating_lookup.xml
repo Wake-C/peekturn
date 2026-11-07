@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="floating_lookup_title">悬浮查词</string>
+    <string name="floating_lookup_tile">悬浮查词</string>
     <string name="floating_lookup_off">把图标拖到其他应用中的单词上</string>
     <string name="floating_lookup_on">正在共享屏幕 · 点击停止</string>
     <string name="floating_lookup_notification">把图标拖到单词上查看解释</string>

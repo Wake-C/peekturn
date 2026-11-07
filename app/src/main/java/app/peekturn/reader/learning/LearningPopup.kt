@@ -56,6 +56,7 @@ internal fun ExplanationExampleRow(
     example: ExplanationExample,
     language: ExplanationLanguage,
     playing: Boolean,
+    tight: Boolean = false,
     onSpeech: () -> Unit
 ) {
     val lines = example.displayLines(language)
@@ -66,8 +67,8 @@ internal fun ExplanationExampleRow(
     Row(Modifier.fillMaxWidth(), verticalAlignment = if (centerShortLine) Alignment.CenterVertically else Alignment.Top) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             lines.forEachIndexed { index, line ->
-                Text(line, fontSize = if (index == 0) 14.sp else 13.sp,
-                    lineHeight = if (index == 0) 20.sp else 18.sp,
+                Text(line, fontSize = if (tight) { if (index == 0) 13.sp else 12.sp } else { if (index == 0) 14.sp else 13.sp },
+                    lineHeight = if (tight) { if (index == 0) 18.sp else 16.sp } else { if (index == 0) 20.sp else 18.sp },
                     onTextLayout = { if (index == 0) singleLine = it.lineCount == 1 },
                     color = if (index == 0) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -88,18 +89,20 @@ internal fun ExplanationExampleRow(
 
 /** Two compact lines after examples; a partial stream must not claim that a relation is absent. */
 @Composable
-internal fun ExplanationRelations(answer: Explanation, complete: Boolean) {
+internal fun ExplanationRelations(answer: Explanation, complete: Boolean, tight: Boolean = false) {
     if (answer.synonyms.isBlank() && answer.antonyms.isBlank() && !complete) return
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         if (answer.synonyms.isNotBlank() || complete) Text(
             stringResource(R.string.reader_lookup_synonyms,
                 answer.synonyms.ifBlank { stringResource(R.string.reader_lookup_no_relation) }),
-            fontSize = 13.sp, lineHeight = 19.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            fontSize = if (tight) 12.sp else 13.sp, lineHeight = if (tight) 17.sp else 19.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         if (answer.antonyms.isNotBlank() || complete) Text(
             stringResource(R.string.reader_lookup_antonyms,
                 answer.antonyms.ifBlank { stringResource(R.string.reader_lookup_no_relation) }),
-            fontSize = 13.sp, lineHeight = 19.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            fontSize = if (tight) 12.sp else 13.sp, lineHeight = if (tight) 17.sp else 19.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -175,7 +178,7 @@ fun LearningPopup(
         onDispose { lifecycle.removeObserver(observer); speech.stop() }
     }
     LaunchedEffect(context) {
-        if (latestSettings.autoPronounce && !externalOverlay) {
+        if (latestSettings.autoPronounce) {
             speech.speakSelection(context.selection, latestSettings.accent, latestSettings.sentenceSpeechProvider)
         }
     }
@@ -245,6 +248,7 @@ fun LearningPopup(
     val configuration = LocalConfiguration.current
     val windowSize = LocalWindowInfo.current.containerSize
     val compact = placement == LearningPopupPlacement.Center
+    val tight = externalOverlay
     val geometry = with(density) {
         val windowWidth = windowSize.width.takeIf { it > 0 } ?: configuration.screenWidthDp.dp.roundToPx()
         val windowHeight = windowSize.height.takeIf { it > 0 } ?: configuration.screenHeightDp.dp.roundToPx()
@@ -285,11 +289,12 @@ fun LearningPopup(
             val loading = if (dictionaryTab) dictionaryLoading else explanation.loading
             val error = if (dictionaryTab) dictionaryError else explanationErrorMessage
             Column {
-                Row(Modifier.fillMaxWidth().padding(start = if (compact) 12.dp else 16.dp, end = 4.dp,
-                    top = if (compact) 2.dp else 6.dp),
+                Row(Modifier.fillMaxWidth().padding(start = if (compact || tight) 12.dp else 16.dp, end = 4.dp,
+                    top = if (compact || tight) 2.dp else 6.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(context.selection, modifier = Modifier.weight(1f).heightIn(max = selectionHeight)
-                        .verticalScroll(rememberScrollState()), fontSize = 21.sp, lineHeight = 26.sp,
+                        .verticalScroll(rememberScrollState()), fontSize = if (tight) 20.sp else 21.sp,
+                        lineHeight = if (tight) 24.sp else 26.sp,
                         fontFamily = FontFamily.Serif)
                     SpeakButton(context.selection, speech, playback.text, playback.playing) {
                         speech.speakSelection(context.selection, accent, sentenceProvider)
@@ -321,18 +326,20 @@ fun LearningPopup(
                     key(context, dictionaryTab) {
                         val bodyScroll = rememberScrollState()
                         Column((if (compact) Modifier else Modifier.weight(1f, fill = false).verticalScroll(bodyScroll))
-                            .fillMaxWidth().padding(horizontal = if (compact) 12.dp else 16.dp,
-                                vertical = if (compact) 8.dp else 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
+                            .fillMaxWidth().padding(horizontal = if (compact || tight) 12.dp else 16.dp,
+                                vertical = if (compact || tight) 8.dp else 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(if (compact || tight) 8.dp else 12.dp)) {
                             val meaning = if (dictionaryTab) entry?.meaning.orEmpty() else answer.meaning
                             if (meaning.isNotBlank()) Text(meaning, fontFamily = FontFamily.Serif,
-                                fontSize = 17.sp, lineHeight = 26.sp)
+                                fontSize = if (tight) 16.sp else 17.sp,
+                                lineHeight = if (tight) 23.sp else 26.sp)
                             if (!dictionaryTab) {
                                 if (answer.context.isNotBlank()) Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Text(stringResource(R.string.reader_lookup_section_context),
                                         fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold,
                                         letterSpacing = 0.2.sp, color = MaterialTheme.colorScheme.primary)
-                                    Text(answer.context, fontSize = 15.sp, lineHeight = 21.sp)
+                                    Text(answer.context, fontSize = if (tight) 14.sp else 15.sp,
+                                        lineHeight = if (tight) 19.sp else 21.sp)
                                 }
                                 if (answer.examples.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(stringResource(R.string.reader_lookup_section_examples),
@@ -340,7 +347,7 @@ fun LearningPopup(
                                         letterSpacing = 0.2.sp, color = MaterialTheme.colorScheme.primary)
                                     answer.examples.forEachIndexed { exampleIndex, example ->
                                         val active = playback.playing && playback.text == example.spokenText
-                                        ExplanationExampleRow(example, language, active) {
+                                        ExplanationExampleRow(example, language, active, tight = tight) {
                                             if (active) speech.stop()
                                             else speech.speakExample(example.spokenText, accent, sentenceProvider)
                                         }
@@ -348,7 +355,7 @@ fun LearningPopup(
                                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                         }
                                     }
-                                    ExplanationRelations(answer, explanation.complete)
+                                    ExplanationRelations(answer, explanation.complete, tight = tight)
                                 }
                             }
                             if (loading) Row(verticalAlignment = Alignment.CenterVertically,

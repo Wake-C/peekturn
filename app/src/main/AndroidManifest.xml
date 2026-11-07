@@ -31,6 +31,13 @@
         </service>
         <service android:name=".learning.FloatingLookupService" android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+        <activity android:name=".learning.FloatingLookupLaunchActivity" android:exported="false"
+            android:theme="@style/Theme.Peekturn.Launch" android:excludeFromRecents="true" />
+        <service android:name=".learning.FloatingLookupTileService" android:exported="true"
+            android:label="@string/floating_lookup_tile" android:icon="@drawable/lookup_tile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
+        </service>
         <service android:name=".video.VideoDownloadService" android:exported="false" android:foregroundServiceType="dataSync">
             <intent-filter>
                 <action android:name="androidx.media3.exoplayer.downloadService.action.RESTART" />

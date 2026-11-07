@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="floating_lookup_title">Floating lookup</string>
+    <string name="floating_lookup_tile">Lookup</string>
     <string name="floating_lookup_off">Drag an icon onto a word in another app</string>
     <string name="floating_lookup_on">Screen sharing is on · tap to stop</string>
     <string name="floating_lookup_notification">Drag the icon onto a word to explain it</string>

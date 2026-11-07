@@ -10,5 +10,10 @@
         <item name="android:windowActionModeOverlay">true</item>
     </style>
     <style name="Theme.Peekturn" parent="Theme.Peekturn.Base" />
+    <style name="Theme.Peekturn.Launch" parent="Theme.Peekturn">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
     <color name="launcher_background">#FFD84C</color>
 </resources>

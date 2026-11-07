@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.Image
@@ -31,9 +32,14 @@ import android.window.OnBackInvokedDispatcher
 import android.view.WindowManager
 import android.widget.Toast
 import android.widget.FrameLayout
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -42,6 +48,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
@@ -115,6 +123,8 @@ class FloatingLookupService : Service() {
     private var capture: Job? = null
     private var bubble: DragOverlayView? = null
     private var bubbleParams: WindowManager.LayoutParams? = null
+    private var dockJob: Job? = null
+    private var docked = false
     private var card: CardOverlayView? = null
     private var current: LookupContext? = null
     private var screenWidth = 0
@@ -150,6 +160,7 @@ class FloatingLookupService : Service() {
             owner.start()
             showBubble()
             active.value = true
+            FloatingLookupTileService.refresh(this)
         } catch (_: Exception) {
             stopSelf()
         }
@@ -195,7 +206,8 @@ class FloatingLookupService : Service() {
         // Resize the existing display; a second createVirtualDisplay would invalidate the grant.
         display?.resize(screenWidth, screenHeight, resources.configuration.densityDpi)
         bubbleParams?.let { params ->
-            params.x = params.x.coerceIn(0, (screenWidth - params.width).coerceAtLeast(0))
+            params.x = if (docked) dockX(params.x, screenWidth, params.width)
+                else params.x.coerceIn(0, (screenWidth - params.width).coerceAtLeast(0))
             params.y = params.y.coerceIn(0, (screenHeight - params.height).coerceAtLeast(0))
             bubble?.let { windows.updateViewLayout(it, params); it.visibility = View.VISIBLE }
         }
@@ -221,26 +233,56 @@ class FloatingLookupService : Service() {
         content()
     }
 
+    private fun dockBubble() {
+        if (capture?.isActive == true) return
+        val p = bubbleParams ?: return
+        val view = bubble ?: return
+        p.x = dockX(p.x, screenWidth, p.width)
+        windows.updateViewLayout(view, p)
+        docked = true
+    }
+
+    private fun scheduleDock() {
+        dockJob?.cancel()
+        dockJob = scope.launch { delay(3_200); dockBubble() }
+    }
+
     private fun showBubble() {
         val size = dp(54)
-        val p = params(size, size, screenWidth - size - dp(12), screenHeight / 3)
+        val height = dp(68)
+        val p = params(size, height, screenWidth - size - dp(12), screenHeight / 3).apply {
+            // Without NO_LIMITS Android clamps the window back inside the display, so a half-
+            // hidden icon would still sit a full window-width away from the actual edge.
+            flags = flags or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        }
+        var dragging by mutableStateOf(false)
         val view = DragOverlayView(this).apply {
             setViewTreeLifecycleOwner(owner)
             setViewTreeViewModelStoreOwner(owner)
             setViewTreeSavedStateRegistryOwner(owner)
             contentDescription = getString(R.string.floating_lookup_drag)
+            if (Build.VERSION.SDK_INT >= 29) systemGestureExclusionRects = listOf(Rect(0, 0, size, height))
             addView(overlay { setContent {
                 val settings by graph.store.settings.collectAsState()
                 PeekturnTheme(settings.appTheme) {
-                    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primary,
-                        shadowElevation = 4.dp) {
-                        Box(Modifier.size(54.dp), contentAlignment = Alignment.Center) {
-                            Icon(PeekturnIcons.Search, contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp))
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                        if (dragging) Box(Modifier.offset(y = 11.5.dp).size(17.dp)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = .72f), CircleShape)
+                            .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape),
+                            contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(3.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+                        }
+                        Surface(modifier = Modifier.offset(y = 30.dp).size(33.dp),
+                            shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = .76f),
+                            shadowElevation = 2.dp) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(PeekturnIcons.Search, contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                            }
                         }
                     }
                 }
-            } }, FrameLayout.LayoutParams(size, size))
+            } }, FrameLayout.LayoutParams(size, height))
         }
         var startX = 0f
         var startY = 0f
@@ -249,30 +291,59 @@ class FloatingLookupService : Service() {
         view.onDragTouch = { event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    dockJob?.cancel()
                     startX = event.rawX; startY = event.rawY
                     originX = p.x; originY = p.y
+                    dragging = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    p.x = (originX + event.rawX - startX).roundToInt().coerceIn(0, (screenWidth - size).coerceAtLeast(0))
-                    p.y = (originY + event.rawY - startY).roundToInt().coerceIn(0, (screenHeight - size).coerceAtLeast(0))
-                    windows.updateViewLayout(view, p)
+                    val dx = event.rawX - startX
+                    val dy = event.rawY - startY
+                    if (!dragging && kotlin.math.abs(dx) + kotlin.math.abs(dy) > dp(8)) {
+                        dragging = true
+                        if (docked) {
+                            originX = if (p.x < 0) 0 else screenWidth - size
+                            docked = false
+                        }
+                    }
+                    if (dragging) {
+                        p.x = (originX + dx).roundToInt().coerceIn(0, (screenWidth - size).coerceAtLeast(0))
+                        p.y = (originY + dy).roundToInt().coerceIn(0, (screenHeight - height + dp(16)).coerceAtLeast(0))
+                        windows.updateViewLayout(view, p)
+                    }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (kotlin.math.abs(event.rawX - startX) + kotlin.math.abs(event.rawY - startY) > dp(8)) {
-                        lookupAt(p.x + size / 2f, p.y + size / 2f)
+                    if (dragging) {
+                        dragging = false
+                        lookupAt(p.x + size / 2f, p.y + dp(20).toFloat())
+                        scheduleDock()
                     } else view.performClick()
                     true
                 }
-                MotionEvent.ACTION_CANCEL -> true
+                MotionEvent.ACTION_CANCEL -> {
+                    dragging = false
+                    scheduleDock()
+                    true
+                }
                 else -> false
             }
         }
-        view.setOnClickListener { showStopControl() }
+        view.setOnClickListener {
+            if (docked) {
+                // Edge navigation can take a swipe from a half-hidden icon. Tap to bring it
+                // into the safe drag area; a second tap opens the Stop control.
+                p.x = if (p.x < 0) dp(12) else screenWidth - size - dp(12)
+                docked = false
+                windows.updateViewLayout(view, p)
+                scheduleDock()
+            } else showStopControl()
+        }
         windows.addView(view, p)
         bubble = view
         bubbleParams = p
+        scheduleDock()
     }
 
     private fun lookupAt(x: Float, y: Float) {
@@ -296,6 +367,7 @@ class FloatingLookupService : Service() {
                 Toast.makeText(this@FloatingLookupService, R.string.floating_lookup_failed, Toast.LENGTH_SHORT).show()
             } finally {
                 bubble?.visibility = if (card == null) View.VISIBLE else View.GONE
+                if (card == null) scheduleDock()
             }
         }
     }
@@ -409,12 +481,17 @@ class FloatingLookupService : Service() {
         speech.stop()
         card?.let { windows.removeView(it) }
         card = null
-        if (!stopping && capture?.isActive != true) bubble?.visibility = View.VISIBLE
+        if (!stopping && capture?.isActive != true) {
+            bubble?.visibility = View.VISIBLE
+            scheduleDock()
+        }
     }
 
     override fun onDestroy() {
         stopping = true
         active.value = false
+        FloatingLookupTileService.refresh(this)
+        dockJob?.cancel()
         capture?.cancel()
         closeCard()
         bubble?.let { windows.removeView(it) }
@@ -432,6 +509,10 @@ class FloatingLookupService : Service() {
         super.onDestroy()
     }
 }
+
+/** Window center sits on the nearest side, leaving exactly half of the round icon visible. */
+internal fun dockX(x: Int, screenWidth: Int, windowWidth: Int): Int =
+    if (x + windowWidth / 2 < screenWidth / 2) -windowWidth / 2 else screenWidth - windowWidth / 2
 
 // Only the visible card takes focus so Back belongs to the lookup, not the source Activity.
 // Tapping outside returns the reading surface and its focus; the icon never takes focus.
