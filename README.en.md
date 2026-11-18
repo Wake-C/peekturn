@@ -4,20 +4,33 @@
 
 ### A bigger world, one word closer.
 
-Watch a science video. Follow a new idea. Read the book you have been putting off. Peekturn keeps word meanings close, so your curiosity can go further than your English.
+Open the book you have been putting off. Save an article worth a closer read. Watch a video that makes you curious. Peekturn keeps word meanings beside the content, so you can spend less time switching tools and more time understanding.
 
-An Android reader and video player for people who know some English and want to learn from real content. **Watch with interactive captions, get explanations in context, and carry word lookup into other apps.**
+An Android reading and video app for people who know some English and want to learn from real content. **Read books, import articles and follow video captions with help in context. Take floating word lookup into other apps, too.**
 
 **[Download the Android APK](https://github.com/Wake-C/peekturn/releases/latest)** · Android 8.0+ · [简体中文](README.md)
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="assets/video/peekturn-intro-cover.jpg">
-  <img src="assets/video/peekturn-intro.gif" width="800" height="800" alt="Peekturn in Classic White: video playback with interactive captions, contextual word explanations, and a floating lookup dragged onto a word in a phone browser.">
+  <source type="image/webp" srcset="assets/video/peekturn-intro.webp">
+  <img src="assets/video/peekturn-intro.gif" width="800" height="800" alt="Peekturn in Classic White: read The Prophet, open an explanation beside the book, import a web article into the reader, watch video with caption lookup, and look up words over another app.">
 </picture>
 
-[View a still image](assets/video/peekturn-intro-cover.jpg)
+[Still preview](assets/video/peekturn-intro-cover.jpg) · [GIF version](assets/video/peekturn-intro.gif)
 
-## Let the ideas play
+## A book, at your own pace
+
+Import an EPUB or open the included *The Prophet* by Kahlil Gibran. Choose your font, text size, spacing and theme. Your reading position is saved. Start narration from the current sentence, change the speed or keep listening with the screen locked.
+
+## Understand the sentence without leaving the page
+
+Select a word or phrase to see meanings, context, examples and pronunciation beside the book. Close the explanation and continue the passage. The offline dictionary needs no setup. AI context explanations use your own configured provider and can be wrong.
+
+## Give a good article a place on your shelf
+
+Paste an article link or share it from another app. Open the full text in the import browser, then import it into the reader. Use the same typography, word explanations and narration as your books, and return to where you left off.
+
+## Stay with the video, catch the words
 
 Bring a public YouTube link. Follow the captions, tap an unfamiliar word, then replay the sentence and keep watching. Switch to audio only when you do not need the picture. Completed audio and video downloads, with available captions, can play offline.
 
@@ -26,16 +39,6 @@ Bring a public YouTube link. Follow the captions, tap an unfamiliar word, then r
 Reading in another app? **Drag Peekturn's floating lookup onto an English word.** It captures the screen when you release, recognizes the word on your phone, and opens the explanation over the page you were reading. No copying a sentence into another app.
 
 Use the offline dictionary straight away, or connect your own AI service for context explanations. Screen-sharing permission is required; protected screens and apps that hide overlays may not work.
-
-## Get this meaning, in this moment
-
-A word in a book and the same word in a video can mean different things. Select a word or phrase to see its meaning in the current sentence, examples and pronunciation. AI explanations need your own configured provider and can be wrong.
-
-## Read beyond the familiar
-
-Import an EPUB or save a web article through a link or Android sharing. Bring a novel, some history, a science article or a topic you need for work. Adjust the font, text size, spacing and theme. Your reading position is saved.
-
-Let the page read aloud from the current sentence, change the speed, or keep listening with the screen locked.
 
 ## Open something worth reading
 
@@ -66,7 +69,7 @@ Common Substack, WordPress, Ghost and static blog layouts are supported, includi
 - Cross-app lookup is off by default. It captures the screen only when you release the icon and recognizes text on the device. Screen images and recognized text are not saved in the explanation cache.
 - Video and caption availability depends on the source. Temporary buffering is not an offline download. Save only content you have permission to download. Subtitle grouping does not correct transcription errors.
 
-Demo video: *The Drug To Master Reality*, by [Kurzgesagt - In a Nutshell](https://www.youtube.com/@kurzgesagt). Video imagery belongs to its creator. Browser captures use an [original sample article](assets/demo/curiosity.html), not private reading material.
+Demo sources: [The Prophet](https://www.gutenberg.org/ebooks/58585) by Kahlil Gibran, [The Need to Read](https://paulgraham.com/read.html) by Paul Graham, and *The Drug To Master Reality* by [Kurzgesagt - In a Nutshell](https://www.youtube.com/@kurzgesagt). Article and video content belongs to its creators. Cross-app lookup uses an [original sample article](assets/demo/curiosity.html), not private reading material.
 
 ---
 

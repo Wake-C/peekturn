@@ -4,20 +4,33 @@
 
 ### 读懂一个词，走近一个更大的世界。
 
-看一段科普视频，追一个新想法，翻开那本一直想读的书。憩页把词义放在你需要的地方，让好奇心走得比英语水平更远一点。
+翻开那本一直想读的书，留下一篇值得细读的文章，再看一段让你好奇的视频。憩页把词义放在内容旁边，让你少一点来回切换，多读懂一点。
 
-这是一款面向已有一些英语基础、想从真实内容中学到东西的 Android 阅读与视频 App。**看视频时点字幕查词，在句子里理解词义，去其他 App 阅读时也能随手查。**
+这是一款面向已有一些英语基础、想从真实内容中学到东西的 Android 阅读与视频 App。**读书、导入文章、看视频，都能在语境里查词；去其他 App 阅读时，也能把悬浮查词带过去。**
 
 **[下载 Android APK](https://github.com/Wake-C/peekturn/releases/latest)** · Android 8.0+ · [English](README.en.md)
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="assets/video/peekturn-intro-cover-zh.jpg">
-  <img src="assets/video/peekturn-intro-zh.gif" width="800" height="800" alt="憩页经典白主题演示：视频与互动字幕、语境解释，以及把手机悬浮查词拖到浏览器单词上，就地查看释义。">
+  <source type="image/webp" srcset="assets/video/peekturn-intro-zh.webp">
+  <img src="assets/video/peekturn-intro-zh.gif" width="800" height="800" alt="憩页白色主题完整演示：阅读《先知》，在书页旁打开词义解释，把网页文章导入阅读器，再看视频、点字幕查词，以及在其他 App 中悬浮查词。">
 </picture>
 
-[查看静态演示](assets/video/peekturn-intro-cover-zh.jpg)
+[静态预览](assets/video/peekturn-intro-cover-zh.jpg) · [GIF 版本](assets/video/peekturn-intro-zh.gif)
 
-## 让知识，动起来
+## 一本书，按自己的节奏读
+
+导入 EPUB，或直接打开内置的纪伯伦《先知》。选择喜欢的字体、字号、间距和主题，阅读位置自动保存。也可以从当前句子开始朗读，调整倍速，锁屏后继续听。
+
+## 不离开书页，读懂这一句
+
+选中单词或短语，在书页旁查看释义、语境解释、例句和发音。关掉解释窗口，接着读刚才那一段。离线词典不用配置，AI 语境解释需要连接自己的服务，也可能出错。
+
+## 把一篇好文章，留在书架里
+
+粘贴文章链接，或从其他 App 分享过来。在导入浏览器中打开全文，点一下导入，就能用读书的方式读文章：调整排版、选词解释、朗读，继续上次读到的地方。
+
+## 看视频，也能抓住词句
 
 导入公开 YouTube 链接，跟着字幕看，遇到生词就点开，再回听这一句，接着往下看。不需要画面时，可以切换到仅音频模式。下载完成的音频、视频及可用字幕支持离线播放。
 
@@ -26,16 +39,6 @@
 在其他 App 里读到不懂的词？**把憩页的悬浮查词拖到英文单词上。** 松手时截取屏幕，在手机上识别文字，释义直接出现在原来的页面上，不必把句子复制到另一个 App。
 
 离线词典可以直接用，连接自己的 AI 服务后还能看语境解释。此功能需要屏幕共享权限，受保护的页面或禁止悬浮窗的 App 可能无法使用。
-
-## 读懂的，是这一句里的意思
-
-同一个词，在书里和视频里未必是同一个意思。选中单词或短语，查看它在当前句子里的解释、例句和发音。AI 解释需要配置自己的服务，也可能出错。
-
-## 读得更远，懂得更多
-
-导入 EPUB，或通过链接、Android 分享保存网页文章。小说、历史、科学、工作中想弄懂的话题，都可以成为阅读的起点。字体、字号、间距和主题可以调整，阅读位置自动保存。
-
-也可以从当前句子开始朗读，调整倍速，锁屏后继续听。
 
 ## 先读起来
 
@@ -66,7 +69,7 @@
 - 跨 App 查词默认关闭，只在松开图标时截取屏幕，并在本机识别文字。截图和识别出的文字不会保存到解释缓存。
 - 视频和字幕能否获取取决于来源。临时缓冲不等于离线下载，请仅下载你有权保存的内容。字幕分组不会纠正原有的识别错误。
 
-演示视频为 [Kurzgesagt - In a Nutshell](https://www.youtube.com/@kurzgesagt) 的 *The Drug To Master Reality*，视频画面归原作者所有。浏览器截图使用[原创示例文章](assets/demo/curiosity.html)，不含私人阅读内容。
+演示素材：[《先知》](https://www.gutenberg.org/ebooks/58585)（纪伯伦）、[The Need to Read](https://paulgraham.com/read.html)（Paul Graham）、*The Drug To Master Reality*（[Kurzgesagt - In a Nutshell](https://www.youtube.com/@kurzgesagt)）。文章与视频归原作者所有。跨 App 查词使用[原创示例文章](assets/demo/curiosity.html)，不含私人阅读内容。
 
 ---
 
