@@ -10,13 +10,15 @@
 
 **[下载 Android APK](https://github.com/Wake-C/peekturn/releases/latest)** · Android 8.0+ · [English](README.en.md)
 
+<p align="center">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="assets/video/peekturn-intro-cover-zh.jpg">
   <source type="image/webp" srcset="assets/video/peekturn-intro-zh.webp">
-  <img src="assets/video/peekturn-intro-zh.gif" width="800" height="800" alt="憩页白色主题完整演示：阅读《先知》，在书页旁打开词义解释，把网页文章导入阅读器，再看视频、点字幕查词，以及在其他 App 中悬浮查词。">
+  <img src="assets/video/peekturn-intro-zh.gif" width="324" alt="Android 模拟器录屏：从书架打开《先知》，在书页上查词，导入 NASA 文章，点视频字幕看解释，再到 Chrome 中悬浮查词。">
 </picture>
+</p>
 
-[静态预览](assets/video/peekturn-intro-cover-zh.jpg) · [GIF 版本](assets/video/peekturn-intro-zh.gif)
+Android 模拟器实录，使用憩页的「经典白」主题。[完整录屏（MP4）](assets/video/peekturn-intro-zh.mp4) · [GIF 版本](assets/video/peekturn-intro-zh.gif) · [静态截图](assets/video/peekturn-intro-cover-zh.jpg)
 
 ## 一本书，按自己的节奏读
 
@@ -69,7 +71,7 @@
 - 跨 App 查词默认关闭，只在松开图标时截取屏幕，并在本机识别文字。截图和识别出的文字不会保存到解释缓存。
 - 视频和字幕能否获取取决于来源。临时缓冲不等于离线下载，请仅下载你有权保存的内容。字幕分组不会纠正原有的识别错误。
 
-演示素材：[《先知》](https://www.gutenberg.org/ebooks/58585)（纪伯伦）、[The Need to Read](https://paulgraham.com/read.html)（Paul Graham）、*The Drug To Master Reality*（[Kurzgesagt - In a Nutshell](https://www.youtube.com/@kurzgesagt)）。文章与视频归原作者所有。跨 App 查词使用[原创示例文章](assets/demo/curiosity.html)，不含私人阅读内容。
+录屏内容：纪伯伦的[《先知》](https://www.gutenberg.org/ebooks/58585)、NASA Space Place 的 [Why Is the Sky Blue?](https://spaceplace.nasa.gov/blue-sky/en/)，以及 [Kurzgesagt - In a Nutshell](https://www.youtube.com/@kurzgesagt) 的 *The Drug To Master Reality*。跨 App 查词录制于 Chrome，演示的是同一篇 NASA 文章。
 
 ---
 

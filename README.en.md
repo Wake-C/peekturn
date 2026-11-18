@@ -10,13 +10,15 @@ An Android reading and video app for people who know some English and want to le
 
 **[Download the Android APK](https://github.com/Wake-C/peekturn/releases/latest)** · Android 8.0+ · [简体中文](README.md)
 
+<p align="center">
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="assets/video/peekturn-intro-cover.jpg">
   <source type="image/webp" srcset="assets/video/peekturn-intro.webp">
-  <img src="assets/video/peekturn-intro.gif" width="800" height="800" alt="Peekturn in Classic White: read The Prophet, open an explanation beside the book, import a web article into the reader, watch video with caption lookup, and look up words over another app.">
+  <img src="assets/video/peekturn-intro.gif" width="324" alt="Android emulator recording: open The Prophet from the library, explain a word on the page, import a NASA article, tap a video caption, then use floating lookup in Chrome.">
 </picture>
+</p>
 
-[Still preview](assets/video/peekturn-intro-cover.jpg) · [GIF version](assets/video/peekturn-intro.gif)
+Recorded in the Android emulator with Peekturn's Classic White theme. [Full-size recording (MP4)](assets/video/peekturn-intro.mp4) · [GIF](assets/video/peekturn-intro.gif) · [Still image](assets/video/peekturn-intro-cover.jpg)
 
 ## A book, at your own pace
 
@@ -69,7 +71,7 @@ Common Substack, WordPress, Ghost and static blog layouts are supported, includi
 - Cross-app lookup is off by default. It captures the screen only when you release the icon and recognizes text on the device. Screen images and recognized text are not saved in the explanation cache.
 - Video and caption availability depends on the source. Temporary buffering is not an offline download. Save only content you have permission to download. Subtitle grouping does not correct transcription errors.
 
-Demo sources: [The Prophet](https://www.gutenberg.org/ebooks/58585) by Kahlil Gibran, [The Need to Read](https://paulgraham.com/read.html) by Paul Graham, and *The Drug To Master Reality* by [Kurzgesagt - In a Nutshell](https://www.youtube.com/@kurzgesagt). Article and video content belongs to its creators. Cross-app lookup uses an [original sample article](assets/demo/curiosity.html), not private reading material.
+In the recording: [The Prophet](https://www.gutenberg.org/ebooks/58585) by Kahlil Gibran, [Why Is the Sky Blue?](https://spaceplace.nasa.gov/blue-sky/en/) from NASA Space Place, and *The Drug To Master Reality* by [Kurzgesagt - In a Nutshell](https://www.youtube.com/@kurzgesagt). The cross-app lookup runs over the same NASA article in Chrome.
 
 ---
 
