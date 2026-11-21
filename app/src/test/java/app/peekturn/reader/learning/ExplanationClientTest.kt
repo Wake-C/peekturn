@@ -46,6 +46,11 @@ class ExplanationClientTest {
         val json = JsonParser.parseString(request.body.readUtf8()).asJsonObject
         assertEquals("configured-model", json["model"].asString)
         assertEquals("json_object", json.getAsJsonObject("response_format")["type"].asString)
+        val system = json.getAsJsonArray("messages")[0].asJsonObject["content"].asString
+        assertTrue(system.startsWith("Write a small English dictionary card."))
+        assertTrue(system.contains("Give exactly two complete, short English examples."))
+        assertTrue(system.contains("up to three natural English alternatives"))
+        assertEquals("explanation-prompt-v5", explanationPromptGeneration(ExplanationLanguage.English))
         val context = JsonParser.parseString(json.getAsJsonArray("messages")[1].asJsonObject["content"].asString).asJsonObject
         assertEquals("before11", context["before"].asString.substringBefore(' '))
     }
@@ -58,6 +63,10 @@ class ExplanationClientTest {
         val json = JsonParser.parseString(server.takeRequest().body.readUtf8()).asJsonObject
         val messages = json.getAsJsonArray("messages")
         val system = messages[0].asJsonObject["content"].asString
+        assertTrue(system.startsWith("你给学英语的人写简短的英汉查词卡。"))
+        assertTrue(system.contains("examples 恰好两条。"))
+        assertTrue(system.contains("各给最多三个"))
+        assertEquals("explanation-prompt-v4", explanationPromptGeneration(ExplanationLanguage.Chinese))
         val user = messages[1].asJsonObject["content"].asString
         val passage = JsonParser.parseString(user).asJsonObject
         assertEquals(lookup.selection, passage["selection"].asString)
