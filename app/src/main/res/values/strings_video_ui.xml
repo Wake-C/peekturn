@@ -4,7 +4,7 @@
     <string name="video_ui_title">Video</string>
     <string name="video_ui_empty_title">No videos yet</string>
     <string name="video_ui_empty_detail">Videos you add from YouTube appear here.</string>
-    <string name="video_ui_import_video">Import video</string>
+    <string name="video_ui_import_video">Add a video or playlist</string>
     <string name="video_ui_import_link">Import a link</string>
     <string name="video_ui_all_videos">All videos</string>
     <string name="video_ui_video_count">%1$d videos</string>

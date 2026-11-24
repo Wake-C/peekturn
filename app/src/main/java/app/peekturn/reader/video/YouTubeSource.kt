@@ -24,7 +24,10 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.schabi.newpipe.extractor.Image
+import org.schabi.newpipe.extractor.ListExtractor.InfoItemsPage
 import org.schabi.newpipe.extractor.MediaFormat
+import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.downloader.Downloader
@@ -47,9 +50,11 @@ import org.schabi.newpipe.extractor.localization.Localization
 import org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper
 import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.AudioTrackType
+import org.schabi.newpipe.extractor.stream.ContentAvailability
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
 import org.schabi.newpipe.extractor.stream.StreamExtractor
 import org.schabi.newpipe.extractor.stream.StreamInfo
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import org.schabi.newpipe.extractor.stream.StreamType
 import org.schabi.newpipe.extractor.stream.VideoStream
 
@@ -110,9 +115,25 @@ class YouTubeSource(private val http: OkHttpClient = defaultVideoHttpClient()) {
      * provider/network/content failure for everything the extractor cannot return. Cancelling the
      * caller cancels the in-flight extractor request so no work continues after the user leaves.
      */
-    @OptIn(InternalCoroutinesApi::class)
     suspend fun resolve(videoId: String): ResolvedVideo {
         if (!YouTubeUrls.isVideoId(videoId)) throw VideoFailure(VideoFailureKind.InvalidLink)
+        return runExtraction { extract(videoId) }
+    }
+
+    /** Fetch listing metadata only. Playback sources and captions are resolved when a member opens. */
+    suspend fun playlist(id: String): YouTubePlaylist {
+        if (!YouTubeUrls.isPlaylistId(id)) throw VideoFailure(VideoFailureKind.InvalidLink)
+        return runExtraction {
+            val extractor = ServiceList.YouTube.getPlaylistExtractor("https://www.youtube.com/playlist?list=$id")
+            extractor.fetchPage()
+            val title = extractor.name.trim().ifEmpty { throw VideoFailure(VideoFailureKind.Provider) }
+            val videos = playlistVideos(extractor.initialPage, extractor::getPage)
+            YouTubePlaylist(id, title, videos)
+        }
+    }
+
+    @OptIn(InternalCoroutinesApi::class)
+    private suspend fun <T> runExtraction(read: () -> T): T {
         return withContext(Dispatchers.IO) {
             ensureExtractorInitialized()
             extractionMutex.withLock {
@@ -126,7 +147,7 @@ class YouTubeSource(private val http: OkHttpClient = defaultVideoHttpClient()) {
                 activeExtraction = gate
                 try {
                     currentCoroutineContext().ensureActive()
-                    val resolved = extract(videoId)
+                    val resolved = read()
                     // A cancelled caller must not receive a late extraction result.
                     currentCoroutineContext().ensureActive()
                     resolved
@@ -206,13 +227,7 @@ class YouTubeSource(private val http: OkHttpClient = defaultVideoHttpClient()) {
         if (title.isEmpty()) throw VideoFailure(VideoFailureKind.Provider)
         val author = optional { extractor.uploaderName }?.trim().orEmpty()
         val durationSeconds = optional { extractor.length } ?: 0L
-        val thumbnailUrl = optional { extractor.thumbnails }
-            .orEmpty()
-            .filter { image ->
-                image.url.startsWith("https://", ignoreCase = true) && isRemoteUrl(image.url)
-            }
-            .maxByOrNull { image -> image.width.toLong() * image.height.toLong() }
-            ?.url
+        val thumbnailUrl = thumbnailUrl(optional { extractor.thumbnails }.orEmpty())
         val audioChoices = extractor.audioStreams.mapNotNull { audioChoice(it, videoId) }
         val renditions = playbackRenditions(
             muxed = extractor.videoStreams.mapNotNull { videoChoice(it, videoId) },
@@ -487,6 +502,36 @@ private fun bestAudioChoice(audio: List<AudioChoice>): AudioChoice? {
 private fun heightOf(stream: VideoStream): Int {
     if (stream.height > 0) return stream.height
     return stream.resolution.orEmpty().takeWhile { it.isDigit() }.toIntOrNull() ?: 0
+}
+
+private fun thumbnailUrl(images: List<Image>): String? = images
+    .filter { it.url.startsWith("https://", ignoreCase = true) && isRemoteUrl(it.url) }
+    .maxByOrNull { it.width.toLong() * it.height }?.url
+
+data class YouTubePlaylist(val id: String, val title: String, val videos: List<VideoMetadata>)
+
+/** Keep the first appearance of each playable member, in the order returned across all pages. */
+internal fun playlistVideos(
+    firstPage: InfoItemsPage<StreamInfoItem>,
+    nextPage: (Page) -> InfoItemsPage<StreamInfoItem>
+): List<VideoMetadata> {
+    var page = firstPage
+    val videos = linkedMapOf<String, VideoMetadata>()
+    while (true) {
+        for (item in page.items) {
+            if (item.streamType == StreamType.LIVE_STREAM || item.streamType == StreamType.AUDIO_LIVE_STREAM) continue
+            if (item.contentAvailability == ContentAvailability.PAID ||
+                item.contentAvailability == ContentAvailability.MEMBERSHIP ||
+                item.contentAvailability == ContentAvailability.UPCOMING) continue
+            val id = YouTubeUrls.parse(item.url)?.videoId ?: continue
+            val title = item.name.trim()
+            if (title.isEmpty() || id in videos) continue
+            videos[id] = VideoMetadata(id, title, item.uploaderName.orEmpty().trim(),
+                durationMillis(item.duration), thumbnailUrl(item.thumbnails.orEmpty()))
+        }
+        if (!page.hasNextPage()) return videos.values.toList()
+        page = nextPage(checkNotNull(page.nextPage))
+    }
 }
 
 private fun durationMillis(seconds: Long): Long {

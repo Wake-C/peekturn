@@ -45,7 +45,7 @@ Use the offline dictionary straight away, or connect your own AI service for con
 ## Open something worth reading
 
 1. **Install and open Peekturn.** Start with the included *The Prophet* by Kahlil Gibran, or import your own EPUB or article.
-2. **Try a passage you want to understand.** Select an unfamiliar word to look it up, or start narration from the current sentence. For video, paste a YouTube link in Video or share it from another app.
+2. **Try a passage you want to understand.** Select an unfamiliar word to look it up, or start narration from the current sentence. For video, paste a YouTube video or playlist link in Video, or share it from another app. Each playlist has one entry in Video. Tap Episodes in the player to switch. Open the playlist again to return to your last episode.
 3. **Add AI when you want context explanations.** Enter your own model service, model name and API key in Settings. Your provider may charge for requests, and explanations can be wrong.
 
 <details>

@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -34,10 +35,23 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
-/**
- * A's compact video shelf: one honest continue row, the whole library and one import action. No
- * demo rows are ever created here; every title and position comes from the stored video entry.
- */
+private sealed interface ShelfEntry {
+    val title: String
+    val key: String
+    val resumeVideo: VideoItem?
+
+    data class Single(val item: VideoItem) : ShelfEntry {
+        override val title get() = item.title
+        override val key get() = "video-${item.id}"
+        override val resumeVideo get() = item
+    }
+
+    data class Playlist(val playlist: VideoPlaylist, val coverUrl: String?, override val resumeVideo: VideoItem?) : ShelfEntry {
+        override val title get() = playlist.title
+        override val key get() = "playlist-${playlist.id}"
+    }
+}
+
 @Composable
 internal fun VideoLibraryScreen(
     items: List<VideoItem>,
@@ -47,94 +61,166 @@ internal fun VideoLibraryScreen(
     downloads: Map<Long, VideoDownloadState> = emptyMap(),
     onDownload: (VideoItem) -> Unit = {},
     onRemoveDownload: (VideoItem) -> Unit = {},
-    onDownloadVideo: (VideoItem) -> Unit = {}
+    onDownloadVideo: (VideoItem) -> Unit = {},
+    playlists: List<VideoPlaylist> = emptyList(),
+    onOpenPlaylist: (VideoPlaylist, VideoItem) -> Unit = { _, _ -> },
+    onRemovePlaylist: (String) -> Unit = {},
+    lastPlaylistId: String? = null
 ) {
-    val ordered = remember(items) {
-        items.sortedWith(compareByDescending<VideoItem> { it.lastWatchedAt }.thenBy { it.title.lowercase() })
+    val ordered = remember(items, playlists) {
+        val byId = items.associateBy(VideoItem::id)
+        buildList {
+            playlists.forEach { playlist ->
+                val members = playlist.videoIds.mapNotNull(byId::get)
+                add(ShelfEntry.Playlist(playlist, members.firstOrNull()?.thumbnailUrl, members.maxByOrNull { it.lastWatchedAt }))
+            }
+            items.filter(VideoItem::isStandalone).forEach { add(ShelfEntry.Single(it)) }
+        }.sortedWith(compareByDescending<ShelfEntry> { it.resumeVideo?.lastWatchedAt ?: 0 }
+            .thenBy { it.title.lowercase() })
     }
-    var deletingId by rememberSaveable { mutableStateOf<Long?>(null) }
-    val focus = ordered.firstOrNull { it.lastWatchedAt > 0L }
+    var deleting by rememberSaveable { mutableStateOf<String?>(null) }
+    val focus = remember(ordered, lastPlaylistId) {
+        val latest = ordered.firstOrNull()?.resumeVideo?.lastWatchedAt ?: 0L
+        if (latest == 0L) null else {
+            val recent = ordered.takeWhile { it.resumeVideo?.lastWatchedAt == latest }
+            recent.firstOrNull { it is ShelfEntry.Playlist && it.playlist.id == lastPlaylistId }
+                ?: recent.firstOrNull { it is ShelfEntry.Single }
+                ?: recent.first()
+        }
+    }
 
-    LazyColumn(
-        Modifier.fillMaxSize(),
+    LazyColumn(Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 48.dp)
     ) {
         if (ordered.isEmpty()) {
             item {
                 Column(
-                    Modifier.fillMaxWidth().padding(top = 48.dp, bottom = 48.dp),
+                    Modifier.fillMaxWidth().padding(vertical = 48.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Text(
-                        stringResource(R.string.video_ui_empty_title),
-                        style = MaterialTheme.typography.headlineSmall
-                    )
-                    Text(
-                        stringResource(R.string.video_ui_empty_detail),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(stringResource(R.string.video_ui_empty_title), style = MaterialTheme.typography.headlineSmall)
+                    Text(stringResource(R.string.video_ui_empty_detail), style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                     VideoImportButton(onImport)
                 }
             }
         } else {
             if (focus != null) {
-                item(key = "continue-${focus.id}") {
-                    ContinueRow(focus, onOpen)
+                item(key = "continue-${focus.key}") {
+                    when (focus) {
+                        is ShelfEntry.Single -> ContinueRow(focus.item, onOpen = { onOpen(focus.item) })
+                        is ShelfEntry.Playlist -> focus.resumeVideo?.let { episode ->
+                            val index = focus.playlist.videoIds.indexOf(episode.id) + 1
+                            ContinueRow(episode, focus.title, stringResource(R.string.playlist_library_episode, index, episode.title)) {
+                                onOpenPlaylist(focus.playlist, episode)
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(20.dp))
                 }
             }
             item {
                 Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        stringResource(R.string.video_ui_all_videos),
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        stringResource(R.string.video_ui_video_count, ordered.size),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(stringResource(R.string.video_ui_all_videos), style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f))
+                    Text(if (playlists.isEmpty()) stringResource(R.string.video_ui_video_count, ordered.size)
+                        else pluralStringResource(R.plurals.playlist_library_count, ordered.size, ordered.size),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.width(8.dp))
                     VideoImportButton(onImport)
                 }
             }
-            items(ordered, key = { it.id }) { item ->
-                VideoRow(item, onOpen = { onOpen(item) }, onRemove = { deletingId = item.id },
-                    download = downloads[item.id], onDownload = { onDownload(item) },
-                    onRemoveDownload = { onRemoveDownload(item) }, onDownloadVideo = { onDownloadVideo(item) })
+            items(ordered, key = ShelfEntry::key) { entry ->
+                when (entry) {
+                    is ShelfEntry.Single -> {
+                        val item = entry.item
+                        VideoRow(item, onOpen = { onOpen(item) }, onRemove = { deleting = entry.key },
+                            download = downloads[item.id], onDownload = { onDownload(item) },
+                            onRemoveDownload = { onRemoveDownload(item) }, onDownloadVideo = { onDownloadVideo(item) })
+                    }
+                    is ShelfEntry.Playlist -> PlaylistRow(entry, onOpen = { episode -> onOpenPlaylist(entry.playlist, episode) },
+                        onRemove = { deleting = entry.key })
+                }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
     }
 
-    ordered.firstOrNull { it.id == deletingId }?.let { item ->
+    ordered.firstOrNull { it.key == deleting }?.let { entry ->
+        val isPlaylist = entry is ShelfEntry.Playlist
+        val removeMessage = when {
+            entry is ShelfEntry.Playlist -> R.string.playlist_library_remove_message
+            entry is ShelfEntry.Single && playlists.any { entry.item.id in it.videoIds } -> R.string.playlist_library_remove_single
+            else -> R.string.video_ui_remove_video_message
+        }
         AlertDialog(
-            onDismissRequest = { deletingId = null },
+            onDismissRequest = { deleting = null },
             shape = MaterialTheme.shapes.large,
             containerColor = MaterialTheme.colorScheme.surface,
-            title = { Text(stringResource(R.string.video_ui_remove_video_title), style = MaterialTheme.typography.titleLarge) },
+            title = { Text(stringResource(if (isPlaylist) R.string.playlist_library_remove_title
+                else R.string.video_ui_remove_video_title), style = MaterialTheme.typography.titleLarge) },
             text = {
-                Text(
-                    stringResource(R.string.video_ui_remove_video_message, item.title),
-                    Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())
-                )
+                Text(stringResource(removeMessage, entry.title),
+                    Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()))
             },
             confirmButton = {
                 TextButton(
-                    onClick = { deletingId = null; onDelete(item) },
+                    onClick = {
+                        deleting = null
+                        when (entry) {
+                            is ShelfEntry.Single -> onDelete(entry.item)
+                            is ShelfEntry.Playlist -> onRemovePlaylist(entry.playlist.id)
+                        }
+                    },
                     modifier = Modifier.heightIn(min = 48.dp),
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) { Text(stringResource(R.string.video_ui_remove)) }
             },
             dismissButton = {
-                TextButton(onClick = { deletingId = null }, modifier = Modifier.heightIn(min = 48.dp)) {
+                TextButton(onClick = { deleting = null }, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.video_ui_keep))
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun PlaylistRow(entry: ShelfEntry.Playlist, onOpen: (VideoItem) -> Unit, onRemove: () -> Unit) {
+    val playlist = entry.playlist
+    var menuOpen by remember(playlist.id) { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.weight(1f)
+                .clickable(enabled = entry.resumeVideo != null, role = Role.Button) { entry.resumeVideo?.let(onOpen) }
+                .padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            VideoThumbnail(entry.coverUrl, 0L, Modifier.width(96.dp).aspectRatio(16f / 9f))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(playlist.title, style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(pluralStringResource(R.plurals.playlist_library_episodes, playlist.videoIds.size, playlist.videoIds.size),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                entry.resumeVideo?.takeIf { it.lastWatchedAt > 0 }?.let { episode ->
+                    Text(stringResource(R.string.playlist_library_episode, playlist.videoIds.indexOf(episode.id) + 1,
+                        episode.title), style = MaterialTheme.typography.bodySmall, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        Box {
+            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
+                Icon(PeekturnIcons.More, stringResource(R.string.playlist_library_options, playlist.title),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(text = { Text(stringResource(R.string.playlist_library_remove)) },
+                    onClick = { menuOpen = false; onRemove() })
+            }
+        }
     }
 }
 
@@ -147,11 +233,11 @@ private fun VideoImportButton(onImport: () -> Unit) {
 }
 
 @Composable
-private fun ContinueRow(item: VideoItem, onOpen: (VideoItem) -> Unit) {
+private fun ContinueRow(item: VideoItem, title: String = item.title, subtitle: String = item.author, onOpen: () -> Unit) {
     Row(
         Modifier.fillMaxWidth()
-            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.video_ui_open_video, item.title)) {
-                onOpen(item)
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.video_ui_open_video, title)) {
+                onOpen()
             }
             .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -164,13 +250,13 @@ private fun ContinueRow(item: VideoItem, onOpen: (VideoItem) -> Unit) {
         )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                item.title,
+                title,
                 style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp, lineHeight = 25.sp),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                item.author.ifBlank { stringResource(R.string.video_ui_unknown_channel) },
+                subtitle.ifBlank { stringResource(R.string.video_ui_unknown_channel) },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -296,8 +382,8 @@ private fun VideoThumbnail(url: String?, durationMs: Long, modifier: Modifier) {
     val fallback = stringResource(R.string.video_ui_thumbnail)
     val cached = remember(url) { url?.let { thumbnailCache.get(it) } }
     val image by produceState<ImageBitmap?>(initialValue = cached, key1 = url) {
-        if (value != null || url == null) return@produceState
-        value = withContext(Dispatchers.IO) { loadThumbnail(url) }
+        value = cached
+        if (cached == null && url != null) value = withContext(Dispatchers.IO) { loadThumbnail(url) }
     }
     val shape = RoundedCornerShape(8.dp)
     Box(modifier.clip(shape).background(MaterialTheme.colorScheme.surfaceVariant)) {

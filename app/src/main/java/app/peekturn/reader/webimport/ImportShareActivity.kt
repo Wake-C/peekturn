@@ -20,6 +20,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import app.peekturn.reader.MainActivity
 import app.peekturn.reader.PeekturnApp
 import app.peekturn.reader.R
 import app.peekturn.reader.reader.ReaderActivity
@@ -58,9 +59,11 @@ class ImportShareActivity : AppCompatActivity() {
         }
         val target = when (val incoming = extract(intent)) {
             is Incoming.Link -> {
-                startActivity(if (YouTubeUrls.isYouTubeUrl(incoming.url))
-                    VideoActivity.importIntent(this, incoming.url)
-                else WebImportActivity.intent(this, incoming.url, direct = true))
+                startActivity(when {
+                    YouTubeUrls.playlistId(incoming.url) != null -> MainActivity.playlistIntent(this, incoming.url)
+                    YouTubeUrls.isYouTubeUrl(incoming.url) -> VideoActivity.importIntent(this, incoming.url)
+                    else -> WebImportActivity.intent(this, incoming.url, direct = true)
+                })
                 finish()
                 return
             }

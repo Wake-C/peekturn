@@ -82,6 +82,7 @@ class MainActivity : AppCompatActivity() {
         val videoEntry = intent.getBooleanExtra(EXTRA_VIDEO_TAB, false)
         val settingsEntry = intent.getBooleanExtra(EXTRA_SETTINGS_TAB, false)
         if (settingsEntry) vm.tab(3) else if (videoEntry) vm.showVideos()
+        if (savedInstanceState == null) intent.getStringExtra(EXTRA_PLAYLIST_LINK)?.let(vm::importPlaylistLink)
         vm.initialize(reopen = savedInstanceState == null && !videoEntry && !settingsEntry)
         setContent {
             val settings by graph.store.settings.collectAsStateWithLifecycle()
@@ -98,8 +99,8 @@ class MainActivity : AppCompatActivity() {
                             else WebImportActivity.intent(this, url))
                     },
                     onOpen = { id -> startActivity(ReaderActivity.intent(this, id)) },
-                    onOpenVideo = { id -> startActivity(VideoActivity.intent(this, id)) },
-                    onResumeVideo = { id -> startActivity(VideoActivity.intent(this, id, resumeOnLaunch = true)) },
+                    onOpenVideo = { id, playlist -> startActivity(VideoActivity.intent(this, id, playlistId = playlist)) },
+                    onResumeVideo = { id, playlist -> startActivity(VideoActivity.intent(this, id, resumeOnLaunch = true, playlistId = playlist)) },
                     onFloatingLookup = ::toggleFloatingLookup
                 )
             }
@@ -122,9 +123,12 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         if (intent.getBooleanExtra(EXTRA_SETTINGS_TAB, false)) vm.tab(3)
         else if (intent.getBooleanExtra(EXTRA_VIDEO_TAB, false)) vm.showVideos()
+        intent.getStringExtra(EXTRA_PLAYLIST_LINK)?.let(vm::importPlaylistLink)
     }
 
     companion object {
+        private const val EXTRA_PLAYLIST_LINK = "playlist_link"
+        fun playlistIntent(context: Context, url: String) = videoIntent(context).putExtra(EXTRA_PLAYLIST_LINK, url)
         private const val EXTRA_VIDEO_TAB = "video_tab"
         private const val EXTRA_SETTINGS_TAB = "settings_tab"
         fun settingsIntent(context: Context): Intent = Intent(context, MainActivity::class.java)
@@ -143,13 +147,14 @@ private fun PeekturnHome(
     onImportFile: () -> Unit,
     onImportUrl: (String) -> Unit,
     onOpen: (Long) -> Unit,
-    onOpenVideo: (Long) -> Unit,
-    onResumeVideo: (Long) -> Unit,
+    onOpenVideo: (Long, String?) -> Unit,
+    onResumeVideo: (Long, String?) -> Unit,
     onFloatingLookup: () -> Unit
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val books by vm.graph.store.books.collectAsStateWithLifecycle()
     val videos by vm.graph.store.videos.collectAsStateWithLifecycle()
+    val playlists by vm.graph.store.playlists.collectAsStateWithLifecycle()
     val downloads by vm.graph.videoDownloads.states.collectAsStateWithLifecycle()
     val floatingLookupActive by FloatingLookupService.active.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.graph.videoDownloads.initialize() }
@@ -158,9 +163,10 @@ private fun PeekturnHome(
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val videoDeleteFailure = stringResource(R.string.video_shell_delete_failed)
+    val playlistRemoveFailed = stringResource(R.string.playlist_remove_failed)
     val scope = rememberCoroutineScope()
     var videoUrlDialog by rememberSaveable { mutableStateOf(false) }
-    var urlDialog by remember { mutableStateOf(false) }
+    var urlDialog by rememberSaveable { mutableStateOf(false) }
     var urlText by rememberSaveable { mutableStateOf("") }
     var urlInvalid by remember { mutableStateOf(false) }
     LaunchedEffect(state.pendingBookId, lifecycle) {
@@ -174,7 +180,14 @@ private fun PeekturnHome(
         val id = state.pendingVideoId
         if (id != null && lifecycle.isAtLeast(Lifecycle.State.RESUMED)) {
             vm.consumeVideoOpen(id)
-            onResumeVideo(id)
+            onResumeVideo(id, state.resumePlaylistId)
+        }
+    }
+    val savedMessage = state.savedPlaylistTitle?.let { stringResource(R.string.playlist_saved, it) }
+    LaunchedEffect(savedMessage) {
+        savedMessage?.let {
+            snackbar.showSnackbar(it)
+            vm.consumePlaylistSaved()
         }
     }
     LaunchedEffect(state.message) {
@@ -211,16 +224,28 @@ private fun PeekturnHome(
             else when (state.tab) {
                 0 -> LibraryScreen(books, vm::open, onImportFile, { videoUrlDialog = false; urlDialog = true }, vm::delete)
                 1 -> VideoLibraryScreen(videos,
-                    onOpen = { onOpenVideo(it.id) },
+                    onOpen = { onOpenVideo(it.id, null) },
                     onImport = { videoUrlDialog = true; urlDialog = true },
                     onDelete = { item ->
                         scope.launch {
                             try {
+                                if (vm.graph.store.removeStandaloneIfInPlaylist(item.id)) return@launch
                                 if (downloads[item.id] != null) vm.graph.videoDownloads.remove(item.id)
                                 vm.graph.videos.delete(item)
                             }
                             catch (cancelled: CancellationException) { throw cancelled }
                             catch (_: Exception) { snackbar.showSnackbar(videoDeleteFailure) }
+                        }
+                    },
+                    playlists = playlists,
+                    lastPlaylistId = vm.graph.store.lastVideoPlaylistId(),
+                    onOpenPlaylist = { playlist, episode -> onOpenVideo(episode.id, playlist.id) },
+                    onRemovePlaylist = { id ->
+                        scope.launch {
+                            try {
+                                vm.graph.store.removePlaylist(id)
+                            } catch (e: CancellationException) { throw e }
+                            catch (_: Exception) { snackbar.showSnackbar(playlistRemoveFailed) }
                         }
                     },
                     downloads = downloads,
@@ -231,7 +256,9 @@ private fun PeekturnHome(
                     },
                     onRemoveDownload = { vm.graph.videoDownloads.remove(it.id) },
                     onDownloadVideo = { vm.graph.videoDownloads.download(it, false, settings.videoQualityHeight) })
-                2 -> StatisticsScreen(stats, books, videos, vm::open, { onOpenVideo(it.id) })
+                2 -> StatisticsScreen(stats, books, videos, vm::open, { video ->
+                    onOpenVideo(video.id, playlists.firstOrNull { !video.isStandalone && video.id in it.videoIds }?.id)
+                })
                 else -> SettingsScreen(
                     settings, vm::save, vm.graph.explanations::testConnection, vm.graph.speech,
                     vm.graph.explanationCache::sizeBytes,
@@ -285,15 +312,25 @@ private fun PeekturnHome(
             confirmButton = {
                 TextButton(onClick = {
                     val isVideo = videoUrlDialog || YouTubeUrls.isYouTubeUrl(urlText)
-                    val url = if (isVideo) urlText.trim().takeIf { YouTubeUrls.parse(it) != null }
+                    val isPlaylist = YouTubeUrls.playlistId(urlText) != null
+                    val url = if (isVideo) urlText.trim().takeIf { isPlaylist || YouTubeUrls.parse(it) != null }
                         else normalizeHttpUrl(urlText)
                     if (url == null) urlInvalid = true
-                    else { urlDialog = false; urlText = ""; onImportUrl(url) }
+                    else {
+                        urlDialog = false
+                        urlText = ""
+                        if (isPlaylist) vm.importPlaylistLink(url) else onImportUrl(url)
+                    }
                 }) { Text(stringResource(R.string.shell_import_open)) }
             },
             dismissButton = {
                 TextButton(onClick = { urlDialog = false }) { Text(stringResource(R.string.shell_cancel)) }
             }
         )
+    }
+    state.playlistImport?.let { import ->
+        PlaylistImportDialog(import, updating = import is PlaylistImport.Preview && playlists.any { it.id == import.playlist.id },
+            onDismiss = vm::cancelPlaylistImport, onLoad = vm::loadPlaylist, onSave = vm::savePlaylist,
+            onOpenVideo = { vm.cancelPlaylistImport(); onImportUrl(it) })
     }
 }

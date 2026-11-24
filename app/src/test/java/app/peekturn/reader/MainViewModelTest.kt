@@ -6,6 +6,8 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
 import app.peekturn.reader.model.SentenceSpeechProvider
+import app.peekturn.reader.video.VideoMetadata
+import app.peekturn.reader.video.YouTubePlaylist
 import app.peekturn.reader.reader.BuiltinBook
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -75,6 +77,23 @@ class MainViewModelTest {
         assertTrue(vm.state.value.ready)
         assertNull(vm.state.value.pendingBookId)
         assertEquals(book.id, graph.store.lastBookId())
+    }
+
+    @Test fun coldLaunchRestoresTheSamePlaylistForASharedEpisode() = runBlocking {
+        val episode = VideoMetadata("aaaaaaaaaaa", "Shared episode", "Channel", 60000, null)
+        graph.store.savePlaylist(YouTubePlaylist("first", "First course", listOf(episode)))
+        graph.store.savePlaylist(YouTubePlaylist("second", "Second course", listOf(episode)))
+        val id = graph.store.findVideoBySource(episode.videoId)!!.id
+        graph.store.markVideoOpened(id, playlistId = "second")
+        val vm = viewModel("return to course")
+        initialize(vm, reopen = true)
+        assertEquals(id, vm.state.value.pendingVideoId)
+        assertEquals("second", vm.state.value.resumePlaylistId)
+        graph.store.removePlaylist("second")
+        graph.store.removePlaylist("first")
+        val afterRemoval = viewModel("return after removing both courses")
+        initialize(afterRemoval, reopen = true)
+        assertNull(afterRemoval.state.value.pendingVideoId)
     }
 
     @Test fun explicitVideoEntryDoesNotReopenTheLastEpub() = runBlocking {

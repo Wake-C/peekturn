@@ -11,6 +11,8 @@ import app.peekturn.reader.model.ReadingStats
 import app.peekturn.reader.model.VideoReadingTime
 import app.peekturn.reader.video.VideoItem
 import app.peekturn.reader.video.VideoMetadata
+import app.peekturn.reader.video.VideoPlaylist
+import app.peekturn.reader.video.YouTubePlaylist
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -267,6 +269,88 @@ class PeekturnStoreVideoTest {
         upgraded.selectVideoTrack(old.id, "ja")
         assertTrue(PeekturnStore(context).findVideo(old.id)!!.trackExplicit)
         assertEquals("v1 locator", upgraded.findBook(1)?.locatorJson)
+    }
+
+    @Test fun versionFiveLibraryCanImportAndRefreshPlaylistsWithoutLosingVideosOrProgress() = runBlocking {
+        createVersionOneDatabase()
+        SQLiteDatabase.openDatabase(context.getDatabasePath("peekturn.db").path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("CREATE TABLE videos(id INTEGER PRIMARY KEY AUTOINCREMENT,video_id TEXT NOT NULL UNIQUE,title TEXT NOT NULL,author TEXT NOT NULL,duration_ms INTEGER NOT NULL DEFAULT 0,thumbnail_url TEXT,position_ms INTEGER NOT NULL DEFAULT 0,last_watched_at INTEGER NOT NULL DEFAULT 0,selected_track_id TEXT,track_explicit INTEGER NOT NULL DEFAULT 0,audio_only INTEGER,read_mode INTEGER NOT NULL DEFAULT 0)")
+            db.execSQL("CREATE TABLE video_daily(video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,date TEXT NOT NULL,seconds INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(video_id,date))")
+            db.execSQL("INSERT INTO videos(video_id,title,author,duration_ms,position_ms,last_watched_at,selected_track_id,track_explicit,audio_only,read_mode) VALUES('one','Kept','Channel',60000,12345,42,'en',1,1,1)")
+            db.execSQL("INSERT INTO video_daily VALUES(1,'2026-10-25',42)")
+            db.version = 5
+        }
+
+        store.load()
+        assertTrue(store.playlists.value.isEmpty())
+        val kept = store.videos.value.single()
+        assertTrue(kept.isStandalone)
+        val one = VideoMetadata("one", "New name", "Channel", 0, null)
+        val two = VideoMetadata("two", "Another", "Channel", 0, null)
+        val three = VideoMetadata("three", "Third", "Channel", 0, null)
+        val playlist = YouTubePlaylist("list", "First title", listOf(one, two))
+        store.savePlaylist(playlist)
+        val secondId = store.findVideoBySource("two")!!.id
+        assertEquals(listOf(kept.id, secondId), store.playlists.value.single().videoIds)
+        store.savePlaylist(YouTubePlaylist("shared", "Other", listOf(two, one)))
+        store.savePlaylist(playlist.copy(title = "New title", videos = listOf(three, one)))
+
+        val reopened = PeekturnStore(context)
+        reopened.load()
+        val thirdId = reopened.findVideoBySource("three")!!.id
+        assertEquals(listOf(VideoPlaylist("list", "New title", listOf(thirdId, kept.id)),
+            VideoPlaylist("shared", "Other", listOf(secondId, kept.id))), reopened.playlists.value)
+        assertEquals(3, reopened.videos.value.size)
+        assertEquals(kept.copy(title = "New name"), reopened.findVideo(kept.id))
+        assertEquals(listOf(kept.id), reopened.videos.value.filter { it.isStandalone }.map { it.id })
+        assertEquals(0L, reopened.findVideo(thirdId)!!.lastWatchedAt)
+        assertEquals(42L, reopened.stats.value.videos.single().seconds)
+        assertEquals("v1 locator", reopened.findBook(1)!!.locatorJson)
+
+        reopened.removePlaylist("list")
+        assertFalse(reopened.findVideo(thirdId)!!.isStandalone)
+        // Importing a former playlist member directly gives it a shelf entry with the same progress.
+        reopened.saveVideoPosition(thirdId, 1000)
+        val standalone = reopened.upsertVideo(three)
+        assertTrue(standalone.isStandalone)
+        assertEquals(thirdId, standalone.id)
+        assertEquals(1000L, standalone.positionMs)
+        assertEquals(listOf(secondId, kept.id), reopened.playlists.value.single().videoIds)
+        assertFalse(reopened.removeStandaloneIfInPlaylist(thirdId))
+        assertTrue(reopened.removeStandaloneIfInPlaylist(kept.id))
+        assertEquals(kept.copy(title = "New name", isStandalone = false), reopened.findVideo(kept.id))
+        assertEquals(listOf(secondId, kept.id), reopened.playlists.value.single().videoIds)
+        reopened.deleteVideo(secondId)
+        assertEquals(listOf(kept.id), reopened.playlists.value.single().videoIds)
+        reopened.deleteVideo(kept.id)
+        assertEquals(VideoPlaylist("shared", "Other", emptyList()), reopened.playlists.value.single())
+    }
+
+    @Test fun rememberedVideoKeepsItsPlaylistUntilOpenedFromAnotherEntry() = runBlocking {
+        val item = video("shared-video")
+        store.markVideoOpened(item.id, playlistId = "list-1")
+        store.markVideoOpened(item.id, remember = false)
+        assertEquals("list-1", PeekturnStore(context).lastVideoPlaylistId())
+        store.markVideoOpened(item.id, playlistId = "list-2")
+        assertEquals("list-2", store.lastVideoPlaylistId())
+        store.markVideoOpened(item.id)
+        assertNull(store.lastVideoPlaylistId())
+    }
+
+    @Test fun failedPlaylistUpdateRollsBackBothLibraryAndMembership() = runBlocking {
+        val original = VideoMetadata("original", "Original", "Channel", 0, null)
+        val playlist = YouTubePlaylist("list", "Previous title", listOf(original))
+        store.savePlaylist(playlist)
+        val saved = store.playlists.value.single()
+
+        val invalidVideos = listOf(original.copy(title = "Changed"), original.copy(videoId = "new"), original.copy(videoId = ""))
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { store.savePlaylist(playlist.copy(title = "Updated", videos = invalidVideos)) }
+        }
+        val reopened = PeekturnStore(context)
+        reopened.load()
+        assertEquals(listOf(saved), reopened.playlists.value)
+        assertEquals("Original", reopened.videos.value.single().title)
     }
 
     private suspend fun video(videoId: String, title: String = "Video $videoId", durationMs: Long = 60_000): VideoItem =

@@ -7,13 +7,18 @@ data class VideoLink(val videoId: String, val startMs: Long? = null) {
 data class VideoMetadata(val videoId: String, val title: String, val author: String,
     val durationMs: Long, val thumbnailUrl: String?)
 
+/** A saved YouTube playlist. Members refer to local video rows in source order. */
+data class VideoPlaylist(val id: String, val title: String, val videoIds: List<Long>)
+
 data class VideoItem(val id: Long, val videoId: String, val title: String, val author: String,
     val durationMs: Long, val thumbnailUrl: String?, val positionMs: Long = 0,
     val lastWatchedAt: Long = 0, val selectedTrackId: String? = null,
     val trackExplicit: Boolean = false,
     /** Null inherits the legacy app default; explicit choices belong to this video. */
     val audioOnly: Boolean? = null,
-    val readMode: Boolean = false)
+    val readMode: Boolean = false,
+    /** Shown on the main shelf as well as in any playlists that contain it. */
+    val isStandalone: Boolean = true)
 
 /** Resolved URLs are session-only and must never be persisted or logged. */
 data class CaptionTrack(val id: String, val language: String, val automatic: Boolean, val url: String,

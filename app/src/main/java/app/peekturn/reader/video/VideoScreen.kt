@@ -93,13 +93,18 @@ internal fun VideoScreen(
     speech: PronunciationPlayer,
     onBack: () -> Unit,
     onEnterFullscreen: () -> Unit,
-    onExitFullscreen: () -> Unit
+    onExitFullscreen: () -> Unit,
+    playlist: VideoPlaylist? = null,
+    episodes: List<VideoItem> = emptyList(),
+    onEpisode: (Long) -> Unit = {}
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val downloads by vm.downloads.collectAsStateWithLifecycle()
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     LaunchedEffect(landscape) { vm.onOrientation(landscape) }
 
+    var choosingEpisode by rememberSaveable(playlist?.id) { mutableStateOf(false) }
+    val onEpisodes: (() -> Unit)? = if (episodes.isEmpty()) null else { { choosingEpisode = true } }
     val snackbar = remember { SnackbarHostState() }
     val notice = state.cacheNotice
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -149,6 +154,7 @@ internal fun VideoScreen(
                 vm = vm,
                 onBack = onBack,
                 onSettings = { settingsOpen = true },
+                onEpisodes = onEpisodes,
                 onExitFullscreen = onExitFullscreen
             )
         } else {
@@ -159,6 +165,7 @@ internal fun VideoScreen(
                 vm = vm,
                 onBack = onBack,
                 onSettings = { settingsOpen = true },
+                onEpisodes = onEpisodes,
                 onFullscreen = if (landscape) onExitFullscreen else onEnterFullscreen
             )
         }
@@ -170,6 +177,12 @@ internal fun VideoScreen(
         )
     }
 
+    if (choosingEpisode && playlist != null) {
+        EpisodeSheet(playlist.title, episodes, state.item?.id, onDismiss = { choosingEpisode = false }) { id ->
+            choosingEpisode = false
+            if (id != state.item?.id) onEpisode(id)
+        }
+    }
     if (settingsOpen) {
         VideoSettingsSheet(
             state = state,
@@ -230,6 +243,7 @@ private fun PortraitPlayer(
     vm: VideoViewModel,
     onBack: () -> Unit,
     onSettings: () -> Unit,
+    onEpisodes: (() -> Unit)?,
     onFullscreen: () -> Unit
 ) {
     var follow by rememberSaveable(state.item?.id) { mutableStateOf(true) }
@@ -238,7 +252,7 @@ private fun PortraitPlayer(
         when (val phase = state.phase) {
             VideoPhase.Idle, VideoPhase.Loading -> {
                 Column(Modifier.fillMaxSize()) {
-                    VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true,
+                    VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true, onEpisodes = onEpisodes,
                         hasItem = state.item != null, landscape = false,
                         trailingIcon = PeekturnIcons.Fullscreen,
                         trailingDescription = stringResource(R.string.video_ui_fullscreen),
@@ -248,7 +262,7 @@ private fun PortraitPlayer(
             }
             is VideoPhase.Failed -> {
                 Column(Modifier.fillMaxSize()) {
-                    VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true,
+                    VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true, onEpisodes = onEpisodes,
                         hasItem = state.item != null, landscape = false,
                         trailingIcon = PeekturnIcons.Fullscreen,
                         trailingDescription = stringResource(R.string.video_ui_fullscreen),
@@ -263,7 +277,7 @@ private fun PortraitPlayer(
                     (configuration.screenHeightDp * 0.45f).dp
                 )
                 val topBar: @Composable (Boolean) -> Unit = { applyInsets ->
-                    VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true,
+                    VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true, onEpisodes = onEpisodes,
                         hasItem = state.item != null, landscape = false,
                         trailingIcon = if (state.readMode) PeekturnIcons.Watch else PeekturnIcons.Fullscreen,
                         trailingDescription = stringResource(if (state.readMode) R.string.video_ui_watch_video else R.string.video_ui_fullscreen),
@@ -317,6 +331,7 @@ private fun LandscapePlayer(
     vm: VideoViewModel,
     onBack: () -> Unit,
     onSettings: () -> Unit,
+    onEpisodes: (() -> Unit)?,
     onExitFullscreen: () -> Unit
 ) {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -337,13 +352,14 @@ private fun LandscapePlayer(
                         vm = vm,
                         onBack = onBack,
                         onSettings = onSettings,
+                        onEpisodes = onEpisodes,
                         onExitFullscreen = onExitFullscreen
                     )
                 }
             }
         }
         if (state.phase !is VideoPhase.Ready) {
-            VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true,
+            VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true, onEpisodes = onEpisodes,
                 hasItem = state.item != null, landscape = true,
                 trailingIcon = PeekturnIcons.ExitFullscreen,
                 trailingDescription = stringResource(R.string.video_ui_exit_fullscreen),
@@ -365,7 +381,8 @@ internal fun VideoTopBar(
     onTrailing: () -> Unit,
     trailingEnabled: Boolean = true,
     trailingBusy: Boolean = false,
-    applySystemInsets: Boolean = true
+    applySystemInsets: Boolean = true,
+    onEpisodes: (() -> Unit)? = null
 ) {
     if (!controlsVisible) return
     val foreground = if (landscape) Color.White else MaterialTheme.colorScheme.onSurface
@@ -384,14 +401,18 @@ internal fun VideoTopBar(
                     contentDescription = stringResource(R.string.video_ui_back),
                     tint = foreground)
             }
-            Text(
-                title.ifBlank { stringResource(R.string.video_ui_title) },
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium,
-                color = foreground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Column(Modifier.weight(1f).then(if (onEpisodes == null) Modifier else Modifier
+                .clickable(role = Role.Button, onClick = onEpisodes).heightIn(min = 48.dp)),
+                verticalArrangement = Arrangement.Center) {
+                Text(title.ifBlank { stringResource(R.string.video_ui_title) },
+                    style = MaterialTheme.typography.titleMedium, color = foreground,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (onEpisodes != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.playlist_episodes), style = MaterialTheme.typography.labelMedium,
+                        color = foreground)
+                    Icon(PeekturnIcons.ChevronDown, null, Modifier.size(16.dp), tint = foreground)
+                }
+            }
             IconButton(onClick = onSettings, enabled = hasItem, modifier = Modifier.size(48.dp)) {
                 Icon(PeekturnIcons.Settings,
                     contentDescription = stringResource(R.string.video_ui_settings),
@@ -404,6 +425,34 @@ internal fun VideoTopBar(
             }
         }
         if (!landscape) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun EpisodeSheet(title: String, episodes: List<VideoItem>, selectedId: Long?,
+    onDismiss: () -> Unit, onSelect: (Long) -> Unit) {
+    val current = episodes.indexOfFirst { it.id == selectedId }
+    ModalBottomSheet(onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Text(title, Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
+            style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        LazyColumn(state = rememberLazyListState(initialFirstVisibleItemIndex = current.coerceAtLeast(0)),
+            contentPadding = PaddingValues(bottom = 12.dp), modifier = Modifier.fillMaxWidth().selectableGroup()) {
+            itemsIndexed(episodes, key = { _, episode -> episode.id }) { index, episode ->
+                val selected = episode.id == selectedId
+                val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                Row(Modifier.fillMaxWidth().selectable(selected, role = Role.RadioButton,
+                    onClick = { onSelect(episode.id) }).heightIn(min = 52.dp).padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text((index + 1).toString(), style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.widthIn(min = 24.dp), color = color)
+                    Text(episode.title, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis, color = color)
+                    if (episode.durationMs > 0) Text(formatClock(episode.durationMs),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
 
@@ -674,6 +723,7 @@ private fun LandscapeChrome(
     vm: VideoViewModel,
     onBack: () -> Unit,
     onSettings: () -> Unit,
+    onEpisodes: (() -> Unit)?,
     onExitFullscreen: () -> Unit
 ) {
     // One full-screen layer: the transport is centered against the screen itself, not against the
@@ -684,6 +734,7 @@ private fun LandscapeChrome(
                 title = state.item?.title.orEmpty(),
                 onBack = onBack,
                 onSettings = onSettings,
+                onEpisodes = onEpisodes,
                 controlsVisible = true,
                 hasItem = state.item != null,
                 landscape = true,

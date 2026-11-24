@@ -15,6 +15,8 @@ import java.util.Locale
 object YouTubeUrls {
     private const val VIDEO_ID_LENGTH = 11
 
+    // NewPipe's playlist link handler accepts at least ten URL-safe characters.
+    private val playlistIdPattern = Regex("[A-Za-z0-9_-]{10,}")
     private val anySchemePattern = Regex("""[A-Za-z][A-Za-z0-9+.-]*://""")
     private val digitsPattern = Regex("""^\d+$""")
     private val clockPattern = Regex("""^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$""", RegexOption.IGNORE_CASE)
@@ -34,11 +36,7 @@ object YouTubeUrls {
      * YouTube video link. A link that carries an explicit start time returns it in milliseconds.
      */
     fun parse(text: String): VideoLink? {
-        val candidate = firstLinkToken(text) ?: return null
-        val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
-        if (!isHttpScheme(uri)) return null
-        if (uri.rawUserInfo != null) return null
-        if (uri.port != -1 && uri.port != 80 && uri.port != 443) return null
+        val uri = importUri(text) ?: return null
         val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.') ?: return null
         val parameters = rawQueryParameters(uri.rawQuery)
         val id = extractVideoId(host, uri, parameters) ?: return null
@@ -50,9 +48,34 @@ object YouTubeUrls {
         return VideoLink(id, startMs)
     }
 
+    /** A finite YouTube playlist, either shared on its own or alongside a video. */
+    fun playlistId(text: String): String? {
+        val uri = importUri(text) ?: return null
+        val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.') ?: return null
+        val parameters = rawQueryParameters(uri.rawQuery)
+        val id = parameters.firstOrNull { it.first == "list" }?.second ?: return null
+        if (!isPlaylistId(id)) return null
+        val playlistPage = isVideoSite(host) && uri.rawPath.trimEnd('/') == "/playlist"
+        if (playlistPage) return id
+        return id.takeIf { extractVideoId(host, uri, parameters)?.let(::isVideoId) == true }
+    }
+
+    // Mix queues (RD...) can continue indefinitely and have no fixed contents to import.
+    internal fun isPlaylistId(value: String): Boolean =
+        playlistIdPattern.matches(value) && !value.startsWith("RD")
+
+    private fun importUri(text: String): URI? {
+        val candidate = firstLinkToken(text) ?: return null
+        val uri = runCatching { URI(candidate) }.getOrNull() ?: return null
+        if (!isHttpScheme(uri)) return null
+        if (uri.rawUserInfo != null) return null
+        if (uri.port != -1 && uri.port != 80 && uri.port != 443) return null
+        return uri
+    }
+
     /**
      * True when the first link in the text is a YouTube link, even when it is not an importable
-     * video (a channel, a playlist or an invalid id). The app must not fall back to article capture
+     * video or playlist (a channel or an invalid id). The app must not fall back to article capture
      * for these; the video path reports the precise refusal instead.
      */
     fun isYouTubeUrl(text: String): Boolean {
@@ -121,11 +144,14 @@ object YouTubeUrls {
         return secondsToMillis(totalSeconds)
     }
 
+    private fun isVideoSite(host: String): Boolean =
+        host == "youtube.com" || host == "www.youtube.com" || host == "m.youtube.com"
+
     private fun extractVideoId(host: String, uri: URI, parameters: List<Pair<String, String>>): String? {
         val segments = uri.rawPath.orEmpty().split('/').filter { it.isNotEmpty() }
         return when {
             host == "youtu.be" -> segments.singleOrNull()
-            host == "youtube.com" || host == "www.youtube.com" || host == "m.youtube.com" -> when {
+            isVideoSite(host) -> when {
                 segments.size == 1 && segments[0].equals("watch", ignoreCase = true) ->
                     parameters.firstOrNull { it.first == "v" }?.second
                 segments.size == 2 && segments[0].equals("shorts", ignoreCase = true) -> segments[1]

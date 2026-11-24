@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="playlist_library_count">
+        <item quantity="one">%1$d item</item>
+        <item quantity="other">%1$d items</item>
+    </plurals>
+    <plurals name="playlist_library_episodes">
+        <item quantity="one">Playlist · %1$d episode</item>
+        <item quantity="other">Playlist · %1$d episodes</item>
+    </plurals>
+    <string name="playlist_library_episode">Ep. %1$d · %2$s</string>
+    <string name="playlist_library_options">Options for playlist %1$s</string>
+    <string name="playlist_library_remove">Remove playlist</string>
+    <string name="playlist_library_remove_title">Remove playlist?</string>
+    <string name="playlist_library_remove_message">Remove “%1$s” from your video library? Videos you added separately will stay.</string>
+    <string name="playlist_library_remove_single">Remove the separate entry for “%1$s”? You can still open the video in your playlists with its progress and downloads.</string>
+</resources>

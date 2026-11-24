@@ -68,7 +68,8 @@ class VideoRepositoryTest {
     }
 
     @Test fun completedOfflineEntryOpensAndReimportsWithoutResolvingOrFetching() = runBlocking {
-        val item = store.upsertVideo(metadata)
+        store.savePlaylist(YouTubePlaylist("list", "List", listOf(metadata)))
+        val item = store.videos.value.single()
         store.selectVideoPresentation(item.id, audioOnly = true, readMode = true)
         store.saveVideoPosition(item.id, 123_000)
         val local = VideoPlaybackSource("peekturn-offline://media/opaque", "audio/mp4", videoCacheKey = "opaque")
@@ -80,7 +81,11 @@ class VideoRepositoryTest {
                 ResolvedVideo(metadata, local, emptyList(), audioOnly = local), null) })
         assertEquals(local, offline.open(item.id).resolved.audioOnly)
         assertEquals(123_000L, offline.open(item.id).item.positionMs)
-        assertEquals(local, offline.`import`(VideoLink(VIDEO)).resolved.playback)
+        assertFalse(store.findVideo(item.id)!!.isStandalone)
+        val imported = offline.`import`(VideoLink(VIDEO))
+        assertEquals(local, imported.resolved.playback)
+        assertTrue(imported.item.isStandalone)
+        assertTrue(store.findVideo(item.id)!!.isStandalone)
         assertEquals(123_000L, store.findVideo(item.id)!!.positionMs)
     }
 
@@ -117,7 +122,8 @@ class VideoRepositoryTest {
     }
 
     @Test fun savedWatchModeFallsBackToSavedAudioWhenVideoCannotResolve() = runBlocking {
-        val item = store.upsertVideo(metadata)
+        store.savePlaylist(YouTubePlaylist("list", "List", listOf(metadata)))
+        val item = store.videos.value.single()
         store.selectVideoPresentation(item.id, audioOnly = false, readMode = false)
         store.saveVideoPosition(item.id, 123_000)
         val local = VideoPlaybackSource("peekturn-offline://media/opaque", "audio/mp4", videoCacheKey = "opaque")
@@ -131,6 +137,12 @@ class VideoRepositoryTest {
         assertEquals(123_000L, session.item.positionMs)
         assertEquals(VideoFailureKind.Network, session.watchFallbackFailure)
         assertEquals(false, store.findVideo(item.id)!!.audioOnly)
+        assertFalse(store.findVideo(item.id)!!.isStandalone)
+        val imported = repo.`import`(VideoLink(VIDEO))
+        assertTrue(imported.item.isStandalone)
+        assertTrue(store.findVideo(item.id)!!.isStandalone)
+        assertEquals(VideoFailureKind.Network, imported.watchFallbackFailure)
+        assertEquals(listOf(item.id), store.playlists.value.single().videoIds)
     }
 
     @Test fun importingPreparesMediaWithoutWaitingForNetworkCaptions() = runBlocking {

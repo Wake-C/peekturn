@@ -140,6 +140,15 @@ internal class VideoViewModel(
         graph.developerLog.recordFailure("learning", category, cause)
     }
     val dictionary: OfflineDictionary get() = graph.dictionary
+    private val _playlistId = MutableStateFlow<String?>(null)
+    val playlistId = _playlistId.asStateFlow()
+
+    fun openFromIntent(id: Long?, url: String?, playlistId: String?, autoPlay: Boolean) {
+        _playlistId.value = playlistId
+        start(id, url, autoPlay = autoPlay)
+        if (foreground && id != null && _state.value.item?.id == id) rememberForegroundVideo()
+    }
+
     val downloads get() = graph.videoDownloads.states
     fun downloadCurrentVideo() {
         val state = _state.value
@@ -413,7 +422,10 @@ internal class VideoViewModel(
         _state.update { it.copy(phase = VideoPhase.Loading, qualityChanging = false, modeSaving = false, modeSaveFailed = false) }
         sessionJob = viewModelScope.launch {
             try {
-                val data = graph.videos.open(item.id, request?.preferDownload ?: true)
+                val preferDownload = request?.preferDownload ?: true
+                val link = request?.url?.let(YouTubeUrls::parse)
+                val data = if (link == null) graph.videos.open(item.id, preferDownload)
+                    else graph.videos.`import`(link, preferDownload)
                 if (token != sessionGeneration) return@launch
                 attachSession(data, startAt, autoPlay = true, token = token)
             } catch (cancelled: CancellationException) {
@@ -627,7 +639,7 @@ internal class VideoViewModel(
         val id = _state.value.item?.id ?: return
         graph.scope.launch {
             if (!foreground || _state.value.item?.id != id) return@launch
-            try { graph.store.markVideoOpened(id) }
+            try { graph.store.markVideoOpened(id, playlistId = _playlistId.value) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {
                 graph.developerLog.recordFailure("video", "remember-open", failure)

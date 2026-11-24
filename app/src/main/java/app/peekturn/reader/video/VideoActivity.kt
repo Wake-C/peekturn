@@ -65,7 +65,7 @@ class VideoActivity : AppCompatActivity() {
                 finish()
                 return
             }
-            if (id != null || url != null) vm.start(id, url, autoPlay = !intent.getBooleanExtra(EXTRA_RESUME_ON_LAUNCH, false))
+            if (id != null || url != null) openIntent(intent)
             if (resumed) vm.onForeground()
             showSession()
         }
@@ -96,6 +96,10 @@ class VideoActivity : AppCompatActivity() {
         AppLanguage.apply(this, graph.store.settings.value.uiLanguage)
         applyAppTheme(graph.store.settings.value.appTheme)
         applySystemBars(isLandscape())
+        savedInstanceState?.getString(EXTRA_PLAYLIST_ID)?.let { playlist ->
+            intent.putExtra(EXTRA_PLAYLIST_ID, playlist)
+            intent.putExtra(EXTRA_VIDEO_ID, savedInstanceState.getLong(EXTRA_VIDEO_ID))
+        }
         openedFromShare = videoUrl(intent) != null
         val service = Intent(this, VideoPlaybackService::class.java)
         startService(service)
@@ -127,9 +131,27 @@ class VideoActivity : AppCompatActivity() {
             LaunchedEffect(LocalConfiguration.current.orientation, readMode, settings.reading.immersive) {
                 applySystemBars(isLandscape())
             }
+            val playlistId by vm.playlistId.collectAsStateWithLifecycle()
+            LaunchedEffect(playlistId) {
+                // Android can restore the player before the library after process death.
+                if (playlistId != null && graph.store.playlists.value.isEmpty()) graph.store.load()
+            }
+            val playlists by graph.store.playlists.collectAsStateWithLifecycle()
+            val videos by graph.store.videos.collectAsStateWithLifecycle()
+            val playlist = playlists.find { it.id == playlistId }
+            val episodes = remember(playlist, videos) {
+                if (playlist == null) emptyList() else playlist.videoIds.mapNotNull(videos.associateBy { it.id }::get)
+            }
             PeekturnTheme(theme = settings.appTheme) {
                 VideoScreen(
                     vm = vm,
+                    playlist = playlist,
+                    episodes = episodes,
+                    onEpisode = { id ->
+                        val next = intent(this@VideoActivity, id, playlistId = playlistId)
+                        setIntent(next)
+                        openIntent(next)
+                    },
                     settings = settings,
                     speech = graph.speech,
                     onBack = ::leaveVideo,
@@ -163,7 +185,20 @@ class VideoActivity : AppCompatActivity() {
         setIntent(intent)
         openedFromShare = videoUrl(intent) != null
         if (::vm.isInitialized && (videoId(intent) != null || videoUrl(intent) != null)) {
-            vm.start(videoId(intent), videoUrl(intent), autoPlay = !intent.getBooleanExtra(EXTRA_RESUME_ON_LAUNCH, false))
+            openIntent(intent)
+        }
+    }
+
+    private fun openIntent(intent: Intent) {
+        vm.openFromIntent(videoId(intent), videoUrl(intent), intent.getStringExtra(EXTRA_PLAYLIST_ID),
+            autoPlay = !intent.getBooleanExtra(EXTRA_RESUME_ON_LAUNCH, false))
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        intent.getStringExtra(EXTRA_PLAYLIST_ID)?.let {
+            outState.putString(EXTRA_PLAYLIST_ID, it)
+            outState.putLong(EXTRA_VIDEO_ID, videoId(intent) ?: return)
         }
     }
 
@@ -256,11 +291,13 @@ class VideoActivity : AppCompatActivity() {
 
     companion object {
         private const val EXTRA_RESUME_ON_LAUNCH = "resume_on_launch"
+        private const val EXTRA_PLAYLIST_ID = "playlist_id"
         private const val EXTRA_VIDEO_ID = "video_id"
         private const val EXTRA_VIDEO_URL = "video_url"
 
-        fun intent(context: Context, id: Long, resumeOnLaunch: Boolean = false): Intent =
+        fun intent(context: Context, id: Long, resumeOnLaunch: Boolean = false, playlistId: String? = null): Intent =
             Intent(context, VideoActivity::class.java)
+                .putExtra(EXTRA_PLAYLIST_ID, playlistId)
                 .putExtra(EXTRA_VIDEO_ID, id)
                 .putExtra(EXTRA_RESUME_ON_LAUNCH, resumeOnLaunch)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)

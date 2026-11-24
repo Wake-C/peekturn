@@ -51,9 +51,12 @@ class VideoRepository internal constructor(
     suspend fun `import`(link: VideoLink, preferDownload: Boolean = true): VideoSessionData {
         val known = if (preferDownload) store.findVideoBySource(link.videoId) else null
         val cached = known?.let { offlineSession(it) }
-        if (known != null && cached != null && suppliesChosenView(known, cached)) return cached
+        if (known != null && cached != null && suppliesChosenView(known, cached)) return importCached(cached)
         val resolved = try { resolve(link.videoId) }
-        catch (failure: VideoFailure) { if (cached != null) return cached.copy(watchFallbackFailure = failure.kind) else throw failure }
+        catch (failure: VideoFailure) {
+            if (cached == null) throw failure
+            return importCached(cached).copy(watchFallbackFailure = failure.kind)
+        }
         val stored = try {
             store.upsertVideo(resolved.metadata)
         } catch (cancelled: CancellationException) {
@@ -65,6 +68,12 @@ class VideoRepository internal constructor(
         }
         // The returned session is played immediately, so this import is also an open of the entry.
         return session(opened(stored), resolved)
+    }
+
+    private suspend fun importCached(cached: VideoSessionData): VideoSessionData {
+        if (cached.item.isStandalone) return cached
+        store.upsertVideo(cached.resolved.metadata)
+        return cached.copy(item = cached.item.copy(isStandalone = true))
     }
 
     /** Re-resolves the temporary media URLs and restores position, track choice and cached captions. */

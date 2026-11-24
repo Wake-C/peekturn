@@ -35,6 +35,34 @@ class YouTubeUrlsTest {
     }
 
     @Test
+    fun `shared playlist and video links retain independent identities`() {
+        val list = "PL123456789"
+        assertEquals(list, YouTubeUrls.playlistId("课程 m.youtube.com/playlist?list=$list&si=abc，收藏"))
+        assertNull(YouTubeUrls.parse("https://youtube.com/playlist?list=$list"))
+        val watch = "https://www.youtube.com/watch?v=$id&t=90&list=$list"
+        assertEquals(list, YouTubeUrls.playlistId(watch))
+        assertEquals(VideoLink(id, 90000), YouTubeUrls.parse(watch))
+        assertEquals(list, YouTubeUrls.playlistId("https://youtu.be/$id?list=$list"))
+    }
+
+    @Test
+    fun `foreign links malformed identity and endless mix queues cannot import a playlist`() {
+        val refused = listOf(
+            "https://youtube.com.evil/playlist?list=PL123456789",
+            "https://other@youtube.com/playlist?list=PL123456789",
+            "ftp://youtube.com/playlist?list=PL123456789",
+            "https://youtube.com:9999/playlist?list=PL123456789",
+            "https://youtube.com/channel?id=xyz&list=PL123456789",
+            "https://youtube.com/watch?v=invalid&list=PL123456789",
+            "https://youtube.com/playlist?list=",
+            "https://youtube.com/playlist?list=PL123%2F456789",
+            "https://youtube.com/playlist?list=WL",
+            "https://www.youtube.com/watch?v=$id&list=RD$id"
+        )
+        refused.forEach { assertNull(it, YouTubeUrls.playlistId(it)) }
+    }
+
+    @Test
     fun `explicit start times accept seconds and clock notation`() {
         assertEquals(90_000L, YouTubeUrls.parse("https://youtu.be/$id?t=90")?.startMs)
         assertEquals(90_000L, YouTubeUrls.parse("https://youtu.be/$id?t=90s")?.startMs)

@@ -1,7 +1,26 @@
 <resources>
     <string name="video_shell_title">视频</string>
-    <string name="video_shell_import_title">加入 YouTube 视频</string>
-    <string name="video_shell_url_hint">https://youtu.be/…</string>
-    <string name="video_shell_url_error">请输入有效的 YouTube 视频链接。</string>
+    <string name="video_shell_import_title">从 YouTube 添加</string>
+    <string name="video_shell_url_hint">视频或合集链接</string>
+    <string name="video_shell_url_error">请输入 YouTube 视频或合集链接。</string>
     <string name="video_shell_delete_failed">无法删除这个视频，请重试。</string>
+    <string name="playlist_choose">从 YouTube 打开</string>
+    <string name="playlist_choose_hint">这个视频来自一个合集。</string>
+    <string name="playlist_this_video">打开此视频</string>
+    <string name="playlist_entire">查看整个合集</string>
+    <string name="playlist_loading">正在读取合集…</string>
+    <string name="playlist_saving">正在保存合集…</string>
+    <string name="playlist_import_title">导入合集</string>
+    <string name="playlist_add">添加合集</string>
+    <string name="playlist_update">更新合集</string>
+    <string name="playlist_no_videos">合集中没有可导入的视频。</string>
+    <string name="playlist_unavailable">无法打开合集，请确认这个链接无需登录即可查看。</string>
+    <string name="playlist_load_failed">暂时无法从 YouTube 读取合集，请重试。</string>
+    <string name="playlist_save_failed">无法保存合集，请检查剩余存储空间后重试。</string>
+    <string name="playlist_remove_failed">无法移除合集，请重试。</string>
+    <plurals name="playlist_available">
+        <item quantity="other">%d 个可导入的视频</item>
+    </plurals>
+    <string name="playlist_saved">已保存「%s」</string>
+    <string name="playlist_episodes">选集</string>
 </resources>

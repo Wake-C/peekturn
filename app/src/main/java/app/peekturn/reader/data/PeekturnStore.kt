@@ -5,13 +5,18 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.util.Log
+import androidx.core.database.sqlite.transaction
 import app.peekturn.reader.model.*
 import app.peekturn.reader.video.VideoItem
 import app.peekturn.reader.video.VideoMetadata
+import app.peekturn.reader.video.VideoPlaylist
+import app.peekturn.reader.video.YouTubePlaylist
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +41,8 @@ class PeekturnStore internal constructor(private val context: Context, private v
     val books: StateFlow<List<Book>> = _books.asStateFlow()
     private val _videos = MutableStateFlow<List<VideoItem>>(emptyList())
     val videos: StateFlow<List<VideoItem>> = _videos.asStateFlow()
+    private val _playlists = MutableStateFlow<List<VideoPlaylist>>(emptyList())
+    val playlists: StateFlow<List<VideoPlaylist>> = _playlists.asStateFlow()
     private val _settings = MutableStateFlow(readSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
     private val _stats = MutableStateFlow(ReadingStats())
@@ -109,6 +116,9 @@ class PeekturnStore internal constructor(private val context: Context, private v
             else -> null
         }
     }
+
+    fun lastVideoPlaylistId(): String? =
+        if (lastContent() is LastContent.Video) prefs.getString("last_video_playlist", null) else null
 
     private fun clearLastContentPreference() {
         check(prefs.edit().putString("last_content_kind", "none").remove("last_content_id").commit()) {
@@ -211,40 +221,66 @@ class PeekturnStore internal constructor(private val context: Context, private v
      */
     suspend fun upsertVideo(metadata: VideoMetadata): VideoItem = withContext(Dispatchers.IO) {
         writes.withLock {
-            require(metadata.videoId.isNotBlank()) { "A video identity is required" }
             val database = db.writableDatabase
-            val duration = metadata.durationMs.coerceAtLeast(0L)
-            database.beginTransaction()
-            try {
-                val existing = database.query("videos", null, "video_id=?", arrayOf(metadata.videoId), null, null, null)
-                    .use { c -> if (c.moveToFirst()) c.video() else null }
-                if (existing == null) {
-                    database.insertOrThrow("videos", null, ContentValues().apply {
-                        put("video_id", metadata.videoId)
-                        put("title", metadata.title)
-                        put("author", metadata.author)
-                        put("duration_ms", duration)
-                        put("thumbnail_url", metadata.thumbnailUrl)
-                        put("position_ms", 0L)
-                        put("last_watched_at", 0L)
-                        putNull("selected_track_id")
-                    })
-                } else {
-                    val keptDuration = if (duration > 0) duration else existing.durationMs
-                    database.update("videos", ContentValues().apply {
-                        put("title", metadata.title)
-                        put("author", metadata.author)
-                        put("duration_ms", keptDuration)
-                        put("thumbnail_url", metadata.thumbnailUrl)
-                    }, "video_id=?", arrayOf(metadata.videoId))
+            val id = database.transaction { saveVideoMetadata(database, metadata, standalone = true) }
+            refreshVideos()
+            _videos.value.first { it.id == id }
+        }
+    }
+
+    private fun saveVideoMetadata(database: SQLiteDatabase, metadata: VideoMetadata, standalone: Boolean): Long {
+        require(metadata.videoId.isNotBlank()) { "A video identity is required" }
+        val existingId = database.query("videos", arrayOf("id"), "video_id=?", arrayOf(metadata.videoId), null, null, null)
+            .use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+        val values = ContentValues().apply {
+            put("title", metadata.title)
+            put("author", metadata.author)
+            put("thumbnail_url", metadata.thumbnailUrl)
+            if (metadata.durationMs > 0) put("duration_ms", metadata.durationMs)
+        }
+        // A separate import adds a shelf entry. A playlist refresh keeps any existing shelf entry.
+        if (standalone || existingId == null) values.put("standalone", if (standalone) 1 else 0)
+        if (existingId == null) {
+            values.put("video_id", metadata.videoId)
+            return database.insertOrThrow("videos", null, values)
+        }
+        database.update("videos", values, "id=?", arrayOf(existingId.toString()))
+        return existingId
+    }
+
+    suspend fun savePlaylist(playlist: YouTubePlaylist) = withContext(Dispatchers.IO) {
+        writes.withLock {
+            val database = db.writableDatabase
+            database.transaction {
+                // Replacing the playlist cascades only to its previous membership, never to videos.
+                database.execSQL("INSERT OR REPLACE INTO video_playlists(id,title) VALUES(?,?)",
+                    arrayOf(playlist.id, playlist.title))
+                playlist.videos.forEachIndexed { position, metadata ->
+                    currentCoroutineContext().ensureActive()
+                    val videoId = saveVideoMetadata(database, metadata, standalone = false)
+                    database.execSQL("INSERT INTO video_playlist_items(playlist_id,position,video_id) VALUES(?,?,?)",
+                        arrayOf<Any>(playlist.id, position, videoId))
                 }
-                database.setTransactionSuccessful()
-            } finally {
-                database.endTransaction()
             }
             refreshVideos()
-            _videos.value.firstOrNull { it.videoId == metadata.videoId }
-                ?: throw IllegalStateException("Could not save video")
+            refreshPlaylists()
+        }
+    }
+
+    /** A video still available in a playlist keeps its progress, captions and downloads. */
+    suspend fun removeStandaloneIfInPlaylist(id: Long): Boolean = withContext(Dispatchers.IO) {
+        writes.withLock {
+            val updated = db.writableDatabase.update("videos", ContentValues().apply { put("standalone", 0) },
+                "id=? AND EXISTS(SELECT 1 FROM video_playlist_items WHERE video_id=videos.id)", arrayOf(id.toString()))
+            if (updated > 0) refreshVideos()
+            updated > 0
+        }
+    }
+
+    suspend fun removePlaylist(id: String) = withContext(Dispatchers.IO) {
+        writes.withLock {
+            db.writableDatabase.delete("video_playlists", "id=?", arrayOf(id))
+            refreshPlaylists()
         }
     }
 
@@ -261,11 +297,11 @@ class PeekturnStore internal constructor(private val context: Context, private v
         }
     }
 
-    suspend fun markVideoOpened(id: Long, remember: Boolean = true) = withContext(Dispatchers.IO) {
+    suspend fun markVideoOpened(id: Long, remember: Boolean = true, playlistId: String? = null) = withContext(Dispatchers.IO) {
         writes.withLock {
             val values = ContentValues().apply { put("last_watched_at", System.currentTimeMillis()) }
             if (db.writableDatabase.update("videos", values, "id=?", arrayOf(id.toString())) > 0) {
-                if (remember) check(prefs.edit().putString("last_content_kind", "video").putLong("last_content_id", id).commit()) {
+                if (remember) check(prefs.edit().putString("last_content_kind", "video").putLong("last_content_id", id).putString("last_video_playlist", playlistId).commit()) {
                     "Could not save last video"
                 }
                 refreshVideos()
@@ -305,6 +341,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
             db.writableDatabase.delete("videos", "id=?", arrayOf(id.toString()))
             if (lastContent() == LastContent.Video(id)) clearLastContentPreference()
             refreshVideos()
+            refreshPlaylists()
             refreshStats()
         }
     }
@@ -502,7 +539,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
         }
         return saved
     }
-    private fun refresh() { refreshBooks(); refreshVideos(); refreshStats() }
+    private fun refresh() { refreshBooks(); refreshVideos(); refreshPlaylists(); refreshStats() }
     private fun refreshBooks() {
         _books.value = db.readableDatabase.query("books", null, null, null, null, null, "last_read_at DESC,id DESC").use { c ->
             buildList { while (c.moveToNext()) add(c.book()) }
@@ -511,6 +548,21 @@ class PeekturnStore internal constructor(private val context: Context, private v
     private fun refreshVideos() {
         _videos.value = db.readableDatabase.query("videos", null, null, null, null, null, "last_watched_at DESC,id DESC").use { c ->
             buildList { while (c.moveToNext()) add(c.video()) }
+        }
+    }
+    private fun refreshPlaylists() {
+        val database = db.readableDatabase
+        val members = mutableMapOf<String, MutableList<Long>>()
+        database.rawQuery("SELECT playlist_id,video_id FROM video_playlist_items ORDER BY playlist_id,position", null).use { c ->
+            while (c.moveToNext()) members.getOrPut(c.getString(0)) { mutableListOf() }.add(c.getLong(1))
+        }
+        _playlists.value = database.rawQuery("SELECT id,title FROM video_playlists ORDER BY title COLLATE NOCASE,id", null).use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    val id = c.getString(0)
+                    add(VideoPlaylist(id, c.getString(1), members[id].orEmpty()))
+                }
+            }
         }
     }
     private fun refreshStats() {
@@ -545,7 +597,8 @@ class PeekturnStore internal constructor(private val context: Context, private v
             .let { if (isNull(it)) null else getString(it) },
         trackExplicit = getInt(getColumnIndexOrThrow("track_explicit")) != 0,
         audioOnly = getColumnIndexOrThrow("audio_only").let { if (isNull(it)) null else getInt(it) != 0 },
-        readMode = getInt(getColumnIndexOrThrow("read_mode")) != 0
+        readMode = getInt(getColumnIndexOrThrow("read_mode")) != 0,
+        isStandalone = getInt(getColumnIndexOrThrow("standalone")) != 0
     )
     private fun android.database.Cursor.book() = Book(
         id = getLong(getColumnIndexOrThrow("id")), title = getString(getColumnIndexOrThrow("title")),
@@ -553,24 +606,35 @@ class PeekturnStore internal constructor(private val context: Context, private v
         coverPath = getString(getColumnIndexOrThrow("cover_path")), locatorJson = getString(getColumnIndexOrThrow("locator")),
         progression = getDouble(getColumnIndexOrThrow("progression")), lastReadAt = getLong(getColumnIndexOrThrow("last_read_at"))
     )
-    private class Database(context: Context) : SQLiteOpenHelper(context, "peekturn.db", null, 5) {
+    private class Database(context: Context) : SQLiteOpenHelper(context, "peekturn.db", null, 6) {
         override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE books(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,author TEXT NOT NULL,file_path TEXT NOT NULL,cover_path TEXT,locator TEXT,progression REAL NOT NULL DEFAULT 0,last_read_at INTEGER NOT NULL DEFAULT 0)")
             db.execSQL("CREATE TABLE reading_daily(book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,date TEXT NOT NULL,seconds INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(book_id,date))")
             createVideoTables(db)
+            createPlaylistTables(db)
         }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            if (newVersion > 5) error("No migration from $oldVersion to $newVersion")
+            if (newVersion > 6) error("No migration from $oldVersion to $newVersion")
             if (oldVersion < 2) createVideoTables(db)
             else {
                 if (oldVersion < 3) db.execSQL("ALTER TABLE videos ADD COLUMN track_explicit INTEGER NOT NULL DEFAULT 0")
                 if (oldVersion < 4) db.execSQL("ALTER TABLE videos ADD COLUMN audio_only INTEGER")
                 if (oldVersion < 5) db.execSQL("ALTER TABLE videos ADD COLUMN read_mode INTEGER NOT NULL DEFAULT 0")
+                if (oldVersion < 6) db.execSQL("ALTER TABLE videos ADD COLUMN standalone INTEGER NOT NULL DEFAULT 1")
             }
+            if (oldVersion < 6) createPlaylistTables(db)
+        }
+        private fun createPlaylistTables(db: SQLiteDatabase) {
+            db.execSQL("CREATE TABLE video_playlists(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL)")
+            db.execSQL("""CREATE TABLE video_playlist_items(
+                playlist_id TEXT NOT NULL REFERENCES video_playlists(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+                PRIMARY KEY(playlist_id,position))""")
         }
         private fun createVideoTables(db: SQLiteDatabase) {
-            db.execSQL("CREATE TABLE IF NOT EXISTS videos(id INTEGER PRIMARY KEY AUTOINCREMENT,video_id TEXT NOT NULL UNIQUE,title TEXT NOT NULL,author TEXT NOT NULL,duration_ms INTEGER NOT NULL DEFAULT 0,thumbnail_url TEXT,position_ms INTEGER NOT NULL DEFAULT 0,last_watched_at INTEGER NOT NULL DEFAULT 0,selected_track_id TEXT,track_explicit INTEGER NOT NULL DEFAULT 0,audio_only INTEGER,read_mode INTEGER NOT NULL DEFAULT 0)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS videos(id INTEGER PRIMARY KEY AUTOINCREMENT,video_id TEXT NOT NULL UNIQUE,title TEXT NOT NULL,author TEXT NOT NULL,duration_ms INTEGER NOT NULL DEFAULT 0,thumbnail_url TEXT,position_ms INTEGER NOT NULL DEFAULT 0,last_watched_at INTEGER NOT NULL DEFAULT 0,selected_track_id TEXT,track_explicit INTEGER NOT NULL DEFAULT 0,audio_only INTEGER,read_mode INTEGER NOT NULL DEFAULT 0,standalone INTEGER NOT NULL DEFAULT 1)")
             db.execSQL("CREATE TABLE IF NOT EXISTS video_daily(video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,date TEXT NOT NULL,seconds INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(video_id,date))")
         }
     }

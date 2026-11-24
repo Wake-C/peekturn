@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="playlist_library_count">
+        <item quantity="other">%1$d 项</item>
+    </plurals>
+    <plurals name="playlist_library_episodes">
+        <item quantity="other">合集 · %1$d 集</item>
+    </plurals>
+    <string name="playlist_library_episode">第 %1$d 集 · %2$s</string>
+    <string name="playlist_library_options">%1$s 的合集选项</string>
+    <string name="playlist_library_remove">移除合集</string>
+    <string name="playlist_library_remove_title">移除合集？</string>
+    <string name="playlist_library_remove_message">从视频库移除“%1$s”？单独添加过的视频会保留。</string>
+    <string name="playlist_library_remove_single">移除“%1$s”的独立条目？你仍可在合集中打开这个视频，观看进度和下载会保留。</string>
+</resources>

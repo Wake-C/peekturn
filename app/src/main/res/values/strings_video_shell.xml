@@ -1,7 +1,27 @@
 <resources>
     <string name="video_shell_title">Video</string>
-    <string name="video_shell_import_title">Add a YouTube video</string>
-    <string name="video_shell_url_hint">https://youtu.be/…</string>
-    <string name="video_shell_url_error">Enter a valid YouTube video link.</string>
+    <string name="video_shell_import_title">Add from YouTube</string>
+    <string name="video_shell_url_hint">Video or playlist link</string>
+    <string name="video_shell_url_error">Enter a YouTube video or playlist link.</string>
     <string name="video_shell_delete_failed">Could not remove this video. Try again.</string>
+    <string name="playlist_choose">Open from YouTube</string>
+    <string name="playlist_choose_hint">This video belongs to a playlist.</string>
+    <string name="playlist_this_video">Open video</string>
+    <string name="playlist_entire">View playlist</string>
+    <string name="playlist_loading">Loading playlist…</string>
+    <string name="playlist_saving">Saving playlist…</string>
+    <string name="playlist_import_title">Import playlist</string>
+    <string name="playlist_add">Add playlist</string>
+    <string name="playlist_update">Update playlist</string>
+    <string name="playlist_no_videos">This playlist has no videos available to import.</string>
+    <string name="playlist_unavailable">This playlist could not be opened. Check that the link can be viewed without signing in.</string>
+    <string name="playlist_load_failed">Could not read the playlist from YouTube. Try again.</string>
+    <string name="playlist_save_failed">Could not save the playlist. Check available storage and try again.</string>
+    <string name="playlist_remove_failed">Could not remove the playlist. Try again.</string>
+    <plurals name="playlist_available">
+        <item quantity="one">%d available video</item>
+        <item quantity="other">%d available videos</item>
+    </plurals>
+    <string name="playlist_saved">Saved %s</string>
+    <string name="playlist_episodes">Episodes</string>
 </resources>
