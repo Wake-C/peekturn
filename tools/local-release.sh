@@ -63,14 +63,8 @@ def main():
         raise RuntimeError('The release keystore must exist outside the checkout')
     env['PEEKTURN_STORE_FILE'] = str(store)
     env.setdefault('PEEKTURN_KEY_ALIAS', 'peekturn-upload')
-    if not env.get('PEEKTURN_STORE_PASSWORD'):
-        env['PEEKTURN_STORE_PASSWORD'] = capture(
-            ['security', 'find-generic-password', '-s', 'com.peekturn.reader.upload-key', '-a', 'upload', '-w'], env).rstrip('\n')
-    if not env['PEEKTURN_STORE_PASSWORD']:
-        raise RuntimeError('Release signing password is unavailable')
-    env.setdefault('PEEKTURN_KEY_PASSWORD', env['PEEKTURN_STORE_PASSWORD'])
     # No check/test/lint tasks. -x is local to this invocation, not a project-wide setting.
-    subprocess.run([str(ROOT / 'gradlew'), *GRADLE_TASKS], cwd=ROOT, env=env, check=True)
+    subprocess.run([str(ROOT / 'tools/lib/signed-gradle.sh'), *GRADLE_TASKS], cwd=ROOT, env=env, check=True)
     source_dir = ROOT / 'app/build/outputs/apk/release'
     metadata = json.loads((source_dir / 'output-metadata.json').read_text())
     elements = metadata.get('elements', [])

@@ -18,7 +18,8 @@ class LocalReleaseTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='peekturn-local-release-')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / 'checkout with spaces'
-        (self.root / 'tools').mkdir(parents=True)
+        (self.root / 'tools/lib').mkdir(parents=True)
+        shutil.copy2(SCRIPT.parent / 'lib/signed-gradle.sh', self.root / 'tools/lib/signed-gradle.sh')
         shutil.copyfile(SCRIPT, self.root / 'tools/local-release.sh')
         (self.root / '.gitignore').write_text('app/build/\n')
         self.sdk = self.root / 'android sdk'
@@ -114,6 +115,36 @@ printf '%s\\n' "$@" > gradle-args.txt
                 self.metadata.write_text(json.dumps(metadata))
                 self.assertNotEqual(self.run_package().returncode, 0)
                 self.assertEqual(self.deliveries(), [])
+
+    def test_keychain_read_failure_identifies_entry_and_keeps_secrets_out_of_output(self):
+        # Both public entry points for local packaging must report the failed lookup.
+        shutil.copyfile(SCRIPT.with_name('release.sh'), self.root / 'tools/release.sh')
+        wrapper = self.root / 'gradle/wrapper/gradle-wrapper.jar'
+        wrapper.parent.mkdir(parents=True)
+        wrapper.touch()
+        self.executable(self.root / 'jdk/bin/javac', '#!/bin/sh\necho "javac 17.0.14"\n')
+        self.executable(self.root / 'jdk/bin/jarsigner', '#!/bin/sh\nexit 0\n')
+        self.executable(self.root / 'jdk/bin/security', """#!/bin/sh
+echo fixture-secret
+echo private-diagnostic >&2
+exit 152
+""")
+        self.env['PATH'] = str(self.root / 'jdk/bin') + os.pathsep + self.env['PATH']
+        self.env.pop('PEEKTURN_STORE_PASSWORD')
+        self.env.pop('PEEKTURN_KEY_PASSWORD')
+        self.git('add', '.')
+        self.git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'local tool fixtures')
+        for name in ('local-release.sh', 'release.sh'):
+            with self.subTest(name=name):
+                run = subprocess.run(['sh', str(self.root / 'tools' / name)], cwd=self.root,
+                                     env=self.env, capture_output=True, text=True)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertIn('com.peekturn.reader.upload-key', run.stderr)
+                self.assertIn('account upload', run.stderr)
+                self.assertIn('152', run.stderr)
+                self.assertNotIn('fixture-secret', run.stdout + run.stderr)
+                self.assertNotIn('private-diagnostic', run.stdout + run.stderr)
+                self.assertFalse((self.root / 'gradle-args.txt').exists())
 
     def test_help_and_invalid_arguments_do_not_build(self):
         self.assertEqual(self.run_package('--help').returncode, 0)

@@ -77,20 +77,15 @@ case "$(cd "$(dirname "$KEYSTORE")" && pwd)/$(basename "$KEYSTORE")" in
     "$ROOT"/*) fail 'The upload keystore must stay outside the repository.' ;;
 esac
 [ -f "$KEYSTORE" ] || fail "Upload keystore not found at $KEYSTORE. Run the one-time setup first."
-STORE_PASSWORD=$(security find-generic-password -s com.peekturn.reader.upload-key -a upload -w 2>/dev/null) || \
-    fail 'Upload key password is missing from macOS Keychain.'
-[ -n "$STORE_PASSWORD" ] || fail 'Upload key password is empty.'
-
 worktree_status=$(git status --porcelain --untracked-files=normal) || fail 'Cannot read Git worktree status.'
 [ -z "$worktree_status" ] || fail 'Release requires a clean worktree. Commit or stash every change first.'
 revision=$(git rev-parse --verify HEAD) || fail 'Run from a Git checkout with a commit.'
 
 export PEEKTURN_STORE_FILE="$KEYSTORE"
-export PEEKTURN_STORE_PASSWORD="$STORE_PASSWORD"
+unset PEEKTURN_STORE_PASSWORD  # The Play build takes its store password from Keychain.
 export PEEKTURN_KEY_ALIAS="$KEY_ALIAS"
-export PEEKTURN_KEY_PASSWORD="${PEEKTURN_KEY_PASSWORD:-$STORE_PASSWORD}"
 
-./gradlew --console=plain :app:testDebugUnitTest :app:lintRelease :app:bundleRelease :app:assembleRelease
+./tools/lib/signed-gradle.sh --console=plain :app:testDebugUnitTest :app:lintRelease :app:bundleRelease :app:assembleRelease
 
 aab="$ROOT/app/build/outputs/bundle/release/app-release.aab"
 apk="$ROOT/app/build/outputs/apk/release/app-release.apk"

@@ -54,6 +54,7 @@ Help people stay with content they care about and finish more of it. Reading, li
 | Rule | Enforcement |
 | --- | --- |
 | Publish a GitHub release from the reviewed main commit and its named version tag. | `tools/release.sh github <tag>` checks the commit and pushes the two refs atomically. The Release APK workflow builds and signs the download. |
+| Identify the failed signing credential lookup and its exit status. | Both local packagers use `tools/lib/signed-gradle.sh`. A simulated Keychain failure exercises both commands in `tools/tests/test_local_release.py`. |
 
 ## Read when relevant
 
