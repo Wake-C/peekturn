@@ -18,12 +18,25 @@ class VideoPreferencesTest {
     @Test fun choosesRememberedHeightNotHighest() {
         assertEquals(720, preferredQuality(qualities(360, 720, 1080), 720)!!.height)
     }
-    @Test fun missingPreferenceUsesLowerThenLowestAbove() {
-        assertEquals(480, preferredQuality(qualities(360, 480, 1080), 720)!!.height)
+    @Test fun missingPreferenceKeepsHdWhenRealHdExists() {
+        assertEquals(1080, preferredQuality(qualities(360, 480, 1080), 720)!!.height)
+        assertEquals(720, preferredQuality(qualities(360, 720, 1440), 1080)!!.height)
+        assertEquals(480, preferredQuality(qualities(360, 480), 1080)!!.height)
+        assertEquals(360, preferredQuality(qualities(360, 720), 360)!!.height)
         assertEquals(1440, preferredQuality(qualities(2160, 1440), 1080)!!.height)
     }
+    @Test fun refreshingDownloaded360RestoresOnlineChoicesAndKeepsTheOfflineCopy() {
+        val local = VideoQuality("360p", 360, VideoPlaybackSource("peekturn-offline://saved", "video/mp4"))
+        val streams = qualities(360, 720, 1080)
+        val restored = mergeVideoQualities(listOf(local), streams, local.id)
+        assertEquals(listOf(1080, 720, 360), restored.map { it.height })
+        assertEquals(local, restored.last())
+        assertEquals(1080, preferredQuality(restored, 1080)!!.height)
+        assertEquals(720, preferredQuality(restored, 720)!!.height)
+    }
+
     @Test fun invalidPreferencesAndUnknownHeightAreSafe() {
-        assertEquals(1080, preferredQuality(qualities(360, 1080, 2160), -1)!!.height)
+        assertEquals(720, preferredQuality(qualities(360, 720, 1080, 2160), -1)!!.height)
         assertEquals(0, preferredQuality(qualities(0), 720)!!.height)
         assertNull(preferredQuality(emptyList(), 1080))
     }

@@ -54,10 +54,7 @@
     <string name="video_ui_watch_switch_failed">%1$s 已保存的音频仍可播放。</string>
     <string name="video_ui_read">阅读</string>
     <string name="video_ui_captions">字幕</string>
-    <string name="video_ui_follow">跟随</string>
-    <string name="video_ui_following">正在跟随播放</string>
-    <string name="video_ui_follow_paused">已暂停自动跟随</string>
-    <string name="video_ui_follow_description">跟随当前字幕</string>
+    <string name="video_ui_locate_caption">定位到当前字幕</string>
     <string name="video_ui_no_captions">此视频没有可用字幕。</string>
     <string name="video_ui_no_english_captions">没有可用的英文字幕。请在播放设置中选择其他字幕轨。</string>
     <string name="video_ui_caption_loading">正在准备字幕…</string>
@@ -80,8 +77,10 @@
     <string name="video_ui_audio_save_failed">未能保存播放模式，请重试。</string>
     <string name="video_ui_watch_video">切换为视频</string>
     <string name="video_ui_audio_unavailable">此视频没有可用的独立音频流。</string>
-    <string name="video_ui_default_quality">默认清晰度：%1$dp</string>
-    <string name="video_ui_quality_remembered">选择会沿用到其他视频；缺少对应档位时优先使用较低档位。</string>
+    <string name="video_ui_quality_online">需联网获取</string>
+    <string name="video_ui_quality_unavailable">暂时无法获取该清晰度。</string>
+    <string name="video_ui_quality_refresh">刷新清晰度</string>
+    <string name="video_ui_quality_loading">正在读取清晰度…</string>
     <string name="video_ui_approximate_time">接近的原字幕时间</string>
     <string name="video_ui_time_position">%1$s / %2$s</string>
 

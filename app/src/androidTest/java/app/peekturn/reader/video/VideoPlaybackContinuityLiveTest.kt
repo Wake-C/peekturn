@@ -13,13 +13,11 @@ import androidx.media3.exoplayer.source.LoadEventInfo
 import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
-import app.peekturn.reader.PeekturnApp
 import com.google.gson.Gson
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -44,8 +42,6 @@ class VideoPlaybackContinuityLiveTest {
         val seconds = (args.getString("continuitySeconds")?.toIntOrNull() ?: 180).coerceIn(30, 600)
         val requestedHeight = args.getString("continuityHeight")?.toIntOrNull() ?: 240
         val startMs = (args.getString("continuityStartMs")?.toLongOrNull() ?: 120_000).coerceAtLeast(0)
-        val store = (context.applicationContext as PeekturnApp).graph.store
-        val originalHeight = store.settings.value.videoQualityHeight
         val ready = CountDownLatch(1)
         var vm: VideoViewModel? = null
         val connection = object : ServiceConnection {
@@ -175,7 +171,6 @@ class VideoPlaybackContinuityLiveTest {
                 model.player.removeAnalyticsListener(analytics)
                 model.player.pause()
             } }
-            runBlocking { store.updateSettings { it.copy(videoQualityHeight = originalHeight) } }
             if (bound) context.unbindService(connection)
             scenario.close()
             val summary = mapOf("mode" to mode, "requestedHeight" to requestedHeight,

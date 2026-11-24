@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -75,7 +76,7 @@ import kotlinx.coroutines.launch
 private val VideoScrim = Color.Black.copy(alpha = 0.68f)
 private val CaptionScrim = Color.Black.copy(alpha = 0.66f)
 private val LandscapeTransportSize = 76.dp
-private val LandscapeFooterHeight = 64.dp
+private val LandscapeFooterHeight = 56.dp
 private val CaptionControlsGap = 8.dp
 // Two 48dp touch rows; the system navigation inset is added separately.
 internal val PortraitToolsHeight = 96.dp
@@ -246,8 +247,10 @@ private fun PortraitPlayer(
     onEpisodes: (() -> Unit)?,
     onFullscreen: () -> Unit
 ) {
-    var follow by rememberSaveable(state.item?.id) { mutableStateOf(true) }
-    var followRequest by rememberSaveable(state.item?.id) { mutableIntStateOf(0) }
+    var locateRequest by rememberSaveable(state.item?.id) { mutableIntStateOf(0) }
+    fun locateCaption() { locateRequest++ }
+    val previous = { vm.previousCue(); locateCaption() }
+    val next = { vm.nextCue(); locateCaption() }
     Box(Modifier.fillMaxSize()) {
         when (val phase = state.phase) {
             VideoPhase.Idle, VideoPhase.Loading -> {
@@ -286,12 +289,12 @@ private fun PortraitPlayer(
                         applySystemInsets = applyInsets)
                 }
                 val captions: @Composable (Modifier) -> Unit = { modifier ->
-                    CaptionPanel(state, reading, vm, follow, followRequest,
-                        onManualScroll = { follow = false }, modifier = modifier)
+                    CaptionPanel(state, reading, vm, locateRequest,
+                        onPlayCue = { index -> vm.playCue(index); locateCaption() }, modifier = modifier)
                 }
                 val transport: @Composable (Boolean) -> Unit = { applyInsets ->
-                    PortraitTools(state, vm::seekTo, vm::previousCue, vm::togglePlay, vm::nextCue, vm::setSpeed,
-                        following = follow, onFollow = { follow = true; followRequest++ },
+                    PortraitTools(state, { vm.seekTo(it); locateCaption() }, previous, vm::togglePlay, next, vm::setSpeed,
+                        onLocate = ::locateCaption,
                         applyNavigationInsets = applyInsets)
                 }
                 if (state.readMode) {
@@ -302,7 +305,7 @@ private fun PortraitPlayer(
                         content = { captions(Modifier.fillMaxSize()) },
                         topBar = { topBar(false) },
                         expandedTransport = { transport(false) },
-                        compactTransport = { VideoCompactTransport(state, vm::previousCue, vm::togglePlay, vm::nextCue) }
+                        compactTransport = { VideoCompactTransport(state, previous, vm::togglePlay, next) }
                     )
                 } else {
                     Column(Modifier.fillMaxSize()) {
@@ -345,7 +348,7 @@ private fun LandscapePlayer(
             VideoPhase.Ready -> {
                 PlayerSurface(player, Modifier.matchParentSize())
                 PictureTapLayer(vm, Modifier.matchParentSize())
-                LandscapeCaptions(state, vm)
+                LandscapeCaptions(state, vm::openLookup)
                 if (state.toolsVisible) {
                     LandscapeChrome(
                         state = state,
@@ -641,8 +644,7 @@ internal fun PortraitTools(
     onNext: () -> Unit,
     onSpeed: (Float) -> Unit,
     modifier: Modifier = Modifier,
-    following: Boolean = true,
-    onFollow: () -> Unit = {},
+    onLocate: () -> Unit = {},
     applyNavigationInsets: Boolean = true
 ) {
     Surface(
@@ -665,37 +667,26 @@ internal fun PortraitTools(
                 SeekBar(state, onSeek, compact = true, modifier = Modifier.weight(1f))
                 CompactClock(if (state.durationMs > 0L) formatClock(state.durationMs) else "--:--")
             }
-            // Absolute centring keeps the transport still when the speed label changes width.
-            Box(Modifier.fillMaxWidth().height(if (state.readMode) ReadingToolsHeight else 48.dp)) {
-                PeekturnIconButton(
-                    icon = PeekturnIcons.Follow,
-                    description = stringResource(R.string.video_ui_follow),
-                    onClick = onFollow,
-                    enabled = state.displayedCues.isNotEmpty(),
-                    selected = following,
-                    stateDescription = stringResource(
-                        if (following) R.string.video_ui_following else R.string.video_ui_follow_paused
-                    ),
-                    modifier = Modifier.align(Alignment.CenterStart)
-                )
-                Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
-                    CueButton(
-                        PeekturnIcons.Previous,
-                        stringResource(R.string.video_ui_previous_subtitle),
-                        enabled = previousCueIndex(state.displayedCues, state.positionMs) != null,
-                        onClick = onPrevious
-                    )
-                    PlayButton(state, onTogglePlay, size = 48.dp)
-                    CueButton(
-                        PeekturnIcons.Next,
-                        stringResource(R.string.video_ui_next_subtitle),
-                        enabled = nextCueIndex(state.displayedCues, state.positionMs) != null,
-                        onClick = onNext
+            Row(
+                Modifier.fillMaxWidth().height(if (state.readMode) ReadingToolsHeight else 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Equal side slots keep play centred, with separate hit areas for all five actions.
+                Box(Modifier.width(56.dp)) {
+                    PeekturnIconButton(
+                        icon = PeekturnIcons.Follow,
+                        description = stringResource(R.string.video_ui_locate_caption),
+                        onClick = onLocate,
+                        enabled = state.displayedCues.isNotEmpty()
                     )
                 }
-                Box(Modifier.align(Alignment.CenterEnd)) {
-                    SpeedControl(state.speed, onSpeed, compact = true)
-                }
+                CueButton(PeekturnIcons.Previous, stringResource(R.string.video_ui_previous_subtitle),
+                    enabled = previousCueIndex(state.displayedCues, state.positionMs) != null, onClick = onPrevious)
+                PlayButton(state, onTogglePlay, size = 48.dp)
+                CueButton(PeekturnIcons.Next, stringResource(R.string.video_ui_next_subtitle),
+                    enabled = nextCueIndex(state.displayedCues, state.positionMs) != null, onClick = onNext)
+                SpeedControl(state.speed, onSpeed, compact = true)
             }
         }
     }
@@ -708,7 +699,8 @@ internal fun VideoCompactTransport(
     onTogglePlay: () -> Unit,
     onNext: () -> Unit
 ) {
-    Row(Modifier.padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.padding(bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
         CueButton(PeekturnIcons.Previous, stringResource(R.string.video_ui_previous_subtitle),
             enabled = previousCueIndex(state.displayedCues, state.positionMs) != null, onClick = onPrevious)
         PlayButton(state, onTogglePlay, size = 48.dp)
@@ -768,7 +760,7 @@ private fun LandscapeChrome(
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                 .heightIn(min = LandscapeFooterHeight)
                 .background(VideoScrim)
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+                .padding(horizontal = 20.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             TimeText(state.positionMs, state.durationMs, color = Color.White)
@@ -866,7 +858,7 @@ private fun SpeedControl(speed: Float, onSpeed: (Float) -> Unit, light: Boolean 
             onClick = { open = true },
             modifier = Modifier
                 .heightIn(min = 48.dp)
-                .then(if (compact) Modifier.width(72.dp) else Modifier)
+                .then(if (compact) Modifier.width(56.dp) else Modifier)
                 .semantics { contentDescription = "$description, $label" },
             contentPadding = if (compact) PaddingValues(horizontal = 4.dp) else ButtonDefaults.TextButtonContentPadding
         ) {
@@ -941,14 +933,35 @@ private fun PlayButton(state: VideoPlaybackState, onTogglePlay: () -> Unit, size
     }
 }
 
+/** A drag gives the reader the list until they resume playback or request the current cue. */
+@Composable
+internal fun rememberCaptionListState(currentIndex: Int?, playRequested: Boolean, lookupOpen: Boolean,
+    locateRequest: Int): LazyListState {
+    val list = rememberLazyListState()
+    var browsing by rememberSaveable(locateRequest) { mutableStateOf(false) }
+    val dragging by list.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(dragging) { if (dragging) browsing = true }
+    LaunchedEffect(playRequested, lookupOpen) {
+        if (playRequested && !lookupOpen) browsing = false
+    }
+    val height by remember { derivedStateOf { list.layoutInfo.viewportSize.height } }
+    val count by remember { derivedStateOf { list.layoutInfo.totalItemsCount } }
+    val tracking = !browsing && !dragging && !lookupOpen
+    LaunchedEffect(currentIndex, tracking, locateRequest, height, count) {
+        if (tracking && currentIndex != null && currentIndex in 0 until count && height > 0) {
+            list.animateScrollToItem(currentIndex, scrollOffset = -(height * 0.26f).toInt())
+        }
+    }
+    return list
+}
+
 @Composable
 private fun CaptionPanel(
     state: VideoPlaybackState,
     reading: ReaderPreferences,
     vm: VideoViewModel,
-    follow: Boolean,
-    followRequest: Int,
-    onManualScroll: () -> Unit,
+    locateRequest: Int,
+    onPlayCue: (Int) -> Unit,
     modifier: Modifier
 ) {
     val cues = state.displayedCues
@@ -958,19 +971,13 @@ private fun CaptionPanel(
     val readingFamily = rememberReaderFontFamily(reading.fontFamily)
     val paragraphGap = with(density) { metrics.paragraphGapSp.sp.toDp() }
     val maximumTextWidth = with(density) { metrics.maximumWidthSp.sp.toDp() }
-    val listState = rememberLazyListState()
-    val viewportHeight by remember { derivedStateOf { listState.layoutInfo.viewportSize.height } }
-    val dragging by listState.interactionSource.collectIsDraggedAsState()
     val activeIndex = activeCueIndex(cues, state.positionMs)
     // Gaps have no highlighted cue, but a seek still brings the nearby transcript into view.
     val followIndex = activeIndex ?: navigationCueIndex(cues, state.positionMs)
         ?: 0.takeIf { cues.isNotEmpty() }
     val navigationBottom = if (state.readMode) 0.dp else WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    LaunchedEffect(dragging) { if (dragging) onManualScroll() }
-    LaunchedEffect(followIndex, follow, followRequest, state.selectedTrackId, cues.size, viewportHeight, state.readMode) {
-        if (!follow || dragging || followIndex == null) return@LaunchedEffect
-        val offset = (viewportHeight * 0.26f).toInt().coerceAtLeast(0)
-        listState.animateScrollToItem(followIndex, scrollOffset = -offset)
+    val listState = key(state.item?.id, state.selectedTrackId, state.readMode) {
+        rememberCaptionListState(followIndex, state.playRequested, state.lookup != null, locateRequest)
     }
     Column(modifier) {
         if (!state.readMode) Row(
@@ -1049,16 +1056,15 @@ private fun CaptionPanel(
                                 if (current) MaterialTheme.colorScheme.activeSentenceBackground else Color.Transparent,
                                 RoundedCornerShape(8.dp)
                             )
+                            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.video_ui_seek)) {
+                                onPlayCue(index)
+                            }
                             .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.Top
                     ) {
                         Box(
                             Modifier.width(52.dp)
                                 .heightIn(min = 48.dp)
-                                .clickable(
-                                    role = Role.Button,
-                                    onClickLabel = stringResource(R.string.video_ui_seek)
-                                ) { vm.playCue(index) }
                                 .padding(top = 1.dp)
                         ) {
                             Text(
@@ -1074,7 +1080,7 @@ private fun CaptionPanel(
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
                             onLookup = { vm.openLookup(cue.id, it) },
-                            onBlankTap = { vm.seekToCue(index) }
+                            onBlankTap = null
                         )
                     }
                 }
@@ -1114,7 +1120,7 @@ private fun CaptionFailure(text: String, onRetry: () -> Unit, modifier: Modifier
 }
 
 @Composable
-private fun LandscapeCaptions(state: VideoPlaybackState, vm: VideoViewModel) {
+internal fun LandscapeCaptions(state: VideoPlaybackState, onLookup: (Int, CaptionSelection) -> Unit) {
     val cues = state.displayedCues
     val index = activeCueIndex(cues, state.positionMs) ?: return
     val cue = cues.getOrNull(index) ?: return
@@ -1126,8 +1132,9 @@ private fun LandscapeCaptions(state: VideoPlaybackState, vm: VideoViewModel) {
             .padding(horizontal = 24.dp),
         contentAlignment = Alignment.BottomCenter
     ) {
-        val bottom = LandscapeFooterHeight + CaptionControlsGap +
-            WindowInsets.safeDrawing.asPaddingValues().calculateBottomPadding()
+        val safeBottom = WindowInsets.safeDrawing.asPaddingValues().calculateBottomPadding()
+        val bottom = safeBottom + if (state.toolsVisible) LandscapeFooterHeight + CaptionControlsGap
+            else ((maxHeight - safeBottom) * 0.09f).coerceIn(20.dp, 48.dp)
         val captionHeight = (maxHeight / 2 - LandscapeTransportSize / 2 -
             CaptionControlsGap - bottom).coerceAtLeast(1.dp)
         val compact = maxHeight < 360.dp
@@ -1141,8 +1148,7 @@ private fun LandscapeCaptions(state: VideoPlaybackState, vm: VideoViewModel) {
             color = CaptionScrim,
             contentColor = Color.White
         ) {
-            // Reserve the same lane with chrome shown or hidden. A long source cue scrolls rather
-            // than drawing through the central transport or losing words to an ellipsis.
+            // Long cues scroll within the space below the central transport.
             key(state.selectedTrackId, cue.id, cue.text) {
                 Row(
                     Modifier.padding(horizontal = 14.dp, vertical = 2.dp)
@@ -1164,7 +1170,7 @@ private fun LandscapeCaptions(state: VideoPlaybackState, vm: VideoViewModel) {
                         fontSize = if (compact) 16.sp else 19.sp,
                         lineHeight = if (compact) 19.sp else 26.sp,
                         modifier = Modifier.weight(1f),
-                        onLookup = { vm.openLookup(cue.id, it) },
+                        onLookup = { onLookup(cue.id, it) },
                         onBlankTap = null
                     )
                 }
@@ -1434,42 +1440,51 @@ private fun VideoSettingsSheet(
                     }
                 }
             }
-            if (state.qualities.isNotEmpty()) {
+            val qualityHeights = (state.knownQualityHeights + state.qualities.map { it.height }).distinct().sortedDescending()
+            val qualityBusy = state.qualityChanging || state.refreshingQualities || state.modeSaving
+            if (qualityHeights.isNotEmpty()) {
                 Spacer(Modifier.height(20.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    stringResource(R.string.video_ui_default_quality, state.preferredHeight),
+                    stringResource(R.string.video_ui_quality_title),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(stringResource(R.string.video_ui_quality_remembered),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(4.dp))
                 Column(Modifier.fillMaxWidth().selectableGroup()) {
-                    state.qualities.forEach { quality ->
-                        val selected = quality.id == state.selectedQualityId
+                    qualityHeights.forEach { height ->
+                        val quality = state.qualities.find { it.height == height }
+                        val selected = quality != null && quality.id == state.selectedQualityId
                         Row(
                             Modifier.fillMaxWidth()
                                 .selectable(
                                     selected = selected,
-                                    enabled = !state.qualityChanging && !state.modeSaving,
+                                    enabled = !qualityBusy,
                                     role = Role.RadioButton
-                                ) { vm.selectQuality(quality) }
+                                ) { vm.selectKnownQuality(height) }
                                 .heightIn(min = 52.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(selected = selected, onClick = null)
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                if (quality.height > 0) {
-                                    stringResource(R.string.video_ui_quality_label, quality.height)
-                                } else {
-                                    quality.id
-                                },
-                                style = MaterialTheme.typography.bodyLarge
+                                if (height > 0) stringResource(R.string.video_ui_quality_label, height)
+                                else quality?.id.orEmpty(),
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.weight(1f)
                             )
+                            if (quality == null) Text(stringResource(R.string.video_ui_quality_online),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                    }
+                }
+                if (state.qualityUnavailable) Text(stringResource(R.string.video_ui_quality_unavailable),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                if (qualityHeights.size == 1 || state.qualityUnavailable || state.refreshingQualities) {
+                    TextButton(onClick = { vm.refreshQualities() }, enabled = !qualityBusy) {
+                        Text(stringResource(if (state.refreshingQualities) R.string.video_ui_quality_loading
+                            else R.string.video_ui_quality_refresh))
                     }
                 }
                 if (state.qualityChanging) {

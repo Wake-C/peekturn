@@ -30,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.peekturn.reader.R
 import app.peekturn.reader.ui.PeekturnIcons
+import app.peekturn.reader.model.DEFAULT_VIDEO_QUALITY_HEIGHT
 import app.peekturn.reader.model.AppSettings
 import app.peekturn.reader.learning.FloatingLookupService
 import app.peekturn.reader.narration.NarrationService
@@ -252,10 +253,10 @@ private fun PeekturnHome(
                     onDownload = {
                         if (downloads[it.id]?.phase == app.peekturn.reader.video.VideoDownloadPhase.Failed) vm.graph.videoDownloads.retry(it.id)
                         else vm.graph.videoDownloads.download(it,
-                            app.peekturn.reader.video.preferredAudioOnly(it, settings.videoAudioOnly), settings.videoQualityHeight)
+                            app.peekturn.reader.video.preferredAudioOnly(it, settings.videoAudioOnly), DEFAULT_VIDEO_QUALITY_HEIGHT)
                     },
                     onRemoveDownload = { vm.graph.videoDownloads.remove(it.id) },
-                    onDownloadVideo = { vm.graph.videoDownloads.download(it, false, settings.videoQualityHeight) })
+                    onDownloadVideo = { vm.graph.videoDownloads.download(it, false, DEFAULT_VIDEO_QUALITY_HEIGHT) })
                 2 -> StatisticsScreen(stats, books, videos, vm::open, { video ->
                     onOpenVideo(video.id, playlists.firstOrNull { !video.isStandalone && video.id in it.videoIds }?.id)
                 })

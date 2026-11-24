@@ -30,7 +30,7 @@ class YouTubeSourceSelectionTest {
     }
 
     @Test
-    fun `a muxed 360 and a split 1080 are both offered and 1080 is the default`() {
+    fun `a fresh open selects 720 while 1080 and 360 remain available`() {
         val muxed360 = VideoChoice("https://media.example/muxed360", "video/mp4", 360, avc = true)
         val split1080 = VideoChoice("https://media.example/split1080", "video/mp4", 1080, avc = true)
         val split720 = VideoChoice("https://media.example/split720", "video/mp4", 720, avc = true)
@@ -44,8 +44,8 @@ class YouTubeSourceSelectionTest {
         assertEquals(listOf("1080p", "720p", "360p"), renditions.map { it.id })
         assertEquals(listOf(1080, 720, 360), renditions.map { it.height })
         val selected = defaultRendition(renditions)
-        assertEquals("1080p", selected?.id)
-        assertEquals(split1080, selected?.video)
+        assertEquals("720p", selected?.id)
+        assertEquals(split720, selected?.video)
         assertEquals(audio, selected?.audio)
         val muxedRendition = renditions.single { it.height == 360 }
         assertEquals(muxed360, muxedRendition.video)

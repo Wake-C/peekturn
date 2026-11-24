@@ -48,6 +48,7 @@ import kotlinx.coroutines.launch
 class VideoActivity : AppCompatActivity() {
     private val graph get() = (application as PeekturnApp).graph
     private lateinit var vm: VideoViewModel
+    private var restoringSession = false
     private var resumed = false
     private var bound = false
     private val readVolumeKeys = VideoReadVolumeKeys()
@@ -65,7 +66,8 @@ class VideoActivity : AppCompatActivity() {
                 finish()
                 return
             }
-            if (id != null || url != null) openIntent(intent)
+            if (id != null || url != null) openIntent(intent, newOpen = !restoringSession)
+            restoringSession = true
             if (resumed) vm.onForeground()
             showSession()
         }
@@ -93,6 +95,7 @@ class VideoActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        restoringSession = savedInstanceState != null
         AppLanguage.apply(this, graph.store.settings.value.uiLanguage)
         applyAppTheme(graph.store.settings.value.appTheme)
         applySystemBars(isLandscape())
@@ -189,9 +192,9 @@ class VideoActivity : AppCompatActivity() {
         }
     }
 
-    private fun openIntent(intent: Intent) {
+    private fun openIntent(intent: Intent, newOpen: Boolean = true) {
         vm.openFromIntent(videoId(intent), videoUrl(intent), intent.getStringExtra(EXTRA_PLAYLIST_ID),
-            autoPlay = !intent.getBooleanExtra(EXTRA_RESUME_ON_LAUNCH, false))
+            autoPlay = !intent.getBooleanExtra(EXTRA_RESUME_ON_LAUNCH, false), newOpen = newOpen)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

@@ -70,7 +70,8 @@ class PortraitToolsTest {
         assertTrue("slider=$progress, total=$total", progress.right <= total.left)
         assertEquals(panel.center.x, play.center.x, 1f)
         assertEquals(play.center.x - previous.center.x, next.center.x - play.center.x, 1f)
-        assertEquals(48f * pixelsPerDp, next.center.x - play.center.x, 1f)
+        assertTrue("Skip must have a gap before pause", next.left - play.right >= 8f * pixelsPerDp)
+        assertTrue("Skip must have a gap after pause", play.left - previous.right >= 8f * pixelsPerDp)
         assertTrue(speed.left >= next.right)
         assertTrue(speed.right <= panel.right)
         assertTrue(previous.height >= 48f * pixelsPerDp - 1)
@@ -79,16 +80,15 @@ class PortraitToolsTest {
         compose.onNodeWithContentDescription(description(R.string.video_ui_hide_controls)).assertDoesNotExist()
     }
 
-    @Test fun readingToolsHaveNoClockOrSeekAndFollowStaysLeftOfCenteredTransport() {
-        var follows = 0
-        var following by mutableStateOf(false)
+    @Test fun locateIsARepeatableActionLeftOfTheReadingTransport() {
+        var locates = 0
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
                 PeekturnTheme(theme = "dark") {
                     Box(Modifier.width(320.dp)) {
                         PortraitTools(fixture.copy(readMode = true, audioOnly = true), {}, {}, {}, {}, {},
-                            Modifier.testTag("tools"), following = following, onFollow = { follows++; following = true })
+                            Modifier.testTag("tools"), onLocate = { locates++ })
                     }
                 }
             }
@@ -97,32 +97,28 @@ class PortraitToolsTest {
         compose.onNodeWithText("00:40").assertDoesNotExist()
         compose.onNodeWithText("02:00").assertDoesNotExist()
         val panel = compose.onNodeWithTag("tools").fetchSemanticsNode().boundsInRoot
-        compose.onNodeWithText(description(R.string.video_ui_follow)).assertDoesNotExist()
-        val followButton = compose.onNodeWithContentDescription(description(R.string.video_ui_follow))
-        followButton.assertIsNotSelected()
-        followButton.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
-            description(R.string.video_ui_follow_paused)))
-        val follow = followButton.fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithText(description(R.string.video_ui_locate_caption)).assertDoesNotExist()
+        val locateButton = compose.onNodeWithContentDescription(description(R.string.video_ui_locate_caption))
+        locateButton.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected))
+        val locate = locateButton.fetchSemanticsNode().boundsInRoot
         val previous = compose.onNodeWithContentDescription(description(R.string.video_ui_previous_subtitle)).fetchSemanticsNode().boundsInRoot
         val play = compose.onNodeWithContentDescription(description(R.string.video_ui_play)).fetchSemanticsNode().boundsInRoot
         assertEquals(panel.center.x, play.center.x, 1f)
-        assertTrue("follow=$follow previous=$previous", follow.right <= previous.left)
-        followButton.performClick()
-        followButton.assertIsSelected()
-        followButton.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
-            description(R.string.video_ui_following)))
-        assertEquals(follow, followButton.fetchSemanticsNode().boundsInRoot)
-        compose.runOnIdle { assertEquals(1, follows) }
+        assertTrue("locate=$locate previous=$previous", locate.right <= previous.left)
+        locateButton.performClick()
+        locateButton.performClick()
+        assertEquals(locate, locateButton.fetchSemanticsNode().boundsInRoot)
+        compose.runOnIdle { assertEquals(2, locates) }
     }
 
-    @Test fun followWithoutCaptionsIsDisabled() {
+    @Test fun locateWithoutCaptionsIsDisabled() {
         compose.setContent {
             PeekturnTheme {
                 PortraitTools(VideoPlaybackState(readMode = true), {}, {}, {}, {}, {},
-                    onFollow = { fail("No captions to follow") })
+                    onLocate = { fail("No captions to locate") })
             }
         }
-        compose.onNodeWithContentDescription(description(R.string.video_ui_follow)).assertIsNotEnabled()
+        compose.onNodeWithContentDescription(description(R.string.video_ui_locate_caption)).assertIsNotEnabled()
     }
 
     @Test fun readingParagraphIsTextWithoutTimestampAndWordLookupDoesNotSeek() {

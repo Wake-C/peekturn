@@ -1,5 +1,7 @@
 package app.peekturn.reader.video
 
+import app.peekturn.reader.model.DEFAULT_VIDEO_QUALITY_HEIGHT
+
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.io.ByteArrayOutputStream
@@ -57,12 +59,6 @@ import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import org.schabi.newpipe.extractor.stream.StreamType
 import org.schabi.newpipe.extractor.stream.VideoStream
-
-/**
- * The tallest default rendition. Taller real MP4 variants stay selectable, but a phone opens at
- * this height (or the closest available below it) instead of starting on a 4K stream.
- */
-private const val MAX_VIDEO_HEIGHT = 1080
 
 /** YouTube's language code for the one machine translation the app offers. */
 private const val ENGLISH_LANGUAGE_CODE = "en"
@@ -475,16 +471,9 @@ internal fun playbackRenditions(
     } else emptyList()
 }
 
-/**
- * The default is the tallest real rendition no taller than 1080p, so 1080p is chosen when present
- * and 720p remains the best available choice when it is not. When every real option is taller than
- * 1080p, the shortest of those is used rather than claiming the video is unsupported.
- */
 internal fun defaultRendition(renditions: List<VideoRendition>): VideoRendition? {
-    val known = renditions.filter { it.height > 0 }
-    if (known.isEmpty()) return renditions.firstOrNull()
-    val bounded = known.filter { it.height <= MAX_VIDEO_HEIGHT }
-    return bounded.maxByOrNull { it.height } ?: known.minByOrNull { it.height }
+    val height = preferredVideoHeight(renditions.map { it.height }, DEFAULT_VIDEO_QUALITY_HEIGHT)
+    return renditions.firstOrNull { it.height == height } ?: renditions.firstOrNull()
 }
 
 /**

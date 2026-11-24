@@ -36,11 +36,22 @@ class PeekturnStoreVideoTest {
     }
 
     @Test fun videoPlaybackPreferencesSurviveStoreRecreation() = runBlocking {
-        store.updateSettings { it.copy(videoQualityHeight = 720, videoAudioOnly = true, videoMergeCaptions = true) }
+        store.updateSettings { it.copy(videoAudioOnly = true, videoMergeCaptions = true) }
         val reopened = PeekturnStore(context)
-        assertEquals(720, reopened.settings.value.videoQualityHeight)
         assertTrue(reopened.settings.value.videoAudioOnly)
         assertTrue(reopened.settings.value.videoMergeCaptions)
+    }
+
+    @Test fun olderQualitySelectionsDoNotChangeNewSessionsOrSurviveTheNextSettingsWrite() = runBlocking {
+        val prefs = context.getSharedPreferences("peekturn", Context.MODE_PRIVATE)
+        for (height in listOf(360, 1080)) {
+            prefs.edit().putString("settings", """{"videoQualityHeight":$height,"quickExplain":true}""").commit()
+            val restored = PeekturnStore(context)
+            assertTrue(restored.settings.value.quickExplain)
+            assertEquals(720, app.peekturn.reader.video.VideoPlaybackState().preferredHeight)
+            restored.updateSettings { it.copy(accent = "UK") }
+            assertFalse(prefs.getString("settings", "")!!.contains("videoQualityHeight"))
+        }
     }
 
     @Test fun upgradingVersionOneDatabaseKeepsLibraryPositionsReadingTimeAndCredentials() = runBlocking {
@@ -269,6 +280,17 @@ class PeekturnStoreVideoTest {
         upgraded.selectVideoTrack(old.id, "ja")
         assertTrue(PeekturnStore(context).findVideo(old.id)!!.trackExplicit)
         assertEquals("v1 locator", upgraded.findBook(1)?.locatorJson)
+    }
+
+    @Test fun qualityMenuSurvivesColdOpenWithOnlyADownloadedOrFallbackRendition() = runBlocking {
+        val item = store.upsertVideo(VideoMetadata("video", "Video", "Channel", 60000, null))
+        val previous = listOf(1080, 720, 360)
+        assertEquals(previous, store.rememberVideoQualityHeights(item.id, previous))
+        val reopened = PeekturnStore(context)
+        assertEquals(previous, reopened.rememberVideoQualityHeights(item.id, listOf(360, 0)))
+        reopened.deleteVideo(item.id)
+        val importedAgain = reopened.upsertVideo(VideoMetadata("video", "Video", "Channel", 60000, null))
+        assertTrue(reopened.rememberVideoQualityHeights(importedAgain.id, emptyList()).isEmpty())
     }
 
     @Test fun versionFiveLibraryCanImportAndRefreshPlaylistsWithoutLosingVideosOrProgress() = runBlocking {

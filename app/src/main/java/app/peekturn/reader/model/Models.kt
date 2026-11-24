@@ -68,6 +68,8 @@ enum class SentenceSpeechProvider {
     }
 }
 
+const val DEFAULT_VIDEO_QUALITY_HEIGHT = 720
+
 /** Appearance for a new installation or a missing/invalid saved choice. */
 const val DEFAULT_APP_THEME = "light"
 
@@ -84,8 +86,6 @@ data class AppSettings(
     val uiLanguage: String = "system",
     val volumeKeysNarration: Boolean = false,
     val videoMergeCaptions: Boolean = true,
-    /** A height preference, never an expiring stream id. */
-    val videoQualityHeight: Int = 1080,
     /** Compatibility default for videos without an explicit per-video playback mode. */
     val videoAudioOnly: Boolean = false
 ) {

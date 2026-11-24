@@ -284,6 +284,21 @@ class PeekturnStore internal constructor(private val context: Context, private v
         }
     }
 
+    /** Remember source-reported heights only. Playback URLs are valid for a single resolution. */
+    internal suspend fun rememberVideoQualityHeights(id: Long, heights: List<Int>): List<Int> = withContext(Dispatchers.IO) {
+        writes.withLock {
+            val database = db.writableDatabase
+            database.transaction {
+                heights.filter { it > 0 }.distinct().forEach { height ->
+                    database.execSQL("INSERT OR IGNORE INTO video_quality_heights(video_id,height) VALUES(?,?)",
+                        arrayOf<Any>(id, height))
+                }
+                database.rawQuery("SELECT height FROM video_quality_heights WHERE video_id=? ORDER BY height DESC",
+                    arrayOf(id.toString())).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getInt(0)) } }
+            }
+        }
+    }
+
     suspend fun saveVideoPosition(id: Long, positionMs: Long) = withContext(Dispatchers.IO) {
         writes.withLock {
             val database = db.writableDatabase
@@ -606,16 +621,17 @@ class PeekturnStore internal constructor(private val context: Context, private v
         coverPath = getString(getColumnIndexOrThrow("cover_path")), locatorJson = getString(getColumnIndexOrThrow("locator")),
         progression = getDouble(getColumnIndexOrThrow("progression")), lastReadAt = getLong(getColumnIndexOrThrow("last_read_at"))
     )
-    private class Database(context: Context) : SQLiteOpenHelper(context, "peekturn.db", null, 6) {
+    private class Database(context: Context) : SQLiteOpenHelper(context, "peekturn.db", null, 7) {
         override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE books(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,author TEXT NOT NULL,file_path TEXT NOT NULL,cover_path TEXT,locator TEXT,progression REAL NOT NULL DEFAULT 0,last_read_at INTEGER NOT NULL DEFAULT 0)")
             db.execSQL("CREATE TABLE reading_daily(book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,date TEXT NOT NULL,seconds INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(book_id,date))")
             createVideoTables(db)
             createPlaylistTables(db)
+            createQualityTable(db)
         }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            if (newVersion > 6) error("No migration from $oldVersion to $newVersion")
+            if (newVersion > 7) error("No migration from $oldVersion to $newVersion")
             if (oldVersion < 2) createVideoTables(db)
             else {
                 if (oldVersion < 3) db.execSQL("ALTER TABLE videos ADD COLUMN track_explicit INTEGER NOT NULL DEFAULT 0")
@@ -624,6 +640,12 @@ class PeekturnStore internal constructor(private val context: Context, private v
                 if (oldVersion < 6) db.execSQL("ALTER TABLE videos ADD COLUMN standalone INTEGER NOT NULL DEFAULT 1")
             }
             if (oldVersion < 6) createPlaylistTables(db)
+            if (oldVersion < 7) createQualityTable(db)
+        }
+        private fun createQualityTable(db: SQLiteDatabase) {
+            db.execSQL("""CREATE TABLE video_quality_heights(
+                video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+                height INTEGER NOT NULL, PRIMARY KEY(video_id,height))""")
         }
         private fun createPlaylistTables(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE video_playlists(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL)")

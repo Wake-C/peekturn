@@ -3,6 +3,7 @@ package app.peekturn.reader.video
 import android.content.ComponentName
 import android.content.Context
 import android.content.ServiceConnection
+import android.net.ConnectivityManager
 import android.os.IBinder
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
@@ -26,6 +27,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import app.peekturn.reader.AppGraph
 import app.peekturn.reader.data.OfflineDictionary
 import app.peekturn.reader.learning.LearningSession
+import app.peekturn.reader.model.DEFAULT_VIDEO_QUALITY_HEIGHT
 import app.peekturn.reader.model.LookupContext
 import app.peekturn.reader.model.ReaderPreferences
 import app.peekturn.reader.reader.withTypography
@@ -74,6 +76,9 @@ internal data class VideoPlaybackState(
     val tracks: List<CaptionTrack> = emptyList(),
     val selectedTrackId: String? = null,
     val qualities: List<VideoQuality> = emptyList(),
+    val knownQualityHeights: List<Int> = emptyList(),
+    val refreshingQualities: Boolean = false,
+    val qualityUnavailable: Boolean = false,
     val selectedQualityId: String? = null,
     val qualityChanging: Boolean = false,
     val audioOnly: Boolean = false,
@@ -84,7 +89,7 @@ internal data class VideoPlaybackState(
     val modeSaveFailed: Boolean = false,
     val watchSwitchFailure: VideoFailureKind? = null,
     val resumeSaveFailed: Boolean = false,
-    val preferredHeight: Int = 1080,
+    val preferredHeight: Int = DEFAULT_VIDEO_QUALITY_HEIGHT,
     val captions: CaptionDocument? = null,
     val captionStatus: VideoCaptionStatus = VideoCaptionStatus.Absent,
     val captionFailure: VideoFailureKind? = null,
@@ -143,9 +148,9 @@ internal class VideoViewModel(
     private val _playlistId = MutableStateFlow<String?>(null)
     val playlistId = _playlistId.asStateFlow()
 
-    fun openFromIntent(id: Long?, url: String?, playlistId: String?, autoPlay: Boolean) {
+    fun openFromIntent(id: Long?, url: String?, playlistId: String?, autoPlay: Boolean, newOpen: Boolean) {
         _playlistId.value = playlistId
-        start(id, url, autoPlay = autoPlay)
+        start(id, url, autoPlay = autoPlay, newOpen = newOpen)
         if (foreground && id != null && _state.value.item?.id == id) rememberForegroundVideo()
     }
 
@@ -168,7 +173,7 @@ internal class VideoViewModel(
         val current = _state.value
         val id = current.item?.id ?: return
         start(id, null, force = true, autoPlay = player.playWhenReady && current.lookup == null,
-            preferDownload = false, startAtMs = lastKnownPosition())
+            preferDownload = false, startAtMs = lastKnownPosition(), newOpen = false)
     }
 
     private val httpClient get() = graph.videoMediaHttpClient
@@ -194,6 +199,7 @@ internal class VideoViewModel(
     private var narrationStop: Job? = null
     private var metadataJob: Job? = null
     private data class ActiveQualitySwitch(val token: Long, val previousId: String?, val plan: QualitySwitch)
+    private var qualityRefresh: Job? = null
     private var qualityGeneration = 0L
     private var activeQualitySwitch: ActiveQualitySwitch? = null
     private var openingStartedAt = 0L
@@ -288,11 +294,17 @@ internal class VideoViewModel(
                 val switching = activeQualitySwitch
                 if (switching != null && switching.token == qualityGeneration) {
                     activeQualitySwitch = null
-                    // No automatic retry: report the failure, but keep the last working rendition
-                    // as the remembered choice instead of claiming the failed one succeeded.
-                    _state.update {
-                        it.copy(selectedQualityId = switching.previousId, qualityChanging = false)
+                    val previous = _state.value.qualities.find { it.id == switching.previousId }
+                    if (previous != null && previous.id != switching.plan.quality.id && previous.source.isDownloaded) {
+                        // A failed online upgrade can always return to the complete downloaded copy.
+                        val position = player.currentPosition.takeIf { it > 0 } ?: switching.plan.positionMs
+                        val resume = player.playWhenReady
+                        _state.update { it.copy(selectedQualityId = previous.id, offlinePlayback = true,
+                            qualityChanging = false, qualityUnavailable = true) }
+                        preparePlayer(previous.source, position, resume)
+                        return
                     }
+                    _state.update { it.copy(selectedQualityId = switching.previousId, qualityChanging = false) }
                 }
                 val at = player.currentPosition.coerceAtLeast(0L).takeIf { it > 0L }
                     ?: _state.value.positionMs
@@ -310,10 +322,25 @@ internal class VideoViewModel(
      * same request after a configuration change is a no-op so the player is never recreated.
      */
     fun start(id: Long?, url: String?, force: Boolean = false, autoPlay: Boolean = true,
-        preferDownload: Boolean = true, startAtMs: Long? = null) {
+        preferDownload: Boolean = true, startAtMs: Long? = null, newOpen: Boolean = true) {
         val next = Request(id, url, preferDownload)
         val speed = _state.value.speed.takeIf { id != null && _state.value.item?.id == id } ?: 1f
-        if (!force && (request == next || id != null && _state.value.item?.id == id && _state.value.phase is VideoPhase.Ready)) return
+        val current = _state.value
+        val targetHeight = if (newOpen) DEFAULT_VIDEO_QUALITY_HEIGHT else current.preferredHeight
+        if (!force && (request == next || id != null && current.item?.id == id && current.phase is VideoPhase.Ready)) {
+            // Opening the same shelf item can reuse a live service and clock. Reset only the target;
+            // an Activity being recreated within this viewing session retains the manual choice.
+            if (newOpen) {
+                _state.update { it.copy(preferredHeight = targetHeight, qualityUnavailable = false) }
+                if (current.phase is VideoPhase.Ready) {
+                    val preferred = preferredQuality(current.qualities, targetHeight)
+                    if (preferred != null) switchQuality(preferred)
+                    if (preferred?.height != targetHeight && (current.offlinePlayback || targetHeight in current.knownQualityHeights) &&
+                        context.getSystemService(ConnectivityManager::class.java)?.activeNetwork != null) refreshQualities()
+                }
+            }
+            return
+        }
         persistPosition()
         progress.begin(null) // Stop/clear callbacks still belong to the previous player timeline.
         request = next
@@ -321,6 +348,7 @@ internal class VideoViewModel(
         openingStartedAt = SystemClock.elapsedRealtime()
         firstFramePending = true
         sessionJob?.cancel()
+        qualityRefresh?.cancel()
         captionJob?.cancel()
         captionGeneration++
         mergeJob?.cancel()
@@ -346,7 +374,7 @@ internal class VideoViewModel(
             phase = VideoPhase.Loading,
             mergeEnabled = mergeEnabled,
             toolsVisible = lastLandscape == true || graph.store.settings.value.videoAudioOnly,
-            preferredHeight = graph.store.settings.value.videoQualityHeight,
+            preferredHeight = targetHeight,
             speed = speed
         )
         metadataJob?.cancel()
@@ -406,13 +434,14 @@ internal class VideoViewModel(
         if (failed.kind == VideoFailureKind.InvalidLink) return
         val item = _state.value.item
         if (item == null) {
-            start(request?.id, request?.url, force = true)
+            start(request?.id, request?.url, force = true, newOpen = false)
             return
         }
         val token = ++sessionGeneration
         openingStartedAt = SystemClock.elapsedRealtime()
         firstFramePending = true
         sessionJob?.cancel()
+        qualityRefresh?.cancel()
         captionGeneration++
         qualityGeneration++
         activeQualitySwitch = null
@@ -453,6 +482,8 @@ internal class VideoViewModel(
     ) {
         val item = data.item
         val resolved = data.resolved
+        val knownHeights = graph.store.rememberVideoQualityHeights(item.id, resolved.qualities.map { it.height })
+        if (token != sessionGeneration) return
         val duration = resolved.metadata.durationMs
         val start = playbackStartMs(
             itemPositionMs = item.positionMs,
@@ -483,7 +514,8 @@ internal class VideoViewModel(
             else -> VideoCaptionStatus.Absent
         }
         val preferences = graph.store.settings.value
-        val qualityId = preferredQuality(resolved.qualities, preferences.videoQualityHeight)?.id
+        val preferredHeight = _state.value.preferredHeight
+        val qualityId = preferredQuality(resolved.qualities, preferredHeight)?.id
             ?: initialQualityId(resolved.qualities, resolved.playback, resolved.selectedQualityId)
         audioSource = resolved.audioOnly
         val audioOnly = preferredAudioOnly(item, preferences.videoAudioOnly)
@@ -497,16 +529,18 @@ internal class VideoViewModel(
                 tracks = resolved.tracks,
                 selectedTrackId = selected?.id,
                 qualities = resolved.qualities,
+                knownQualityHeights = knownHeights,
+                refreshingQualities = false,
+                qualityUnavailable = false,
                 selectedQualityId = qualityId,
                 qualityChanging = false,
                 audioOnly = audioOnly,
-                offlinePlayback = playback.videoUrl.startsWith("peekturn-offline://"),
+                offlinePlayback = playback.isDownloaded,
                 readMode = item.readMode,
                 audioAvailable = audioSource != null,
                 modeSaving = false,
                 modeSaveFailed = false,
                 watchSwitchFailure = data.watchFallbackFailure,
-                preferredHeight = preferences.videoQualityHeight,
                 toolsVisible = if (item.readMode) false else it.toolsVisible || audioOnly,
                 captions = sessionDocument,
                 captionStatus = status,
@@ -541,6 +575,12 @@ internal class VideoViewModel(
             return
         }
         preparePlayer(playback, start, autoPlay && shouldAutoPlay(start, duration))
+        // Old downloads do not have a catalogue; a lower saved picture must not cap online playback.
+        if (playback.isDownloaded && !audioOnly &&
+            (knownHeights.size <= 1 || resolved.qualities.find { it.id == qualityId }?.height != preferredHeight) &&
+            context.getSystemService(ConnectivityManager::class.java)?.activeNetwork != null) {
+            refreshQualities()
+        }
         startTicker()
         refreshCacheBytes()
     }
@@ -685,6 +725,52 @@ internal class VideoViewModel(
         _state.update { it.copy(speed = speed) }
     }
 
+    /** Refresh the online ladder without tearing down a working downloaded or fallback stream. */
+    fun refreshQualities(requestedHeight: Int? = null) {
+        val current = _state.value
+        val item = current.item ?: return
+        if (qualityRefresh?.isActive == true || current.modeSaving || current.qualityChanging) return
+        // An initial source failure has no prepared session. Retry through the full opening path
+        // so captions, playback tracking and the saved presentation are initialized together.
+        if (current.phase is VideoPhase.Failed && current.qualities.isEmpty()) {
+            retryLoad()
+            return
+        }
+        val session = sessionGeneration
+        _state.update { it.copy(refreshingQualities = true, qualityUnavailable = false) }
+        qualityRefresh = viewModelScope.launch {
+            try {
+                val fresh = graph.videoSource.resolve(item.videoId).qualities
+                val heights = graph.store.rememberVideoQualityHeights(item.id, fresh.map { it.height })
+                if (session != sessionGeneration) return@launch
+                val latest = _state.value
+                val available = mergeVideoQualities(latest.qualities, fresh, latest.selectedQualityId)
+                val target = if (requestedHeight != null && requestedHeight == latest.preferredHeight) available.find { it.height == requestedHeight }
+                    else preferredQuality(available, latest.preferredHeight)
+                _state.update { it.copy(qualities = available, knownQualityHeights = heights,
+                    refreshingQualities = false, qualityUnavailable = target == null) }
+                if (target != null && !latest.modeSaving) switchQuality(target)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                graph.developerLog.recordFailure("video", "refresh-qualities", e)
+                if (session == sessionGeneration) _state.update {
+                    it.copy(refreshingQualities = false, qualityUnavailable = true)
+                }
+            }
+        }
+    }
+
+    fun selectKnownQuality(height: Int) {
+        val current = _state.value
+        if (current.refreshingQualities || current.qualityChanging || current.modeSaving) return
+        val available = current.qualities.find { it.height == height }
+        if (available != null) selectQuality(available)
+        else if (height in current.knownQualityHeights) {
+            _state.update { it.copy(preferredHeight = height) }
+            refreshQualities(height)
+        }
+    }
+
     /**
      * Swaps the media source of the one existing player. Captions, cue timestamps, the current
      * position and the speed are untouched; only the rendition changes. While an explanation owns
@@ -693,7 +779,13 @@ internal class VideoViewModel(
     fun selectQuality(quality: VideoQuality) {
         val current = _state.value
         if (current.modeSaving || current.qualities.none { it.id == quality.id }) return
-        saveHeight(quality.height)
+        _state.update { it.copy(preferredHeight = quality.height.takeIf { h -> h > 0 } ?: it.preferredHeight,
+            qualityUnavailable = false) }
+        switchQuality(quality)
+    }
+
+    private fun switchQuality(quality: VideoQuality) {
+        val current = _state.value
         if (current.audioOnly) {
             _state.update { it.copy(selectedQualityId = quality.id) }
             return
@@ -722,6 +814,7 @@ internal class VideoViewModel(
             it.copy(
                 phase = if (recovering) VideoPhase.Ready else it.phase,
                 selectedQualityId = plan.quality.id,
+                offlinePlayback = plan.quality.source.isDownloaded,
                 qualityChanging = true,
                 positionMs = plan.positionMs,
                 isPlaying = false,
@@ -735,16 +828,6 @@ internal class VideoViewModel(
         player.prepare()
         player.playWhenReady = plan.resumeOnReady
         if (recovering) startTicker()
-    }
-
-    private fun saveHeight(height: Int) {
-        if (height <= 0) return
-        _state.update { it.copy(preferredHeight = height) }
-        viewModelScope.launch {
-            try { graph.store.updateSettings { it.copy(videoQualityHeight = height) } }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { graph.developerLog.recordFailure("video", "quality-preference", failure) }
-        }
     }
 
     suspend fun saveReadingAppearance(reading: ReaderPreferences, theme: String): Boolean = try {
@@ -836,7 +919,8 @@ internal class VideoViewModel(
                 qualityGeneration++
                 activeQualitySwitch = null
                 _state.update { it.copy(phase = VideoPhase.Ready, audioOnly = enabled, readMode = readMode,
-                    item = it.item?.copy(audioOnly = enabled, readMode = readMode), toolsVisible = !readMode, qualityChanging = false, modeSaving = false) }
+                    item = it.item?.copy(audioOnly = enabled, readMode = readMode), toolsVisible = !readMode,
+                    offlinePlayback = source.isDownloaded, qualityChanging = false, modeSaving = false) }
                 if (enabled != current.audioOnly) {
                     player.pause()
                     preparePlayer(source, at, resume)
@@ -871,7 +955,7 @@ internal class VideoViewModel(
         player.play()
     }
 
-    fun seekToCue(index: Int) {
+    private fun seekToCue(index: Int) {
         val cue = _state.value.displayedCues.getOrNull(index) ?: return
         seekTo(cue.startMs)
     }
@@ -1615,6 +1699,11 @@ internal class VideoViewModel(
         val item = failureItem(id, url)
         if (token != sessionGeneration) return
         val cached = item?.let { cachedDocument(it) }
+        val knownHeights = item?.let { stored ->
+            try { graph.store.rememberVideoQualityHeights(stored.id, emptyList()) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { null }
+        }
         if (token != sessionGeneration) return
         val sameItem = _state.value.item?.id == item?.id
         val document = cached ?: if (sameItem) _state.value.captions else null
@@ -1622,6 +1711,8 @@ internal class VideoViewModel(
             it.copy(
                 phase = VideoPhase.Failed(kind),
                 item = item ?: it.item,
+                knownQualityHeights = knownHeights ?: it.knownQualityHeights,
+                refreshingQualities = false,
                 tracks = emptyList(),
                 selectedTrackId = document?.trackId ?: it.selectedTrackId,
                 captions = document,
@@ -1720,6 +1811,7 @@ internal class VideoViewModel(
         stopTicker()
         narrationStop?.cancel()
         sessionJob?.cancel()
+        qualityRefresh?.cancel()
         metadataJob?.cancel()
         captionJob?.cancel()
         cacheBytesJob?.cancel()
