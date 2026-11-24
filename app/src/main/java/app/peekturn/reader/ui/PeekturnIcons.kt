@@ -231,6 +231,13 @@ internal object PeekturnIcons {
         )
     }
 
+    val Replay: ImageVector by lazy {
+        outline("RotateCcw",
+            "M 3,12 a 9,9 0 1,1 9,9 a 9.75,9.75 0 0,1 -6.74,-2.74",
+            "M 3,3 v 9 h 9"
+        )
+    }
+
     val Play: ImageVector by lazy {
         outline("Play",
             "M 5,5 a 2,2 0 0,1 3.008,-1.728 l 11.997,6.998 a 2,2 0 0,1 0.003,3.458 l -12,7 A 2,2 0 0,1 5,19 z"

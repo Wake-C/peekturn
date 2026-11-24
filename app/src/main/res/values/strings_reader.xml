@@ -12,7 +12,6 @@
     <string name="reader_lookup_retry">Retry</string>
     <string name="reader_lookup_dismiss_failure">Dismiss</string>
     <string name="reader_lookup_adjust">Adjust</string>
-    <string name="reader_lookup_close">Close</string>
     <string name="reader_lookup_close_description">Close explanation</string>
     <string name="reader_lookup_pronounce">Pronounce</string>
     <string name="reader_lookup_stop_pronouncing">Stop pronunciation</string>

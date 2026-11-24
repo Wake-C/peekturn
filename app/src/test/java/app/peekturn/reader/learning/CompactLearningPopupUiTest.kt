@@ -84,14 +84,6 @@ class CompactLearningPopupUiTest {
         }
     }
 
-    private fun assertLabelDoesNotClip(text: String) {
-        val layouts = mutableListOf<TextLayoutResult>()
-        val node = compose.onNodeWithText(text)
-        node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-        assertTrue("Missing layout for $text", layouts.isNotEmpty())
-        assertTextFits(text, layouts.single(), node)
-    }
-
     private fun layoutDiagnostics(layout: TextLayoutResult, node: SemanticsNodeInteraction): String = buildString {
         append("size=${layout.size}, constraints=${layout.layoutInput.constraints}, ")
         append("fontSize=${layout.layoutInput.style.fontSize}, lineHeight=${layout.layoutInput.style.lineHeight}, ")
@@ -172,7 +164,6 @@ class CompactLearningPopupUiTest {
         val session = LearningSession(source = ExplanationSource { _, _, _ -> flowOf(ExplanationEvent.Complete(answer)) })
         val speech = PronunciationPlayer(context)
         var replay = 0
-        var resume = 0
         var close = 0
         val visible = mutableStateOf(true)
         val readable = mutableListOf<Boolean>()
@@ -183,7 +174,7 @@ class CompactLearningPopupUiTest {
                         lookup, AppSettings(autoPronounce = false), session, OfflineDictionary(context), speech,
                         language = ExplanationLanguage.English,
                         onClose = { close++; visible.value = false }, onCancel = { visible.value = false },
-                        onReplay = { replay++ }, onResume = { resume++ },
+                        onReplay = { replay++ },
                         placement = LearningPopupPlacement.Center,
                         onReadableContent = { readable += it }
                     )
@@ -209,13 +200,10 @@ class CompactLearningPopupUiTest {
             compose.onNodeWithText(answer.examples.last().text).performScrollTo().assertIsDisplayed()
             compose.onNodeWithText(context.getString(R.string.reader_lookup_antonyms, answer.antonyms))
                 .performScrollTo().assertIsDisplayed()
-            compose.onNodeWithText(label(R.string.learning_popup_replay_sentence)).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithContentDescription(label(R.string.learning_popup_replay_sentence)).assertIsDisplayed()
                 .performClick()
-            compose.onNodeWithText(label(R.string.learning_popup_continue_watching)).performScrollTo().assertIsDisplayed()
-            assertLabelDoesNotClip(label(R.string.learning_popup_continue_watching))
-            capturePopupIfRequested("compact-popup-playback-actions")
-            compose.onNodeWithText(label(R.string.learning_popup_continue_watching)).performClick()
-            compose.runOnIdle { assertEquals(1, replay); assertEquals(1, resume); assertTrue(readable.last()) }
+            compose.onNodeWithText("Continue watching").assertDoesNotExist()
+            compose.runOnIdle { assertEquals(1, replay); assertTrue(readable.last()) }
 
             // Both tabs remain reachable after scrolling to the bottom of a long answer.
             compose.onNodeWithText(label(R.string.reader_lookup_tab_dictionary)).performScrollTo().performClick()
@@ -257,7 +245,7 @@ class CompactLearningPopupUiTest {
         }
     }
 
-    @Test fun errorAndRetryRemainReachableWithoutRemovingThePlaybackFooter() {
+    @Test fun errorAndRetryKeepReplayReachable() {
         var requests = 0
         val session = LearningSession(source = ExplanationSource { _, _, _ -> flow {
             requests++
@@ -270,7 +258,7 @@ class CompactLearningPopupUiTest {
                 ShortLandscape {
                     LearningPopup(lookup, AppSettings(), session, OfflineDictionary(context), speech,
                         language = ExplanationLanguage.English, onClose = {}, onCancel = {}, onReplay = {},
-                        onResume = {}, placement = LearningPopupPlacement.Center)
+                        placement = LearningPopupPlacement.Center)
                 }
             }
             compose.waitUntil(5_000) { session.state.value.failure != null }
@@ -278,9 +266,29 @@ class CompactLearningPopupUiTest {
             compose.onNodeWithText(label(R.string.reader_lookup_retry)).performScrollTo().assertIsDisplayed().performClick()
             compose.waitUntil(5_000) { session.state.value.complete }
             compose.onNodeWithText(answer.meaning).performScrollTo().assertIsDisplayed()
-            compose.onNodeWithText(label(R.string.learning_popup_replay_sentence)).performScrollTo().assertIsDisplayed()
-            compose.onNodeWithText(label(R.string.learning_popup_continue_watching)).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithContentDescription(label(R.string.learning_popup_replay_sentence)).assertIsDisplayed()
             compose.runOnIdle { assertEquals(2, requests) }
+        } finally {
+            compose.runOnIdle { session.close(); speech.shutdown() }
+        }
+    }
+
+    @Test fun bookSelectionKeepsAdjustAndOneDismissAction() {
+        val session = LearningSession(source = ExplanationSource { _, _, _ -> flowOf(ExplanationEvent.Complete(answer)) })
+        val speech = PronunciationPlayer(context)
+        var adjusted = 0
+        try {
+            compose.setContent {
+                ShortLandscape {
+                    LearningPopup(lookup, AppSettings(), session, OfflineDictionary(context), speech,
+                        onClose = {}, onCancel = {}, onAdjust = { adjusted++ })
+                }
+            }
+            compose.onNodeWithText(label(R.string.reader_lookup_adjust)).assertIsDisplayed().performClick()
+            compose.onNodeWithContentDescription(label(R.string.reader_lookup_close_description)).assertIsDisplayed()
+            compose.onNodeWithContentDescription(label(R.string.learning_popup_replay_sentence)).assertDoesNotExist()
+            compose.onNodeWithText("Close").assertDoesNotExist()
+            compose.runOnIdle { assertEquals(1, adjusted) }
         } finally {
             compose.runOnIdle { session.close(); speech.shutdown() }
         }
@@ -300,7 +308,10 @@ class CompactLearningPopupUiTest {
                 }
             }
             compose.waitUntil(5_000) { session.state.value.complete }
-            compose.onNodeWithText(label(R.string.learning_popup_replay_sentence)).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithContentDescription(label(R.string.learning_popup_replay_sentence)).assertIsDisplayed()
+            compose.onNodeWithText("Close").assertDoesNotExist()
+            compose.onNodeWithText("Continue watching").assertDoesNotExist()
+            compose.onNodeWithText(answer.examples.last().text).performScrollTo()
             val close = compose.onNodeWithContentDescription(label(R.string.reader_lookup_close_description))
             val pronounce = compose.onAllNodesWithContentDescription(label(R.string.reader_lookup_pronounce))[0]
             val density = context.resources.displayMetrics.density

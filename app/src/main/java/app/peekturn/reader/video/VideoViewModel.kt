@@ -19,6 +19,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.PlayerMessage
 import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
@@ -66,8 +67,11 @@ internal data class VideoLookupRequest(
     val context: LookupContext,
     val cueId: Int,
     val selection: CaptionSelection,
-    /** The displayed cue's real start, used only by the explicit replay action. */
-    val startMs: Long
+    /** Source audio for the selected sentence can be far from the viewer's place. */
+    val startMs: Long,
+    val endMs: Long,
+    val returnPositionMs: Long,
+    val resumeOnDismiss: Boolean
 )
 
 internal data class VideoPlaybackState(
@@ -101,7 +105,6 @@ internal data class VideoPlaybackState(
     val cacheAllBytes: Long = 0L,
     val cacheMergedBytes: Long = 0L,
     val cacheNotice: VideoCacheNotice? = null,
-    val lookupPausedPlayback: Boolean = false,
     val toolsVisible: Boolean = false,
     val isPlaying: Boolean = false,
     val playRequested: Boolean = false,
@@ -209,7 +212,8 @@ internal class VideoViewModel(
     private var lastSavedPosition = -1L
     private val progress = VideoProgressCheckpoint()
     private var positionWrite: Job? = null
-    private var lastLandscape: Boolean? = null
+    private var lastFullscreen: Boolean? = null
+    private var lookupReplayEnd: PlayerMessage? = null
     private var track: VideoTimeTracker? = null
     private var trackerItemId: Long? = null
 
@@ -259,8 +263,10 @@ internal class VideoViewModel(
                         ended = if (playbackStateEnded()) true else it.ended
                     )
                 }
-                if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS) {
-                    // Focus loss is not a user pause: it still may never resume an old lookup.
+                if (!playWhenReady && (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS ||
+                    reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY ||
+                    reason == Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE)) {
+                    _state.update { it.copy(lookup = it.lookup?.copy(resumeOnDismiss = false)) }
                     persistPosition()
                 }
             }
@@ -278,6 +284,11 @@ internal class VideoViewModel(
                     }
                     Player.STATE_BUFFERING -> graph.developerLog.recordEvent("video", "media-buffering-at-ms:${player.currentPosition.coerceAtLeast(0L)}")
                     Player.STATE_ENDED -> {
+                        // A final caption may extend past the actual media duration.
+                        if (lookupReplayEnd != null) {
+                            cancelLookupReplay()
+                            player.pause()
+                        }
                         _state.update { it.copy(ended = true) }
                         persistPosition()
                     }
@@ -373,7 +384,7 @@ internal class VideoViewModel(
         _state.value = VideoPlaybackState(
             phase = VideoPhase.Loading,
             mergeEnabled = mergeEnabled,
-            toolsVisible = lastLandscape == true || graph.store.settings.value.videoAudioOnly,
+            toolsVisible = lastFullscreen == true || graph.store.settings.value.videoAudioOnly,
             preferredHeight = targetHeight,
             speed = speed
         )
@@ -943,7 +954,7 @@ internal class VideoViewModel(
         val duration = _state.value.durationMs
         val target = positionMs.coerceAtLeast(0L).let { if (duration > 0L) it.coerceAtMost(duration) else it }
         graph.developerLog.recordEvent("video", "seek-ms:${player.currentPosition.coerceAtLeast(0L)}:$target:buffered=${player.bufferedPosition.coerceAtLeast(0L)}")
-        progress.seek()
+        if (_state.value.lookup == null) progress.seek()
         player.seekTo(target)
         _state.update { it.copy(positionMs = target, ended = false) }
     }
@@ -1487,7 +1498,7 @@ internal class VideoViewModel(
 
     /**
      * A lookup pauses the picture before any request leaves the device and records the exact cue
-     * and word. Closing it never resumes: only a new, explicit play action can.
+     * and word. Keep the original playback intent when the selection changes inside a lookup.
      */
     fun openLookup(cueId: Int, selection: CaptionSelection) {
         val current = _state.value
@@ -1498,8 +1509,9 @@ internal class VideoViewModel(
         if (index < 0) return
         val cue = cues[index]
         if (selection.start < 0 || selection.end > cue.text.length || selection.start >= selection.end) return
-        val pausedByLookup = current.lookupPausedPlayback ||
+        val resumeOnDismiss = current.lookup?.resumeOnDismiss ?:
             (player.playWhenReady && player.playbackState != Player.STATE_ENDED)
+        cancelLookupReplay()
         if (player.playWhenReady) player.pause()
         val lookup = VideoLookupRequest(
             context = videoLookupContext(
@@ -1514,13 +1526,16 @@ internal class VideoViewModel(
             ),
             cueId = cueId,
             selection = selection,
-            startMs = cue.startMs
+            startMs = cue.startMs,
+            endMs = cue.endMs,
+            returnPositionMs = current.lookup?.returnPositionMs ?: lastKnownPosition(),
+            resumeOnDismiss = resumeOnDismiss
         )
         // Explanation reading time begins only when the popup reports readable content, never
         // while the model request is still pending. A replacement selection also stops the old
         // answer's readable window immediately.
         track?.explaining(false)
-        _state.update { it.copy(lookup = lookup, lookupPausedPlayback = pausedByLookup) }
+        _state.update { it.copy(lookup = lookup) }
     }
 
     /** Called by the popup for its current, non-stale lookup only. */
@@ -1535,11 +1550,24 @@ internal class VideoViewModel(
         if (readable) track?.interact()
     }
 
-    fun closeLookup() {
+    /** The popup's close button, Back and outside tap all return to what the viewer was doing. */
+    fun dismissLookup() {
         val lookup = _state.value.lookup ?: return
-        // X, Back and an outside tap never leave the player unexpectedly running: a replay heard
-        // while the answer was open is paused here and needs the ordinary play action to continue.
+        closeLookup()
+        if (lookup.resumeOnDismiss && foreground && _state.value.phase is VideoPhase.Ready && !playbackStateEnded()) {
+            player.play()
+        }
+    }
+
+    /** Internal teardown restores the position silently, including when the Activity goes away. */
+    private fun closeLookup() {
+        val lookup = _state.value.lookup ?: return
+        cancelLookupReplay()
         if (player.playWhenReady) player.pause()
+        if (_state.value.phase is VideoPhase.Ready && player.playbackState != Player.STATE_IDLE &&
+            player.currentPosition != lookup.returnPositionMs) {
+            seekTo(lookup.returnPositionMs)
+        }
         learningSession.dismiss(lookup.context)
         graph.speech.stop()
         val deferred = pendingMergedCues
@@ -1547,7 +1575,6 @@ internal class VideoViewModel(
         _state.update {
             it.copy(
                 lookup = null,
-                lookupPausedPlayback = false,
                 mergedCues = if (deferred != null && it.mergeEnabled) deferred else it.mergedCues
             )
         }
@@ -1555,9 +1582,8 @@ internal class VideoViewModel(
     }
 
     /**
-     * Explicit footer action: restart the sentence the lookup came from. The explanation stays
-     * visible so the sentence can be read while it is heard; the explicit resume action is gone
-     * because this lookup no longer owns a pause.
+     * Preview the selected sentence with the explanation still visible. Its playback clock and
+     * play intent are temporary; closing the card restores the original viewing position.
      */
     fun replayLookupCue() {
         val lookup = _state.value.lookup ?: return
@@ -1565,20 +1591,22 @@ internal class VideoViewModel(
             closeLookup()
             return
         }
+        cancelLookupReplay()
+        player.pause()
         seekTo(lookup.startMs)
+        // Media time follows buffering and playback speed; delivery on the app looper can pause
+        // this player directly. Cancelling a message also cancels a delivery already queued there.
+        lookupReplayEnd = player.createMessage { _, _ ->
+            lookupReplayEnd = null
+            player.pause()
+        }.setLooper(player.applicationLooper).setPosition(lookup.endMs).send()
         player.play()
-        _state.update { it.copy(lookupPausedPlayback = false) }
         track?.interact()
     }
 
-    /** Explicit footer action: resume only the pause this lookup caused, at the same position. */
-    fun resumeLookupPlayback() {
-        val pausedByLookup = _state.value.lookupPausedPlayback
-        if (!pausedByLookup || _state.value.lookup == null) return
-        closeLookup()
-        if (_state.value.phase is VideoPhase.Ready && player.playbackState != Player.STATE_ENDED) {
-            player.play()
-        }
+    private fun cancelLookupReplay() {
+        lookupReplayEnd?.cancel()
+        lookupReplayEnd = null
     }
 
     fun recordDictionaryFailure(cause: Throwable) {
@@ -1593,11 +1621,10 @@ internal class VideoViewModel(
         _state.update { it.copy(toolsVisible = false) }
     }
 
-    /** Landscape enters with its controls visible; portrait starts with the A hidden transport. */
-    fun onOrientation(landscape: Boolean) {
-        if (lastLandscape == landscape) return
-        lastLandscape = landscape
-        _state.update { if (it.readMode) it else it.copy(toolsVisible = landscape) }
+    fun onFullscreenChanged(fullscreen: Boolean) {
+        if (lastFullscreen == fullscreen) return
+        lastFullscreen = fullscreen
+        _state.update { if (it.readMode) it else it.copy(toolsVisible = fullscreen) }
     }
 
     fun interact() {
@@ -1661,6 +1688,7 @@ internal class VideoViewModel(
     private fun observeProgress(): Long? {
         val current = _state.value
         val item = current.item ?: return null
+        if (current.lookup != null) return null
         return progress.observe(item.id, player.currentPosition, SystemClock.elapsedRealtime(),
             current.phase is VideoPhase.Ready && player.playbackState == Player.STATE_READY && player.isPlaying)
     }
@@ -1731,8 +1759,7 @@ internal class VideoViewModel(
                 durationMs = if (sameItem) it.durationMs else item?.durationMs ?: it.durationMs,
                 isPlaying = false,
                 playRequested = false,
-                ended = false,
-                lookupPausedPlayback = false
+                ended = false
             )
         }
         if (item != null) refreshCacheBytes()
@@ -1805,6 +1832,7 @@ internal class VideoViewModel(
     }
 
     override fun onCleared() {
+        cancelLookupReplay()
         sessionGeneration++ // Invalidate any app-scoped preference completion before releasing audio.
         persistPosition()
         progress.begin(null)

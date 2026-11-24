@@ -4,6 +4,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.content.res.Configuration
+import android.view.accessibility.AccessibilityNodeInfo
 import android.os.IBinder
 import android.os.SystemClock
 import androidx.lifecycle.Lifecycle
@@ -42,13 +44,18 @@ class VideoPlaybackLiveTest {
         return value as T
     }
 
-    private fun hasDescription(label: String): Boolean {
-        fun contains(node: android.view.accessibility.AccessibilityNodeInfo): Boolean {
-            if (node.contentDescription?.toString() == label) return true
-            return (0 until node.childCount).any { index -> node.getChild(index)?.let(::contains) == true }
+    private fun control(label: String): AccessibilityNodeInfo? {
+        fun find(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            if (node.contentDescription?.toString() == label) return node
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let(::find)?.let { return it }
+            }
+            return null
         }
-        return instrumentation.uiAutomation.rootInActiveWindow?.let(::contains) == true
+        return instrumentation.uiAutomation.rootInActiveWindow?.let(::find)
     }
+
+    private fun hasDescription(label: String) = control(label) != null
 
     private fun capture(name: String, expectedPaper: Int? = null) {
         if (InstrumentationRegistry.getArguments().getString("captureUi") != "true") return
@@ -127,9 +134,69 @@ class VideoPlaybackLiveTest {
                 onMain { vm.player.isPlaying && vm.player.currentPosition > watchStart + 1_000 }
             }
             awaitStage("english-captions", needsCaptions = true) { it.captionStatus == VideoCaptionStatus.Ready && it.displayedCues.isNotEmpty() }
+            // Look up a cue away from the playback clock so a preview and the return position
+            // are observably different. Dismissing must restore both the clock and the play intent.
+            fun openTestLookup() {
+                val cue = vm.state.value.displayedCues.first { cue ->
+                    cue.text.any(Char::isLetter) && kotlin.math.abs(cue.startMs - vm.player.currentPosition) > 1_000
+                }
+                val word = requireNotNull(wordSelectionAt(cue.text, cue.text.indexOfFirst(Char::isLetter)))
+                vm.openLookup(cue.id, word)
+                assertNotNull(vm.state.value.lookup)
+                assertFalse(vm.player.playWhenReady)
+            }
+            onMain {
+                openTestLookup()
+                val watching = vm.player.currentPosition
+                vm.replayLookupCue()
+                assertTrue(vm.player.playWhenReady)
+                assertTrue(kotlin.math.abs(watching - vm.player.currentPosition) > 500)
+                vm.dismissLookup()
+                assertNull(vm.state.value.lookup)
+                assertEquals(watching.toDouble(), vm.player.currentPosition.toDouble(), 250.0)
+                assertTrue(vm.player.playWhenReady)
+            }
+            val resting = onMain {
+                vm.player.pause()
+                openTestLookup()
+                val at = vm.player.currentPosition
+                vm.replayLookupCue()
+                vm.replayLookupCue()
+                val lookup = requireNotNull(vm.state.value.lookup)
+                // Use the final part of the real cue so long source subtitles need no long test wait.
+                vm.player.seekTo((lookup.endMs - 500).coerceAtLeast(lookup.startMs))
+                at
+            }
+            awaitStage("lookup-replay-stopped-at-cue-end", 30_000) { state ->
+                val end = state.lookup?.endMs ?: return@awaitStage false
+                onMain { !vm.player.playWhenReady && kotlin.math.abs(vm.player.currentPosition - end) <= 700 }
+            }
+            onMain {
+                vm.dismissLookup()
+                assertEquals(resting.toDouble(), vm.player.currentPosition.toDouble(), 250.0)
+                assertFalse(vm.player.playWhenReady)
+            }
             assertTrue("Source has no independent audio for Read", onMain { vm.state.value.audioAvailable })
             onMain { vm.player.pause() }
             capture("live-video-watch")
+            if (context.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) {
+                val beforeFullscreen = onMain { vm.player.currentPosition }
+                val enterLabel = context.getString(R.string.video_ui_fullscreen)
+                val exitLabel = context.getString(R.string.video_ui_exit_fullscreen)
+                val readLabel = context.getString(R.string.video_ui_read)
+                awaitStage("inline-ready-for-fullscreen", 5_000) { hasDescription(enterLabel) }
+                val enter = generateSequence(control(enterLabel)) { it.parent }.first { it.isClickable }
+                assertTrue(enter.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+                awaitStage("portrait-fullscreen", 5_000) { hasDescription(exitLabel) && !hasDescription(readLabel) }
+                scenario.onActivity { activity ->
+                    assertEquals(Configuration.ORIENTATION_PORTRAIT, activity.resources.configuration.orientation)
+                    assertFalse(vm.player.playWhenReady)
+                    assertEquals(beforeFullscreen, vm.player.currentPosition)
+                    activity.onBackPressedDispatcher.onBackPressed()
+                }
+                awaitStage("portrait-fullscreen-return", 5_000) { hasDescription(enterLabel) && hasDescription(readLabel) }
+                onMain { assertFalse(vm.player.playWhenReady); assertEquals(beforeFullscreen, vm.player.currentPosition) }
+            }
             val paused = onMain { vm.player.currentPosition }
             onMain { vm.setReadMode(true) }
             awaitStage("read-ready") { it.readMode && !it.modeSaving && onMain { vm.player.playbackState == Player.STATE_READY } }
@@ -191,8 +258,16 @@ class VideoPlaybackLiveTest {
                 visible
             }
             // A warm Activity stop/start must not resolve the same ready session again.
-            val player = onMain { vm.player }
+            val player = onMain {
+                vm.player.play()
+                openTestLookup()
+                vm.player
+            }
             scenario.moveToState(Lifecycle.State.CREATED)
+            onMain {
+                assertNull(vm.state.value.lookup)
+                assertFalse("Background dismissal must stay silent", vm.player.playWhenReady)
+            }
             scenario.moveToState(Lifecycle.State.RESUMED)
             onMain {
                 assertSame(player, vm.player)

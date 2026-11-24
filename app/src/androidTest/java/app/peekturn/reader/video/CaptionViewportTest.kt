@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
@@ -23,11 +24,15 @@ class CaptionViewportTest {
         var lookup by mutableStateOf(false)
         var current by mutableIntStateOf(1)
         var locate by mutableIntStateOf(0)
+        var showTranscript by mutableStateOf(true)
         lateinit var list: LazyListState
         compose.setContent {
-            list = rememberCaptionListState(current, playing, lookup, locate)
-            LazyColumn(Modifier.size(240.dp, 220.dp).testTag("captions"), state = list) {
-                items(120) { Text("Sentence $it", Modifier.height(48.dp)) }
+            val holder = rememberSaveableStateHolder()
+            if (showTranscript) holder.SaveableStateProvider("transcript") {
+                list = rememberCaptionListState(current, playing, lookup, locate)
+                LazyColumn(Modifier.size(240.dp, 220.dp).testTag("captions"), state = list) {
+                    items(120) { Text("Sentence $it", Modifier.height(48.dp)) }
+                }
             }
         }
         fun browseAhead() {
@@ -38,6 +43,11 @@ class CaptionViewportTest {
             assertTrue(list.layoutInfo.visibleItemsInfo.any { it.index == current })
         }
         browseAhead()
+        val browsed = compose.runOnIdle { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }
+        compose.runOnIdle { showTranscript = false }
+        compose.onNodeWithTag("captions").assertDoesNotExist()
+        compose.runOnIdle { showTranscript = true }
+        compose.runOnIdle { assertEquals(browsed, list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset) }
         compose.runOnIdle { current++; playing = false }
         compose.runOnIdle { assertTrue(list.firstVisibleItemIndex > current); locate++ }
         assertCurrentVisible()

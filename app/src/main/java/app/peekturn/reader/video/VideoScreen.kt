@@ -28,6 +28,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -90,6 +92,8 @@ internal val ReadingToolsHeight = 56.dp
 @Composable
 internal fun VideoScreen(
     vm: VideoViewModel,
+    state: VideoPlaybackState,
+    fullscreen: Boolean,
     settings: AppSettings,
     speech: PronunciationPlayer,
     onBack: () -> Unit,
@@ -99,10 +103,10 @@ internal fun VideoScreen(
     episodes: List<VideoItem> = emptyList(),
     onEpisode: (Long) -> Unit = {}
 ) {
-    val state by vm.state.collectAsStateWithLifecycle()
     val downloads by vm.downloads.collectAsStateWithLifecycle()
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    LaunchedEffect(landscape) { vm.onOrientation(landscape) }
+    LaunchedEffect(fullscreen) { vm.onFullscreenChanged(fullscreen) }
+    val inlineState = key(state.item?.id) { rememberSaveableStateHolder() }
 
     var choosingEpisode by rememberSaveable(playlist?.id) { mutableStateOf(false) }
     val onEpisodes: (() -> Unit)? = if (episodes.isEmpty()) null else { { choosingEpisode = true } }
@@ -147,34 +151,35 @@ internal fun VideoScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize().background(if (landscape && !state.audioOnly) Color.Black else MaterialTheme.colorScheme.background)) {
-        if (landscape && !state.audioOnly) {
-            LandscapePlayer(
+    Box(Modifier.fillMaxSize().background(if (fullscreen) Color.Black else MaterialTheme.colorScheme.background)) {
+        if (fullscreen) {
+            FullscreenPlayer(
                 state = state,
                 player = vm.player,
                 vm = vm,
-                onBack = onBack,
                 onSettings = { settingsOpen = true },
                 onEpisodes = onEpisodes,
                 onExitFullscreen = onExitFullscreen
             )
         } else {
-            PortraitPlayer(
-                state = state,
-                reading = settings.reading,
-                player = vm.player,
-                vm = vm,
-                onBack = onBack,
-                onSettings = { settingsOpen = true },
-                onEpisodes = onEpisodes,
-                onFullscreen = if (landscape) onExitFullscreen else onEnterFullscreen
-            )
+            inlineState.SaveableStateProvider("transcript") {
+                PortraitPlayer(
+                    state = state,
+                    reading = settings.reading,
+                    player = vm.player,
+                    vm = vm,
+                    onBack = onBack,
+                    onSettings = { settingsOpen = true },
+                    onEpisodes = onEpisodes,
+                    onFullscreen = onEnterFullscreen.takeUnless { state.audioOnly }
+                )
+            }
         }
         SnackbarHost(
             snackbar,
             Modifier.align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = if (landscape && !state.audioOnly) 8.dp else PortraitToolsHeight + CaptionControlsGap)
+                .padding(bottom = if (fullscreen) 8.dp else PortraitToolsHeight + CaptionControlsGap)
         )
     }
 
@@ -223,11 +228,10 @@ internal fun VideoScreen(
                 session = vm.learningSession,
                 dictionary = vm.dictionary,
                 speech = speech,
-                onClose = { vm.closeLookup() },
-                onCancel = { vm.closeLookup() },
+                onClose = vm::dismissLookup,
+                onCancel = vm::dismissLookup,
                 onAdjust = null,
                 onReplay = vm::replayLookupCue,
-                onResume = if (state.lookupPausedPlayback) vm::resumeLookupPlayback else null,
                 onDictionaryFailure = vm::recordDictionaryFailure,
                 placement = if (landscape) LearningPopupPlacement.Center else LearningPopupPlacement.Bottom,
                 onReadableContent = { readable -> vm.onLookupReadable(lookup.context, readable) }
@@ -245,7 +249,7 @@ private fun PortraitPlayer(
     onBack: () -> Unit,
     onSettings: () -> Unit,
     onEpisodes: (() -> Unit)?,
-    onFullscreen: () -> Unit
+    onFullscreen: (() -> Unit)?
 ) {
     var locateRequest by rememberSaveable(state.item?.id) { mutableIntStateOf(0) }
     fun locateCaption() { locateRequest++ }
@@ -328,11 +332,10 @@ private fun PortraitPlayer(
 }
 
 @Composable
-private fun LandscapePlayer(
+private fun FullscreenPlayer(
     state: VideoPlaybackState,
     player: Player,
     vm: VideoViewModel,
-    onBack: () -> Unit,
     onSettings: () -> Unit,
     onEpisodes: (() -> Unit)?,
     onExitFullscreen: () -> Unit
@@ -348,12 +351,11 @@ private fun LandscapePlayer(
             VideoPhase.Ready -> {
                 PlayerSurface(player, Modifier.matchParentSize())
                 PictureTapLayer(vm, Modifier.matchParentSize())
-                LandscapeCaptions(state, vm::openLookup)
+                FullscreenCaptions(state, vm::openLookup)
                 if (state.toolsVisible) {
-                    LandscapeChrome(
+                    FullscreenChrome(
                         state = state,
                         vm = vm,
-                        onBack = onBack,
                         onSettings = onSettings,
                         onEpisodes = onEpisodes,
                         onExitFullscreen = onExitFullscreen
@@ -362,7 +364,7 @@ private fun LandscapePlayer(
             }
         }
         if (state.phase !is VideoPhase.Ready) {
-            VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true, onEpisodes = onEpisodes,
+            VideoTopBar(state.item?.title.orEmpty(), onExitFullscreen, onSettings, true, onEpisodes = onEpisodes,
                 hasItem = state.item != null, landscape = true,
                 trailingIcon = PeekturnIcons.ExitFullscreen,
                 trailingDescription = stringResource(R.string.video_ui_exit_fullscreen),
@@ -381,7 +383,7 @@ internal fun VideoTopBar(
     landscape: Boolean,
     trailingIcon: ImageVector,
     trailingDescription: String,
-    onTrailing: () -> Unit,
+    onTrailing: (() -> Unit)?,
     trailingEnabled: Boolean = true,
     trailingBusy: Boolean = false,
     applySystemInsets: Boolean = true,
@@ -421,7 +423,7 @@ internal fun VideoTopBar(
                     contentDescription = stringResource(R.string.video_ui_settings),
                     tint = if (hasItem) foreground else foreground.copy(alpha = 0.38f))
             }
-            IconButton(onClick = onTrailing, enabled = trailingEnabled, modifier = Modifier.size(48.dp)) {
+            if (onTrailing != null) IconButton(onClick = onTrailing, enabled = trailingEnabled, modifier = Modifier.size(48.dp)) {
                 if (trailingBusy) CircularProgressIndicator(
                     Modifier.size(20.dp).semantics { contentDescription = trailingDescription }, strokeWidth = 2.dp)
                 else Icon(trailingIcon, contentDescription = trailingDescription, tint = foreground)
@@ -710,10 +712,9 @@ internal fun VideoCompactTransport(
 }
 
 @Composable
-private fun LandscapeChrome(
+private fun FullscreenChrome(
     state: VideoPlaybackState,
     vm: VideoViewModel,
-    onBack: () -> Unit,
     onSettings: () -> Unit,
     onEpisodes: (() -> Unit)?,
     onExitFullscreen: () -> Unit
@@ -724,7 +725,7 @@ private fun LandscapeChrome(
         Box(Modifier.fillMaxWidth().align(Alignment.TopCenter)) {
             VideoTopBar(
                 title = state.item?.title.orEmpty(),
-                onBack = onBack,
+                onBack = onExitFullscreen,
                 onSettings = onSettings,
                 onEpisodes = onEpisodes,
                 controlsVisible = true,
@@ -941,8 +942,12 @@ internal fun rememberCaptionListState(currentIndex: Int?, playRequested: Boolean
     var browsing by rememberSaveable(locateRequest) { mutableStateOf(false) }
     val dragging by list.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(dragging) { if (dragging) browsing = true }
-    LaunchedEffect(playRequested, lookupOpen) {
-        if (playRequested && !lookupOpen) browsing = false
+    // Returning from fullscreen restores a browsed transcript unless playback actually resumed.
+    val followingPlayback = playRequested && !lookupOpen
+    var previouslyPlaying by rememberSaveable { mutableStateOf(followingPlayback) }
+    LaunchedEffect(followingPlayback) {
+        if (followingPlayback && !previouslyPlaying) browsing = false
+        previouslyPlaying = followingPlayback
     }
     val height by remember { derivedStateOf { list.layoutInfo.viewportSize.height } }
     val count by remember { derivedStateOf { list.layoutInfo.totalItemsCount } }
@@ -1120,26 +1125,33 @@ private fun CaptionFailure(text: String, onRetry: () -> Unit, modifier: Modifier
 }
 
 @Composable
-internal fun LandscapeCaptions(state: VideoPlaybackState, onLookup: (Int, CaptionSelection) -> Unit) {
+internal fun FullscreenCaptions(state: VideoPlaybackState, onLookup: (Int, CaptionSelection) -> Unit) {
     val cues = state.displayedCues
     val index = activeCueIndex(cues, state.positionMs) ?: return
     val cue = cues.getOrNull(index) ?: return
     val selection = state.lookup?.takeIf { it.cueId == cue.id }?.selection
     val tapBlocker = remember { MutableInteractionSource() }
-    BoxWithConstraints(
-        Modifier.fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-            .padding(horizontal = 24.dp),
-        contentAlignment = Alignment.BottomCenter
-    ) {
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        val portrait = maxHeight > maxWidth
         val safeBottom = WindowInsets.safeDrawing.asPaddingValues().calculateBottomPadding()
-        val bottom = safeBottom + if (state.toolsVisible) LandscapeFooterHeight + CaptionControlsGap
-            else ((maxHeight - safeBottom) * 0.09f).coerceIn(20.dp, 48.dp)
-        val captionHeight = (maxHeight / 2 - LandscapeTransportSize / 2 -
-            CaptionControlsGap - bottom).coerceAtLeast(1.dp)
+        val footer = safeBottom + LandscapeFooterHeight + CaptionControlsGap
+        // PlayerView fits the picture without cropping. Keep portrait captions on that picture,
+        // even when a wide video leaves a large black band below it.
+        val bottom = if (portrait) {
+            val pictureHeight = minOf(maxHeight, maxWidth / state.aspectRatio)
+            val pictureMargin = (pictureHeight * 0.09f).coerceIn(12.dp, 64.dp)
+            val pictureBottom = (maxHeight - pictureHeight) / 2 + pictureMargin
+            maxOf(pictureBottom, if (state.toolsVisible) footer else safeBottom + 12.dp)
+        } else if (state.toolsVisible) footer
+            else safeBottom + ((maxHeight - safeBottom) * 0.09f).coerceIn(20.dp, 48.dp)
+        val belowControls = maxHeight / 2 - LandscapeTransportSize / 2 - CaptionControlsGap - bottom
+        val captionHeight = if (portrait && !state.toolsVisible) maxHeight * .26f
+            else belowControls.coerceAtLeast(1.dp)
         val compact = maxHeight < 360.dp
         Surface(
             modifier = Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                .padding(horizontal = if (portrait) 16.dp else 24.dp)
                 .widthIn(max = 760.dp)
                 .padding(bottom = bottom)
                 .heightIn(max = captionHeight)
@@ -1151,17 +1163,19 @@ internal fun LandscapeCaptions(state: VideoPlaybackState, onLookup: (Int, Captio
             // Long cues scroll within the space below the central transport.
             key(state.selectedTrackId, cue.id, cue.text) {
                 Row(
-                    Modifier.padding(horizontal = 14.dp, vertical = 2.dp)
+                    Modifier.padding(horizontal = 14.dp, vertical = if (portrait) 5.dp else 2.dp)
                         .verticalScroll(rememberScrollState()),
                     verticalAlignment = Alignment.Top
                 ) {
-                    Text(
-                        formatClock(cue.startMs),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.72f),
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                    Spacer(Modifier.width(10.dp))
+                    if (!portrait) {
+                        Text(
+                            formatClock(cue.startMs),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.72f),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                    }
                     CaptionText(
                         cue = cue,
                         selected = selection,
@@ -1169,7 +1183,8 @@ internal fun LandscapeCaptions(state: VideoPlaybackState, onLookup: (Int, Captio
                         color = Color.White,
                         fontSize = if (compact) 16.sp else 19.sp,
                         lineHeight = if (compact) 19.sp else 26.sp,
-                        modifier = Modifier.weight(1f),
+                        textAlign = if (portrait) TextAlign.Center else TextAlign.Start,
+                        modifier = Modifier.weight(1f, fill = !portrait),
                         onLookup = { onLookup(cue.id, it) },
                         onBlankTap = null
                     )
@@ -1223,6 +1238,7 @@ private fun CaptionText(
     fontSize: TextUnit = 15.sp,
     fontFamily: FontFamily? = null,
     lineHeight: TextUnit = 23.sp,
+    textAlign: TextAlign = TextAlign.Start,
     letterSpacing: TextUnit = TextUnit.Unspecified,
     activeBackground: Color = Color.Unspecified,
     maxLines: Int = Int.MAX_VALUE,
@@ -1316,6 +1332,7 @@ private fun CaptionText(
         fontSize = fontSize,
         fontFamily = fontFamily,
         lineHeight = lineHeight,
+        textAlign = textAlign,
         letterSpacing = letterSpacing,
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,

@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.ComponentName
 import android.content.ServiceConnection
 import android.os.IBinder
-import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
@@ -19,6 +18,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
@@ -48,6 +49,8 @@ import kotlinx.coroutines.launch
 class VideoActivity : AppCompatActivity() {
     private val graph get() = (application as PeekturnApp).graph
     private lateinit var vm: VideoViewModel
+    // Null follows the device: the transcript in portrait, the picture in landscape.
+    private var fullscreenChoice by mutableStateOf<Boolean?>(null)
     private var restoringSession = false
     private var resumed = false
     private var bound = false
@@ -96,9 +99,12 @@ class VideoActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         restoringSession = savedInstanceState != null
+        if (savedInstanceState?.containsKey(EXTRA_FULLSCREEN) == true) {
+            fullscreenChoice = savedInstanceState.getBoolean(EXTRA_FULLSCREEN)
+        }
         AppLanguage.apply(this, graph.store.settings.value.uiLanguage)
         applyAppTheme(graph.store.settings.value.appTheme)
-        applySystemBars(isLandscape())
+        applySystemBars()
         savedInstanceState?.getString(EXTRA_PLAYLIST_ID)?.let { playlist ->
             intent.putExtra(EXTRA_PLAYLIST_ID, playlist)
             intent.putExtra(EXTRA_VIDEO_ID, savedInstanceState.getLong(EXTRA_VIDEO_ID))
@@ -111,8 +117,9 @@ class VideoActivity : AppCompatActivity() {
             override fun handleOnBackPressed() {
                 val state = if (::vm.isInitialized) vm.state.value else null
                 when {
+                    state?.lookup != null -> vm.dismissLookup()
                     state?.readMode == true && state.toolsVisible -> vm.hideTools()
-                    isLandscape() && state?.readMode != true -> exitFullscreen()
+                    isFullscreen() -> exitFullscreen()
                     else -> leaveVideo()
                 }
             }
@@ -120,19 +127,22 @@ class VideoActivity : AppCompatActivity() {
     }
 
     private fun showSession() {
-        val initialReadMode = vm.state.value.readMode
         setContent {
             val settings by graph.store.settings.collectAsStateWithLifecycle()
-            val readMode by remember(vm) { vm.state.map { it.readMode }.distinctUntilChanged() }
-                .collectAsStateWithLifecycle(initialValue = initialReadMode)
+            val state by vm.state.collectAsStateWithLifecycle()
+            val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+            val fullscreen = isFullscreen(landscape, state.audioOnly)
+            LaunchedEffect(state.audioOnly) {
+                if (state.audioOnly) fullscreenChoice = null
+            }
             LaunchedEffect(settings.uiLanguage) { AppLanguage.apply(this@VideoActivity, settings.uiLanguage) }
             DisposableEffect(settings.appTheme) {
                 applyAppTheme(settings.appTheme)
-                applySystemBars(isLandscape())
+                applySystemBars()
                 onDispose { }
             }
-            LaunchedEffect(LocalConfiguration.current.orientation, readMode, settings.reading.immersive) {
-                applySystemBars(isLandscape())
+            LaunchedEffect(fullscreen, state.readMode, settings.reading.immersive) {
+                applySystemBars()
             }
             val playlistId by vm.playlistId.collectAsStateWithLifecycle()
             LaunchedEffect(playlistId) {
@@ -148,6 +158,8 @@ class VideoActivity : AppCompatActivity() {
             PeekturnTheme(theme = settings.appTheme) {
                 VideoScreen(
                     vm = vm,
+                    state = state,
+                    fullscreen = fullscreen,
                     playlist = playlist,
                     episodes = episodes,
                     onEpisode = { id ->
@@ -158,7 +170,7 @@ class VideoActivity : AppCompatActivity() {
                     settings = settings,
                     speech = graph.speech,
                     onBack = ::leaveVideo,
-                    onEnterFullscreen = ::enterFullscreen,
+                    onEnterFullscreen = { fullscreenChoice = true },
                     onExitFullscreen = ::exitFullscreen
                 )
             }
@@ -188,6 +200,7 @@ class VideoActivity : AppCompatActivity() {
         setIntent(intent)
         openedFromShare = videoUrl(intent) != null
         if (::vm.isInitialized && (videoId(intent) != null || videoUrl(intent) != null)) {
+            fullscreenChoice = null
             openIntent(intent)
         }
     }
@@ -199,6 +212,7 @@ class VideoActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        fullscreenChoice?.let { outState.putBoolean(EXTRA_FULLSCREEN, it) }
         intent.getStringExtra(EXTRA_PLAYLIST_ID)?.let {
             outState.putString(EXTRA_PLAYLIST_ID, it)
             outState.putLong(EXTRA_VIDEO_ID, videoId(intent) ?: return)
@@ -223,7 +237,7 @@ class VideoActivity : AppCompatActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) applySystemBars(isLandscape())
+        if (hasFocus) applySystemBars()
     }
 
     /** Popup touches are genuine explanation interactions; the video tracker owns the 120s window. */
@@ -244,13 +258,20 @@ class VideoActivity : AppCompatActivity() {
         }
     }
 
-    private fun enterFullscreen() {
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+    private fun exitFullscreen() {
+        fullscreenChoice = if (isLandscape()) false else null
     }
 
-    private fun exitFullscreen() {
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Once back in portrait, the next natural rotation can enter landscape fullscreen again.
+        if (!isLandscape() && fullscreenChoice == false) fullscreenChoice = null
     }
+
+    private fun isFullscreen(
+        landscape: Boolean = isLandscape(),
+        audioOnly: Boolean = ::vm.isInitialized && vm.state.value.audioOnly
+    ): Boolean = !audioOnly && (fullscreenChoice ?: landscape)
 
     private fun isLandscape(): Boolean =
         resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -266,8 +287,7 @@ class VideoActivity : AppCompatActivity() {
         enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
     }
 
-    /** Portrait keeps the bars over the app surface; landscape is the A full-screen picture. */
-    private fun applySystemBars(landscape: Boolean) {
+    private fun applySystemBars() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -280,7 +300,7 @@ class VideoActivity : AppCompatActivity() {
             else controller.hide(WindowInsetsCompat.Type.statusBars())
             if (bars.navigationVisible) controller.show(WindowInsetsCompat.Type.navigationBars())
             else controller.hide(WindowInsetsCompat.Type.navigationBars())
-        } else if (landscape) {
+        } else if (isFullscreen()) {
             controller.isAppearanceLightStatusBars = false
             controller.isAppearanceLightNavigationBars = false
             controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -293,6 +313,7 @@ class VideoActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val EXTRA_FULLSCREEN = "fullscreen"
         private const val EXTRA_RESUME_ON_LAUNCH = "resume_on_launch"
         private const val EXTRA_PLAYLIST_ID = "playlist_id"
         private const val EXTRA_VIDEO_ID = "video_id"

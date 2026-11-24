@@ -12,7 +12,6 @@
     <string name="reader_lookup_retry">重试</string>
     <string name="reader_lookup_dismiss_failure">忽略</string>
     <string name="reader_lookup_adjust">调整</string>
-    <string name="reader_lookup_close">关闭</string>
     <string name="reader_lookup_close_description">关闭解释</string>
     <string name="reader_lookup_pronounce">朗读</string>
     <string name="reader_lookup_stop_pronouncing">停止朗读</string>

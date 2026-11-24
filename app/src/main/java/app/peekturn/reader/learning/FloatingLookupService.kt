@@ -1,5 +1,6 @@
 package app.peekturn.reader.learning
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -23,6 +24,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
+import android.view.GestureDetector
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -131,13 +133,20 @@ class FloatingLookupService : Service() {
     private var screenHeight = 0
     private var stopping = false
     private val projectionCallback = object : MediaProjection.Callback() {
-        override fun onStop() { stopSelf() }
+        override fun onStop() {
+            if (stopping) return
+            val locked = getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
+            stopLookup(if (locked) "projection-stopped-while-locked" else "projection-stopped")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) { stopSelf(); return START_NOT_STICKY }
+        if (intent?.action == ACTION_STOP) {
+            stopLookup("stop-requested")
+            return START_NOT_STICKY
+        }
         if (intent?.action != ACTION_START || projection != null || stopping || !Settings.canDrawOverlays(this)) {
             if (projection == null) stopSelf()
             return START_NOT_STICKY
@@ -160,11 +169,20 @@ class FloatingLookupService : Service() {
             owner.start()
             showBubble()
             active.value = true
+            graph.developerLog.recordEvent("floating-lookup", "started")
             FloatingLookupTileService.refresh(this)
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+            graph.developerLog.recordFailure("floating-lookup", "start", failure)
             stopSelf()
         }
         return START_NOT_STICKY
+    }
+
+    private fun stopLookup(event: String) {
+        if (stopping) return
+        stopping = true
+        if (active.value) graph.developerLog.recordEvent("floating-lookup", event)
+        stopSelf()
     }
 
     private fun createNotification() {
@@ -217,9 +235,8 @@ class FloatingLookupService : Service() {
 
     private fun params(width: Int, height: Int, x: Int, y: Int, focusable: Boolean = false): WindowManager.LayoutParams =
         WindowManager.LayoutParams(width, height, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            (if (focusable) WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
-                else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or (if (focusable) 0 else
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL),
             PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.TOP or Gravity.START
             this.x = x
@@ -420,13 +437,13 @@ class FloatingLookupService : Service() {
                     Surface(shape = MaterialTheme.shapes.medium,
                         color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = { stopSelf() }) {
+                            TextButton(onClick = { stopLookup("stop-requested") }) {
                                 Text(getString(R.string.floating_lookup_stop),
                                     color = MaterialTheme.colorScheme.error)
                             }
                             IconButton(onClick = ::closeCard) {
                                 Icon(PeekturnIcons.Close,
-                                    contentDescription = getString(R.string.reader_lookup_close_description))
+                                    contentDescription = getString(R.string.shell_close))
                             }
                         }
                     }
@@ -489,6 +506,7 @@ class FloatingLookupService : Service() {
 
     override fun onDestroy() {
         stopping = true
+        if (active.value) graph.developerLog.recordEvent("floating-lookup", "service-destroyed")
         active.value = false
         FloatingLookupTileService.refresh(this)
         dockJob?.cancel()
@@ -514,26 +532,37 @@ class FloatingLookupService : Service() {
 internal fun dockX(x: Int, screenWidth: Int, windowWidth: Int): Int =
     if (x + windowWidth / 2 < screenWidth / 2) -windowWidth / 2 else screenWidth - windowWidth / 2
 
-// Only the visible card takes focus so Back belongs to the lookup, not the source Activity.
-// Tapping outside returns the reading surface and its focus; the icon never takes focus.
-private class CardOverlayView(context: Context, private val dismiss: () -> Unit) : FrameLayout(context) {
-    private var backDispatcher: OnBackInvokedDispatcher? = null
-    private val backCallback = OnBackInvokedCallback { dismiss() }
+// A visible card owns the gesture until Back commits or an outside tap finishes. Dismissing on
+// ACTION_OUTSIDE (the initial touch) would let the same edge swipe navigate the underlying app.
+internal class CardOverlayView(context: Context, private val dismiss: () -> Unit) : FrameLayout(context) {
+    private var unregisterBack: (() -> Unit)? = null
+    private val outsideTap = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent) = isOutside(e)
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            if (!isOutside(e)) return false
+            dismiss()
+            return true
+        }
+    })
+
+    private fun isOutside(event: MotionEvent) =
+        event.x < 0 || event.y < 0 || event.x >= width || event.y >= height
 
     init { isFocusableInTouchMode = true }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         if (Build.VERSION.SDK_INT >= 33) {
-            backDispatcher = findOnBackInvokedDispatcher()?.also {
-                it.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback)
-            }
+            val dispatcher = findOnBackInvokedDispatcher() ?: return
+            val callback = OnBackInvokedCallback { dismiss() }
+            dispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback)
+            unregisterBack = { dispatcher.unregisterOnBackInvokedCallback(callback) }
         }
     }
 
     override fun onDetachedFromWindow() {
-        if (Build.VERSION.SDK_INT >= 33) backDispatcher?.unregisterOnBackInvokedCallback(backCallback)
-        backDispatcher = null
+        unregisterBack?.invoke()
+        unregisterBack = null
         super.onDetachedFromWindow()
     }
 
@@ -545,10 +574,8 @@ private class CardOverlayView(context: Context, private val dismiss: () -> Unit)
         return super.dispatchKeyEvent(event)
     }
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) { dismiss(); return true }
-        return super.onTouchEvent(event)
-    }
+    override fun onTouchEvent(event: MotionEvent): Boolean =
+        outsideTap.onTouchEvent(event) || super.onTouchEvent(event)
 }
 
 // Intercept before the Compose child consumes touch events; ComposeView itself is final.

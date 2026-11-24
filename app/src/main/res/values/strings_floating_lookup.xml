@@ -6,7 +6,7 @@
     <string name="floating_lookup_on">Screen sharing is on · tap to stop</string>
     <string name="floating_lookup_notification">Drag the icon onto a word to explain it</string>
     <string name="floating_lookup_stop">Stop</string>
-    <string name="floating_lookup_consent">Peekturn reads one screen image on each drag. OCR stays on this device. Explain sends the word and nearby text to your selected model; Dictionary works offline. Screen sharing stays on until you stop it. Back closes the card; some apps may pause while it is open. Protected screens may be blank, and some apps hide floating controls.</string>
+    <string name="floating_lookup_consent">Peekturn reads one screen image on each drag. OCR stays on this device. Explain sends the word and nearby text to your selected model; Dictionary works offline. Android can end screen sharing, for example when the device locks. To start again, use the Lookup tile or Peekturn Settings. Back closes the card; some apps may pause while it is open. Protected screens may be blank, and some apps hide floating controls.</string>
     <string name="floating_lookup_open_settings">Open Settings</string>
     <string name="floating_lookup_start">Start</string>
     <string name="floating_lookup_drag">Drag onto a word</string>

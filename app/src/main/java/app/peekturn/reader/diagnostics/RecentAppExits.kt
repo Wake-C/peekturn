@@ -42,5 +42,6 @@ private fun exitReason(reason: Int): String = when (reason) {
     ApplicationExitInfo.REASON_USER_STOPPED -> "user-stopped"
     ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "dependency-died"
     ApplicationExitInfo.REASON_OTHER -> "other"
+    ApplicationExitInfo.REASON_PACKAGE_UPDATED -> "package-updated"
     else -> "reason-$reason"
 }

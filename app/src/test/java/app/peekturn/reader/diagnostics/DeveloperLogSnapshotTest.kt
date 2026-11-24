@@ -1,5 +1,7 @@
 package app.peekturn.reader.diagnostics
 
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
@@ -8,6 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /** The export header describes the environment and speech engines without touching device ids. */
@@ -26,6 +29,15 @@ class DeveloperLogSnapshotTest {
         assertTrue(snapshot.contains("Installed TTS engines: "))
         assertTrue(snapshot.contains("Recent app exits: unsupported before Android 11"))
         assertFalse(snapshot.contains("Android ID"))
+    }
+
+    @Test
+    @Config(sdk = [34])
+    fun packageUpdateIsNamedInTheExport() {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val manager = context.getSystemService(ActivityManager::class.java)
+        shadowOf(manager).addApplicationExitInfo(context.packageName, 42, ApplicationExitInfo.REASON_PACKAGE_UPDATED, 0)
+        assertTrue(developerLogSnapshot(context).contains("reason=package-updated"))
     }
 
     @Test

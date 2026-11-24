@@ -35,6 +35,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.peekturn.reader.R
+import app.peekturn.reader.ui.PeekturnIconButton
 import app.peekturn.reader.ui.PeekturnIcons
 import app.peekturn.reader.data.OfflineDictionary
 import app.peekturn.reader.model.*
@@ -129,11 +130,6 @@ fun LearningPopup(
     onAdjust: (() -> Unit)? = null,
     /** Null hides replay: only a source with a real sentence start can offer it. */
     onReplay: (() -> Unit)? = null,
-    /**
-     * The one explicit action that resumes playback the answer paused. Null keeps the ordinary
-     * close action, so a reader dismissal never changes playback state.
-     */
-    onResume: (() -> Unit)? = null,
     /** The thrown failure behind the visible dictionary error; the caller records it safely. */
     onDictionaryFailure: (Throwable) -> Unit = {},
     placement: LearningPopupPlacement = LearningPopupPlacement.Bottom,
@@ -299,6 +295,13 @@ fun LearningPopup(
                     SpeakButton(context.selection, speech, playback.text, playback.playing) {
                         speech.speakSelection(context.selection, accent, sentenceProvider)
                     }
+                    if (onReplay != null) {
+                        PeekturnIconButton(
+                            icon = PeekturnIcons.Replay,
+                            description = stringResource(R.string.learning_popup_replay_sentence),
+                            onClick = { speech.stop(); onReplay() }
+                        )
+                    }
                     IconButton(onClick = { close() }, modifier = Modifier.size(48.dp)) {
                         Icon(PeekturnIcons.Close, contentDescription = stringResource(R.string.reader_lookup_close_description),
                             modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -383,35 +386,10 @@ fun LearningPopup(
                             LookupSpeechFailure(playback, speech::dismissFailure)
                         }
                     }
-                    if (!externalOverlay || onReplay != null || onAdjust != null || onResume != null) {
-                        HorizontalDivider()
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            val replay = onReplay
-                            val adjust = onAdjust
-                            when {
-                                replay != null -> TextButton(onClick = { speech.stop(); replay() }, modifier = Modifier.weight(1f)) {
-                                    Text(stringResource(R.string.learning_popup_replay_sentence), fontSize = 13.sp,
-                                        maxLines = if (compact) Int.MAX_VALUE else 1)
-                                }
-                                adjust != null -> TextButton(onClick = { speech.stop(); adjust() }, modifier = Modifier.weight(1f)) {
-                                    Text(stringResource(R.string.reader_lookup_adjust), fontSize = 13.sp,
-                                        maxLines = if (compact) Int.MAX_VALUE else 1)
-                                }
-                            }
-                            // X and outside/Back stay cancellations: only this explicit action resumes.
-                            val resume = onResume
-                            if (resume != null) {
-                                TextButton(onClick = { speech.stop(); resume() }, modifier = Modifier.weight(1f)) {
-                                    Text(stringResource(R.string.learning_popup_continue_watching), fontSize = 13.sp,
-                                        maxLines = if (compact) Int.MAX_VALUE else 1, fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.primary)
-                                }
-                            } else {
-                                TextButton(onClick = { close() }, modifier = Modifier.weight(1f)) {
-                                    Text(stringResource(R.string.reader_lookup_close), fontSize = 13.sp,
-                                        maxLines = if (compact) Int.MAX_VALUE else 1)
-                                }
-                            }
+                    if (onAdjust != null) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        TextButton(onClick = { speech.stop(); onAdjust() }, modifier = Modifier.padding(horizontal = 12.dp)) {
+                            Text(stringResource(R.string.reader_lookup_adjust), fontSize = 13.sp)
                         }
                     }
                 }

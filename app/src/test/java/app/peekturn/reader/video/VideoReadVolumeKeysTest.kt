@@ -63,7 +63,7 @@ class VideoReadVolumeKeysTest {
             context = LookupContext(selection = "Now", sourceTitle = "fixture"),
             cueId = 1,
             selection = CaptionSelection(start = 0, end = 3, term = "Now"),
-            startMs = 1_000
+            startMs = 1_000, endMs = 2_000, returnPositionMs = 3_000, resumeOnDismiss = false
         )
         assertNull(VideoReadVolumeKeys().press(reading.copy(lookup = lookup)))
     }
