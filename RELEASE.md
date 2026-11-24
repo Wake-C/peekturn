@@ -2,6 +2,21 @@
 
 This project ships a signed release APK for direct distribution and a signed AAB for Google Play. Debug builds are for development only.
 
+## GitHub release
+
+GitHub Actions owns signing and publishing the downloadable APK. The publishing command needs Git push access to `origin`.
+
+1. Validate the affected features. Bump `versionName` and `versionCode` in `app/build.gradle.kts`, commit the release inputs on `main`, and review that commit.
+2. After publication is authorized, create the matching annotated tag on the reviewed commit. If that tag already exists on the commit, reuse it.
+
+   ```sh
+   git tag -a v1.0.1 main -m "Peekturn 1.0.1"
+   ./tools/release.sh github v1.0.1
+   ```
+
+3. Confirm that the remote tag points to the reviewed commit and that its **Release APK** workflow completed successfully. Update the release notes with the user-facing changes.
+4. Download the published APK and its checksum from the Release. Verify the checksum and expected signer, install it as an update, and repeat the affected user journey on the signed app. Report the build and device results separately.
+
 ## One-time upload key
 
 A 4096-bit RSA upload key already exists outside the repository:
@@ -22,9 +37,9 @@ Back up both the keystore and the password somewhere safe. Losing the upload key
 
 Use this for local iteration, including uncommitted work. It assembles only the signed production APK, skips automatic lint-vital tasks, verifies the existing signer and non-debuggable package, and collects a checksum and receipt under `app/build/outputs/delivery/local-release.*/`. It does not run tests or lint, build an AAB, install, change versions, commit, tag or publish. Choose target tests separately based on the code change. The receipt records tests and lint as `not_run`, never as passed from an older report.
 
-## Public release gate
+## Local APK and Play AAB
 
-The worktree must be clean. The release script reads the password from Keychain, builds a non-debuggable release, runs unit tests and release lint, verifies both signatures, and writes checksums plus a receipt.
+For a local APK and Play bundle, start from a clean worktree. The release script reads the password from Keychain, builds a non-debuggable release, runs unit tests and release lint, verifies both signatures, and writes checksums plus a receipt.
 
 ```sh
 ./tools/release.sh
@@ -38,26 +53,11 @@ app/build/outputs/delivery/release.*/peekturn-1.0.1-2-release.aab
 app/build/outputs/delivery/release.*/receipt.json
 ```
 
-Install the release APK on a device and check the first-run included book, import, reading, explanation, pronunciation and narration paths before publishing. The receipt records runtime verification as `not_run`; a build is not a device acceptance result.
+Before distributing this local build, install its APK and check the first-run included book, import, reading, explanation, pronunciation and narration paths. The receipt records runtime verification as `not_run`; a build is not a device acceptance result.
 
-## GitHub release
+## GitHub signing setup
 
-The repository release page is the download page. Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds a signed release APK on CI and attaches the APK and its `.sha256` to a GitHub Release.
-
-1. Confirm the release APK installs, launches and opens a real EPUB. A build is not a device acceptance result.
-2. Bump `versionName` and `versionCode` in `app/build.gradle.kts`, then commit and confirm `git status` is clean.
-3. Create a tag that matches `versionName` and push it:
-
-```sh
-git tag -a v1.0.1 -m "Peekturn 1.0.1"
-git push origin main --follow-tags
-```
-
-4. Review the generated release notes and replace them with the user-facing changes. Do not describe tests that were not run.
-
-The workflow fails when the tag and `versionName` disagree, and when the signing secrets are absent. It never publishes an unsigned APK.
-
-CI signs with the same upload keystore as `tools/release.sh`, supplied as repository secrets:
+The Release APK workflow uses the following repository secrets to sign with the same upload key as the local packaging scripts.
 
 | Secret | Value |
 | --- | --- |

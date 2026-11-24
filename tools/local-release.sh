@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-# Local iteration only. Keep the public-release gate in release.sh unchanged.
+# Local signed APK for device checks.
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 exec python3 - "$ROOT" "$@" <<'PY'
 import hashlib

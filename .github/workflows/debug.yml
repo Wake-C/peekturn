@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Test release commands
+        run: python3 -m unittest discover -s tools/tests -p 'test_*release*.py'
       - uses: actions/setup-java@v5
         with:
           distribution: temurin

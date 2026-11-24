@@ -2,20 +2,29 @@
 set -eu
 umask 077
 
-usage() {
-    printf '%s\n' 'Usage: tools/release.sh' \
-        'Build a signed release APK and AAB, verify both signatures, and collect checksums plus a receipt.' \
-        'The upload keystore stays outside the repository; its password is read from macOS Keychain.' \
-        'Requires JDK 17, Android SDK, Python 3, Git, jarsigner and apksigner.'
-}
-case "${1-}" in
-    -h|--help) usage; exit 0 ;;
-esac
-if [ "$#" -ne 0 ]; then usage >&2; exit 2; fi
-
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 fail() { printf 'Release failed: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+    printf '%s\n' 'Usage: tools/release.sh github <existing-version-tag> | tools/release.sh' \
+        'github: publish main and its named tag to origin. GitHub Actions signs the release APK.' \
+        'No arguments: build a signed APK and AAB locally from a clean checkout using the macOS upload key.'
+}
+case "${1-}" in
+    -h|--help) usage; exit 0 ;;
+    github)
+        [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+        case "$2" in v[0-9]*) ;; *) fail 'Use the release version tag (v followed by the versionName).' ;; esac
+        tag_ref="refs/tags/$2"
+        git check-ref-format "$tag_ref" || fail 'Invalid Git tag name.'
+        tagged=$(git rev-parse --verify "$tag_ref^{commit}") || fail "Create $2 on the intended main commit first."
+        main=$(git rev-parse --verify refs/heads/main) || fail 'Local main is missing.'
+        [ "$tagged" = "$main" ] || fail "Tag $2 must point at the local main commit."
+        exec git push --atomic --no-follow-tags origin refs/heads/main "$tag_ref"
+        ;;
+esac
+if [ "$#" -ne 0 ]; then usage >&2; exit 2; fi
 
 for tool in python3 git security shasum; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool is required."

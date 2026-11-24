@@ -42,5 +42,4 @@ Production is `app.peekturn.reader`; debug is `app.peekturn.reader.debug` with s
 ## Device and release limits
 
 - After changing emulator graphics backends, cold boot with `-no-snapshot`; `-no-snapshot-save` can still load an incompatible snapshot. Device/emulator crashes are not passed tests.
-- Public releases use `tools/release.sh` and its clean-worktree/test/lint gates. Do not weaken them for local iteration.
-- Commit, push, tag and publish require explicit authorization. A `v*` tag push can publish automatically. After authorized publishing, verify remote SHAs, CI results and downloadable assets using [RELEASE.md](../../RELEASE.md).
+- Commit, push, tag and publish require explicit authorization. A `v*` tag push can publish automatically. For the GitHub publication command and verification of the downloadable APK, follow [RELEASE.md](../../RELEASE.md).

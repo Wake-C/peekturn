@@ -49,6 +49,12 @@ Help people stay with content they care about and finish more of it. Reading, li
 - VibeReading is a separate product, not a source of code or assets.
 - Update this guide only when intent, design principles or working standards change. Keep implementation detail beside code and history in Git; do not append task diaries or feature inventories. README files are for users.
 
+## Enforced release rules
+
+| Rule | Enforcement |
+| --- | --- |
+| Publish a GitHub release from the reviewed main commit and its named version tag. | `tools/release.sh github <tag>` checks the commit and pushes the two refs atomically. The Release APK workflow builds and signs the download. |
+
 ## Read when relevant
 
 - [Integration constraints](agent-doc/essential/ARCHITECTURE.md): external library and platform traps, only for the integration being changed.
