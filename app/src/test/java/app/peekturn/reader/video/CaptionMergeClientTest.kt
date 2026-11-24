@@ -36,7 +36,7 @@ class CaptionMergeClientTest {
     @After fun teardown() { server.shutdown() }
 
     private fun config() = ModelConfig(
-        endpoint = server.url("/v1").toString(), model = "merge-model", apiKey = "test-key", temperature = 0.2
+        endpoint = server.url("/v1").toString(), model = ModelConfig().model, apiKey = "test-key", temperature = 0.2
     )
 
     private fun transport(http: OkHttpClient = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).build()) =
@@ -79,6 +79,7 @@ class CaptionMergeClientTest {
         val sizes = mutableListOf<Int>()
         repeat(2) {
             val body = JsonParser.parseString(server.takeRequest().body.readUtf8()).asJsonObject
+            assertEquals("disabled", body.getAsJsonObject("thinking")["type"].asString)
             val payload = JsonParser.parseString(body.getAsJsonArray("messages")[1].asJsonObject["content"].asString).asJsonObject
             val window = payload.getAsJsonArray("cues")
             sizes += window.size()

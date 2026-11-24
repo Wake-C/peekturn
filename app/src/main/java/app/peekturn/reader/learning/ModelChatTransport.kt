@@ -151,9 +151,14 @@ class ModelChatTransport(private val http: OkHttpClient = OkHttpClient.Builder()
             path.isEmpty() -> "/v1/chat/completions"
             else -> "$path/chat/completions"
         }).build()
+        val model = config.model.trim()
         val strictSchema = base.host == "api.openai.com"
         val body = JsonObject().apply {
-            addProperty("model", config.model.trim()); addProperty("stream", true)
+            addProperty("model", model); addProperty("stream", true)
+            // DeepSeek uses this top-level Chat Completions extension, including through compatible gateways.
+            if (base.host == "api.deepseek.com" || model.substringAfterLast('/').startsWith("deepseek-", ignoreCase = true)) {
+                add("thinking", JsonObject().apply { addProperty("type", "disabled") })
+            }
             addProperty("temperature", config.temperature)
             add("messages", JsonArray().apply {
                 messages.forEachIndexed { index, message ->

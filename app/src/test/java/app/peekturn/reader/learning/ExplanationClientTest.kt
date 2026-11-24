@@ -45,6 +45,7 @@ class ExplanationClientTest {
         assertEquals("Bearer test-key", request.getHeader("Authorization"))
         val json = JsonParser.parseString(request.body.readUtf8()).asJsonObject
         assertEquals("configured-model", json["model"].asString)
+        assertFalse(json.has("thinking"))
         assertEquals("json_object", json.getAsJsonObject("response_format")["type"].asString)
         val system = json.getAsJsonArray("messages")[0].asJsonObject["content"].asString
         assertTrue(system.startsWith("Write a small English dictionary card."))
@@ -222,8 +223,8 @@ class ExplanationClientTest {
         assertFalse(events.any { it is ExplanationEvent.Complete || it is ExplanationEvent.Failure })
     }
 
-    @Test fun chosenNumericTemperatureIsSentForExplanationAndConnectionTest() = runBlocking {
-        val profile = config().copy(temperature = 1.2)
+    @Test fun deepSeekGatewayDisablesThinkingAndKeepsTemperatureForExplanationAndConnectionTest() = runBlocking {
+        val profile = config().copy(model = "deepseek-ai/DeepSeek-V4-Pro", temperature = 1.2)
         server.enqueue(stream(chunk(payload) + chunk(finish = "stop") + "data: [DONE]\n\n"))
         assertTrue(ExplanationClient().testConnection(profile).isSuccess)
         server.enqueue(stream(chunk(payload) + chunk(finish = "stop") + "data: [DONE]\n\n"))
@@ -236,7 +237,7 @@ class ExplanationClientTest {
             assertNotNull("Request $index must carry the profile temperature", sent)
             assertTrue("Temperature must be a JSON number, not a string", sent?.isNumber == true)
             assertEquals(1.2, sent?.asDouble ?: -1.0, 0.0)
-            assertFalse(json.has("thinking"))
+            assertEquals("disabled", json.getAsJsonObject("thinking")["type"].asString)
             assertFalse(json.has("reasoning_effort"))
         }
         assertEquals(2, server.requestCount)
