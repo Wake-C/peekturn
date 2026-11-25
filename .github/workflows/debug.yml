@@ -10,28 +10,56 @@ permissions:
   contents: read
 
 concurrency:
-  group: debug-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Unique groups keep every main/manual run, including ones still queued.
+  group: debug-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   debug:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Test release commands
-        run: python3 -m unittest discover -s tools/tests -p 'test_*release*.py'
+      - name: Test CI and release commands
+        run: python3 -m unittest discover -s tools/tests -p 'test_*.py'
+      - name: Plan Android checks
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 tools/ci/plan.py
+
       - uses: actions/setup-java@v5
+        if: steps.changes.outputs.android == 'true'
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
-      - name: Install SDK
-        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"'
+      - name: Restore Gradle cache
+        if: steps.changes.outputs.android == 'true'
+        id: gradle-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: peekturn-gradle-v1-${{ runner.os }}-${{ runner.arch }}-jdk17-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/*.versions.toml', '**/gradle.lockfile') }}-${{ github.sha }}
+          restore-keys: |
+            peekturn-gradle-v1-${{ runner.os }}-${{ runner.arch }}-jdk17-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/*.versions.toml', '**/gradle.lockfile') }}-
+            peekturn-gradle-v1-${{ runner.os }}-${{ runner.arch }}-jdk17-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}-
+      - name: Ensure Android SDK
+        if: steps.changes.outputs.android == 'true'
+        run: |
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          packages=()
+          [[ -d "$sdk/platforms/android-35" ]] || packages+=("platforms;android-35")
+          [[ -x "$sdk/build-tools/35.0.0/apksigner" ]] || packages+=("build-tools;35.0.0")
+          if ((${#packages[@]})); then
+            "$sdk/cmdline-tools/latest/bin/sdkmanager" "${packages[@]}"
+          fi
 
       # Never expose repository secrets to PR code, including same-repo PRs.
       # PR APKs use a disposable runner key; only trusted main builds share a key.
       - name: Restore stable test signing key
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: steps.changes.outputs.android == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           DEBUG_KEYSTORE: ${{ secrets.PEEKTURN_DEBUG_KEYSTORE_BASE64 }}
         run: |
@@ -41,11 +69,13 @@ jobs:
           printf '%s' "$DEBUG_KEYSTORE" | base64 --decode > "$HOME/.android/debug.keystore"
 
       - name: Test, lint and build Debug APK
+        if: steps.changes.outputs.android == 'true'
         env:
           DOWNLOAD_TEST_BUILD: ${{ github.event_name == 'pull_request' && github.head_ref == 'poc/youtube-verification' }}
-        run: ./gradlew --console=plain -PpeekturnDownloadTest="$DOWNLOAD_TEST_BUILD" :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        run: ./gradlew --console=plain --build-cache --no-configuration-cache -PpeekturnDownloadTest="$DOWNLOAD_TEST_BUILD" :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 
       - name: Collect APK and checksum
+        if: steps.changes.outputs.android == 'true'
         run: |
           mkdir -p dist
           name="peekturn-debug-${GITHUB_SHA:0:7}-${GITHUB_RUN_NUMBER}.apk"
@@ -55,8 +85,24 @@ jobs:
           (cd dist && sha256sum "$name" > "$name.sha256")
 
       - uses: actions/upload-artifact@v4
+        if: steps.changes.outputs.android == 'true'
         with:
           name: peekturn-debug-${{ github.run_number }}
           path: dist/*
           retention-days: 14
           if-no-files-found: error
+          compression-level: 0
+
+      # Only a successful main push can update the shared build cache.
+      # Never cache signing keys or a configuration cache containing credentials.
+      - name: Stop Gradle daemons before caching
+        if: steps.changes.outputs.android == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.gradle-cache.outputs.cache-hit != 'true'
+        run: ./gradlew --stop
+      - name: Save Gradle cache
+        if: steps.changes.outputs.android == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.gradle-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.gradle-cache.outputs.cache-primary-key }}
