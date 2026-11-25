@@ -12,9 +12,13 @@ import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.test.core.app.ApplicationProvider
+import okhttp3.Call
+import okhttp3.EventListener
 import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import okio.Buffer
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -41,10 +45,11 @@ class VideoMediaCacheTest {
     private fun upstream() = OkHttpDataSource.Factory(OkHttpClient.Builder().readTimeout(2, TimeUnit.SECONDS).build())
     private fun spec(url: String, key: String, length: Long = 1024) = DataSpec.Builder()
         .setUri(url).setKey(key).setLength(length).setFlags(DataSpec.FLAG_ALLOW_CACHE_FRAGMENTATION).build()
-    private fun read(factory: DataSource.Factory, dataSpec: DataSpec): ByteArray {
+    private fun read(factory: DataSource.Factory, dataSpec: DataSpec, expectedLength: Long? = null): ByteArray {
         val source = factory.createDataSource()
         try {
-            source.open(dataSpec)
+            val length = source.open(dataSpec)
+            if (expectedLength != null) assertEquals(expectedLength, length)
             val bytes = ByteArrayOutputStream()
             val buffer = ByteArray(512)
             while (true) {
@@ -64,6 +69,105 @@ class VideoMediaCacheTest {
         assertEquals(0L, DefaultLoadControl().getBackBufferDurationUs(PlayerId.UNSET))
         assertEquals(30_000_000L, videoLoadControl().getBackBufferDurationUs(PlayerId.UNSET))
         assertEquals(50_000, DefaultLoadControl.DEFAULT_MAX_BUFFER_MS)
+    }
+
+    @Test fun progressivePlaybackKeepsReadingWhenTheServerSlowsOpenEndedRanges() {
+        val media = ByteArray(2 * 1024 * 1024 + 65_536) { (it % 251).toByte() }
+        val seek = 31_007
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val range = requireNotNull(request.getHeader("Range")).removePrefix("bytes=")
+                val start = range.substringBefore('-').toInt()
+                val requestedEnd = range.substringAfter('-').toLongOrNull()
+                val end = minOf(requestedEnd ?: media.lastIndex.toLong(), media.lastIndex.toLong()).toInt()
+                return MockResponse().setResponseCode(206)
+                    .setHeader("Content-Range", "bytes $start-$end/${media.size}")
+                    .setBody(Buffer().write(media, start, end - start + 1))
+                    .apply { if (requestedEnd == null) throttleBody(16_384, 3, TimeUnit.SECONDS) }
+            }
+        }
+        server.start()
+        val deadlines = mutableListOf<Long>()
+        val client = OkHttpClient.Builder().readTimeout(1, TimeUnit.SECONDS)
+            .eventListener(object : EventListener() {
+                override fun callStart(call: Call) { deadlines += call.timeout().timeoutNanos() }
+            }).build()
+        try {
+            val spec = DataSpec.Builder().setUri(server.url("/media").toString()).setKey("opaque-media-key")
+                .setPosition(seek.toLong())
+                .setFlags(DataSpec.FLAG_ALLOW_CACHE_FRAGMENTATION or DataSpec.FLAG_DONT_CACHE_IF_LENGTH_UNKNOWN)
+                .build()
+            VideoMediaCache(context, temporary.newFolder()).use { cache ->
+                val playback = cache.progressiveFactory(client, emptyMap(), cacheable = true)
+                assertArrayEquals(media.copyOfRange(seek, media.size), read(playback, spec))
+                val networkRequests = server.requestCount
+                assertTrue("The cold seek must span multiple network requests", networkRequests > 1)
+                assertTrue("Playback may pause between reads", deadlines.all { it == 0L })
+                val replay = spec.buildUpon().setPosition((seek + 113).toLong()).setLength(1024).build()
+                assertArrayEquals(media.copyOfRange(seek + 113, seek + 113 + 1024), read(playback, replay))
+                assertEquals(networkRequests, server.requestCount)
+            }
+        } finally { server.shutdown() }
+    }
+
+    @Test fun aColdSeekCanReadAPartialResponseWithoutAFileLength() {
+        val seek = 113
+        val suffix = payload.copyOfRange(seek, payload.size)
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val body = Buffer().write(suffix)
+                val response = MockResponse().setResponseCode(206)
+                    .setHeader("Content-Range", "bytes $seek-${payload.lastIndex}/*")
+                return if (request.path == "/chunked") response.setChunkedBody(body, 127)
+                    else response.setBody(body)
+            }
+        }
+        server.start()
+        try {
+            VideoMediaCache(context, temporary.newFolder()).use { cache ->
+                val factory = cache.progressiveFactory(OkHttpClient(), emptyMap(), cacheable = true)
+                fun readSeek(path: String, requested: Long, expectedLength: Long) {
+                    val spec = DataSpec.Builder().setUri(server.url(path).toString()).setKey("$path-$requested")
+                        .setPosition(seek.toLong()).setLength(requested)
+                        .setFlags(DataSpec.FLAG_ALLOW_CACHE_FRAGMENTATION or DataSpec.FLAG_DONT_CACHE_IF_LENGTH_UNKNOWN)
+                        .build()
+                    assertArrayEquals(suffix, read(factory, spec, expectedLength))
+                }
+                readSeek("/fixed", -1, suffix.size.toLong())
+                readSeek("/chunked", -1, -1)
+                // Media3 reports the requested length here and returns EOF at the actual last byte.
+                readSeek("/chunked", 8192, 8192)
+            }
+        } finally { server.shutdown() }
+    }
+
+    @Test fun progressiveReadPastEofReturnsTheActualTailWithOrWithoutRangeSupport() {
+        val seek = 113
+        val suffix = payload.copyOfRange(seek, payload.size)
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.path == "/whole") return response()
+                return MockResponse().setResponseCode(206)
+                    .setHeader("Content-Range", "bytes $seek-${payload.lastIndex}/${payload.size}")
+                    .setBody(Buffer().write(suffix))
+            }
+        }
+        server.start()
+        try {
+            VideoMediaCache(context, temporary.newFolder()).use { cache ->
+                for (cacheable in listOf(false, true)) {
+                    val factory = cache.progressiveFactory(OkHttpClient(), emptyMap(), cacheable)
+                    for (path in listOf("/whole", "/range")) {
+                        val spec = spec(server.url(path).toString(), "$path-$cacheable", 8192)
+                            .buildUpon().setPosition(seek.toLong()).build()
+                        assertArrayEquals(suffix, read(factory, spec, expectedLength = 8192))
+                    }
+                }
+            }
+        } finally { server.shutdown() }
     }
 
     @Test fun aRepeatedPartialReadUsesDiskWhileUncachedPlaybackHitsTheNetworkAgain() {
@@ -171,10 +275,9 @@ class VideoMediaCacheTest {
         val key = source.videoCacheKey!!
         val events = mutableListOf<String>()
         val client = OkHttpClient.Builder().readTimeout(20, TimeUnit.SECONDS).build()
-        val upstream = OkHttpDataSource.Factory(client).setDefaultRequestProperties(source.headers)
         val directory = File(output!!, "muxed-session-cache")
         VideoMediaCache(context, directory, onEvent = { events += it }).use { cache ->
-            val factory = cache.factory(upstream, true)
+            val factory = cache.progressiveFactory(client, source.headers, cacheable = true)
             fun prefix(): Pair<ByteArray, Long> {
                 val data = factory.createDataSource()
                 try {

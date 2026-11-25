@@ -19,15 +19,17 @@ import java.util.concurrent.TimeUnit
 internal class VideoDownloadDataSource private constructor(
     private val rangedFactory: OkHttpDataSource.Factory,
     private val fullFactory: OkHttpDataSource.Factory,
-    private val chunkBytes: Long
+    private val chunkBytes: Long,
+    private val forPlayback: Boolean
 ) : DataSource {
     class Factory(
         client: OkHttpClient,
         headers: Map<String, String>,
         private val chunkBytes: Long = 2L * 1024 * 1024,
-        requestTimeoutMs: Long = 60_000
+        requestTimeoutMs: Long = 60_000,
+        private val forPlayback: Boolean = false
     ) : DataSource.Factory {
-        init { require(chunkBytes > 0); require(requestTimeoutMs > 0) }
+        init { require(chunkBytes > 0); require(requestTimeoutMs >= 0) }
 
         private val rangedFactory = OkHttpDataSource.Factory(client.newBuilder()
             .callTimeout(requestTimeoutMs, TimeUnit.MILLISECONDS)
@@ -44,7 +46,7 @@ internal class VideoDownloadDataSource private constructor(
         private val fullFactory = OkHttpDataSource.Factory(client).setDefaultRequestProperties(headers)
 
         override fun createDataSource(): DataSource =
-            VideoDownloadDataSource(rangedFactory, fullFactory, chunkBytes)
+            VideoDownloadDataSource(rangedFactory, fullFactory, chunkBytes, forPlayback)
     }
 
     private val listeners = linkedSetOf<TransferListener>()
@@ -68,8 +70,9 @@ internal class VideoDownloadDataSource private constructor(
         position = dataSpec.position
         remaining = dataSpec.length
         return safely {
-            if (dataSpec.httpMethod == DataSpec.HTTP_METHOD_GET) openChunk() else openFull()
-            remaining
+            val available = if (dataSpec.httpMethod == DataSpec.HTTP_METHOD_GET) openChunk() else openFull()
+            // Media3 reports a bounded request's length even when it ends beyond the file.
+            if (forPlayback && dataSpec.length != C.LENGTH_UNSET.toLong()) dataSpec.length else available
         }
     }
 
@@ -98,14 +101,14 @@ internal class VideoDownloadDataSource private constructor(
         }
     }
 
-    private fun openChunk() {
+    private fun openChunk(): Long {
         checkInterrupted()
         closeUpstream()
         val length = minOf(chunkBytes, Long.MAX_VALUE - position,
             remaining.takeIf { it != C.LENGTH_UNSET.toLong() } ?: Long.MAX_VALUE)
         if (length <= 0) throw IOException("Invalid media range")
         val request = checkNotNull(original).buildUpon().setPosition(position).setLength(length).build()
-        try {
+        return try {
             val source = openSource(rangedFactory, request)
             if (source.responseCode == 416 &&
                 header("Content-Range")?.trim()?.equals("bytes */$position", ignoreCase = true) == true) {
@@ -113,18 +116,12 @@ internal class VideoDownloadDataSource private constructor(
                     throw EOFException("Media length changed")
                 }
                 remaining = 0
-                return
+                return remaining
             }
-            if (source.responseCode != 206) {
-                openFull()
-                return
-            }
+            if (source.responseCode != 206) return openFull()
             val range = responseRange()
             validateRange(range, length)
-            if (range.total == null) {
-                openFull()
-                return
-            }
+            if (range.total == null) return openFull()
             if (total != C.LENGTH_UNSET.toLong() && range.total != total) {
                 throw IOException("Media length changed between requests")
             }
@@ -135,6 +132,7 @@ internal class VideoDownloadDataSource private constructor(
             }
             ranged = true
             chunkRemaining = range.end - range.start + 1
+            remaining
         } catch (failure: IOException) {
             if (generateSequence<Throwable>(failure) { it.cause }.any { it is RangeIgnoredException }) {
                 openFull()
@@ -142,7 +140,7 @@ internal class VideoDownloadDataSource private constructor(
         }
     }
 
-    private fun openFull() {
+    private fun openFull(): Long {
         checkInterrupted()
         closeUpstream()
         val initial = checkNotNull(original)
@@ -153,9 +151,19 @@ internal class VideoDownloadDataSource private constructor(
         listeners.forEach(source::addTransferListener)
         val resolved = source.open(request)
         rememberResponse(source)
-        if (source.responseCode == 206) {
-            val range = responseRange()
+        ranged = false
+        chunkRemaining = 0
+        val range = if (source.responseCode == 206) responseRange() else null
+        if (range != null) {
             validateRange(range, if (length == C.LENGTH_UNSET.toLong()) Long.MAX_VALUE - position else length)
+        }
+        if (forPlayback && total == C.LENGTH_UNSET.toLong() && range?.total == null) {
+            // A 200 or unknown-total 206 fallback may end before a bounded request does.
+            // Let OkHttpDataSource enforce the request bound and signal the actual end.
+            remaining = C.LENGTH_UNSET.toLong()
+            return resolved
+        }
+        if (range != null) {
             if (range.total == null || range.end != minOf(
                     range.total - 1,
                     if (length == C.LENGTH_UNSET.toLong()) Long.MAX_VALUE else position + length - 1
@@ -169,8 +177,7 @@ internal class VideoDownloadDataSource private constructor(
                 resolved != remaining) throw IOException("Media length changed between requests")
             if (total == C.LENGTH_UNSET.toLong()) remaining = resolved
         }
-        ranged = false
-        chunkRemaining = 0
+        return remaining
     }
 
     private fun openSource(factory: OkHttpDataSource.Factory, request: DataSpec): OkHttpDataSource =
@@ -241,7 +248,7 @@ internal class VideoDownloadDataSource private constructor(
     }
 
     private fun checkInterrupted() {
-        if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Media download interrupted")
+        if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Media transfer interrupted")
     }
 
     private data class ResponseRange(val start: Long, val end: Long, val total: Long?)

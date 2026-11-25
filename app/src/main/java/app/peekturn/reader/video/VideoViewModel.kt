@@ -626,7 +626,7 @@ internal class VideoViewModel(
                 setCustomCacheKey(cacheKey)
             }.build()
             val factory = if (url.startsWith("peekturn-offline://")) graph.videoDownloads.playbackFactory()
-                else graph.videoMediaCache.factory(upstream, cacheable = cacheKey != null)
+                else graph.videoMediaCache.progressiveFactory(httpClient, source.headers, cacheable = cacheKey != null)
             return ProgressiveMediaSource.Factory(factory)
                 .createMediaSource(item)
         }

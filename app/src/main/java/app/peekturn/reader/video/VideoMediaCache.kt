@@ -15,6 +15,7 @@ import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.OkHttpClient
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
@@ -70,6 +71,15 @@ internal class VideoMediaCache(
                 disk.applyContentMetadataMutations(key, mutations)
             }
         }.also { privateCache = it }
+    }
+
+    // YouTube can slow an open-ended response. Keep the logical stream continuous across ranges.
+    // Media3 can pause reads on an open response, so playback uses only the client's idle timeouts.
+    fun progressiveFactory(client: OkHttpClient, headers: Map<String, String>, cacheable: Boolean): DataSource.Factory {
+        val upstream = VideoDownloadDataSource.Factory(
+            client, headers, requestTimeoutMs = 0, forPlayback = true
+        )
+        return factory(upstream, cacheable)
     }
 
     fun factory(upstream: DataSource.Factory, cacheable: Boolean): DataSource.Factory = DataSource.Factory {
