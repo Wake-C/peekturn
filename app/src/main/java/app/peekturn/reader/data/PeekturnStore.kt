@@ -468,6 +468,10 @@ class PeekturnStore internal constructor(private val context: Context, private v
         val restored = gson.toJsonTree(AppSettings()).asJsonObject
         restored.remove("profiles")
         source?.let { restoreFields(restored, it) }
+        if (FullscreenCaptionSize.entries.none { it.name == restored["fullscreenCaptionSize"].asString }) {
+            restored.addProperty("fullscreenCaptionSize", FullscreenCaptionSize.MEDIUM.name)
+            invalid = true
+        }
         val legacyReading = source?.get("reading")?.takeIf { it.isJsonObject }?.asJsonObject
         if (legacyReading != null && !legacyReading.has("immersive")) {
             fun legacyBarHidden(name: String): Boolean {

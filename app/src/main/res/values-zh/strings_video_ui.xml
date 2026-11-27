@@ -124,4 +124,6 @@
     <string name="video_ui_cache_clear_failed">无法清除字幕缓存。</string>
     <string name="video_ui_brightness">亮度</string>
     <string name="video_ui_media_volume">媒体音量</string>
+    <string name="video_ui_fullscreen_caption_size">全屏字幕字号</string>
+    <string name="video_ui_caption_size_save_failed">未能保存字幕字号，请重试。</string>
 </resources>

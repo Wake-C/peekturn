@@ -7,6 +7,7 @@ import app.peekturn.reader.reader.NARRATION_HIGHLIGHT_ALPHA
 import app.peekturn.reader.reader.NARRATION_HIGHLIGHT_TINT
 import kotlin.math.max
 import kotlin.math.min
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -23,26 +24,30 @@ class ActiveSentenceHighlightTest {
         return (max(a, b) + 0.05) / (min(a, b) + 0.05)
     }
 
-    @Test fun `active sentence is stronger than the old neutral fill in every theme`() {
+    @Test fun `active sentence uses a visible translucent accent in every theme`() {
         themes.forEach { theme ->
             val colors = peekturnColorScheme(theme)
-            assertTrue(theme, contrast(colors.activeSentenceBackground, colors.background) >
-                contrast(colors.surfaceVariant, colors.background))
+            val fill = colors.activeSentenceBackground
+            assertEquals(theme, colors.primaryContainer, fill.copy(alpha = 1f))
+            val rendered = fill.compositeOver(colors.background)
+            val activeContrast = contrast(rendered, colors.background)
+            assertTrue(theme, activeContrast > 1.0 && activeContrast < contrast(colors.primaryContainer, colors.background))
         }
     }
 
     @Test fun `spoken text and current timestamp stay readable`() {
         themes.forEach { theme ->
             val colors = peekturnColorScheme(theme)
-            assertTrue("$theme reading", contrast(colors.onBackground, colors.activeSentenceBackground) >= 4.5)
-            assertTrue("$theme transcript", contrast(colors.onSurface, colors.activeSentenceBackground) >= 4.5)
+            val rendered = colors.activeSentenceBackground.compositeOver(colors.background)
+            assertTrue("$theme reading", contrast(colors.onBackground, rendered) >= 4.5)
+            assertTrue("$theme transcript", contrast(colors.onSurface, rendered) >= 4.5)
         }
     }
 
     @Test fun `word selection retains its separate accent fill`() {
         themes.forEach { theme ->
             val colors = peekturnColorScheme(theme)
-            assertNotEquals(theme, colors.primaryContainer, colors.activeSentenceBackground)
+            assertNotEquals(theme, colors.primaryContainer, colors.activeSentenceBackground.compositeOver(colors.background))
         }
     }
 

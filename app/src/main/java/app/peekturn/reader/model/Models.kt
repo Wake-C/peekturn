@@ -68,6 +68,10 @@ enum class SentenceSpeechProvider {
     }
 }
 
+enum class FullscreenCaptionSize(val scale: Float) {
+    SMALL(0.85f), MEDIUM(1f), LARGE(1.25f)
+}
+
 const val DEFAULT_VIDEO_QUALITY_HEIGHT = 720
 
 /** Appearance for a new installation or a missing/invalid saved choice. */
@@ -87,7 +91,8 @@ data class AppSettings(
     val volumeKeysNarration: Boolean = false,
     val videoMergeCaptions: Boolean = true,
     /** Compatibility default for videos without an explicit per-video playback mode. */
-    val videoAudioOnly: Boolean = false
+    val videoAudioOnly: Boolean = false,
+    val fullscreenCaptionSize: FullscreenCaptionSize = FullscreenCaptionSize.MEDIUM
 ) {
     val model: ModelConfig
         get() = profiles.firstOrNull { it.id == activeProfileId }?.config ?: ModelConfig()

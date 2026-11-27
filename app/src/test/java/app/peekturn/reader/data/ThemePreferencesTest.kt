@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import app.peekturn.reader.model.AppSettings
+import app.peekturn.reader.model.FullscreenCaptionSize
 import app.peekturn.reader.model.ModelConfig
 import app.peekturn.reader.model.LlmProfile
 import app.peekturn.reader.model.ReaderPreferences
@@ -49,6 +50,22 @@ class ThemePreferencesTest {
         assertEquals("dark", reloaded.appTheme)
         assertFalse(reloaded.videoMergeCaptions)
         assertTrue(reloaded.quickExplain)
+    }
+
+    @Test fun fullscreenSubtitleSizeSurvivesReloadAndRejectsAnUnknownChoice() = runBlocking {
+        val store = PeekturnStore(context)
+        val original = store.settings.value
+        assertEquals(FullscreenCaptionSize.MEDIUM, original.fullscreenCaptionSize)
+        for (size in listOf(FullscreenCaptionSize.SMALL, FullscreenCaptionSize.LARGE)) {
+            store.updateSettings { it.copy(fullscreenCaptionSize = size) }
+            assertEquals(original.copy(fullscreenCaptionSize = size), PeekturnStore(context).settings.value)
+        }
+        context.getSharedPreferences("peekturn", Context.MODE_PRIVATE).edit().putString(
+            "settings", """{"fullscreenCaptionSize":"unknown","accent":"UK"}"""
+        ).commit()
+        val repaired = PeekturnStore(context).settings.value
+        assertEquals(FullscreenCaptionSize.MEDIUM, repaired.fullscreenCaptionSize)
+        assertEquals("UK", repaired.accent)
     }
 
     @Test fun invalidAppearanceUsesWhiteWithoutResettingOtherChoices() = runBlocking {
@@ -100,6 +117,7 @@ class ThemePreferencesTest {
         val restored = PeekturnStore(context).settings.value
         assertEquals("light", restored.appTheme)
         assertTrue(restored.videoMergeCaptions)
+        assertEquals(FullscreenCaptionSize.MEDIUM, restored.fullscreenCaptionSize)
         assertEquals(ReaderPreferences(fontSize = 125.0), restored.reading)
         assertEquals(ModelConfig(name = "Existing provider", model = "existing-model"), restored.model)
         assertEquals(true, restored.quickExplain)

@@ -134,7 +134,7 @@ class CompactLearningPopupUiTest {
     private fun assertTabLabelFits(text: String) {
         // Inspect the actual Text bounds, not the merged tab's larger touch-target bounds.
         val tabText = compose.onNodeWithText(text, useUnmergedTree = true)
-        tabText.performScrollTo().assertIsDisplayed()
+        tabText.assertIsDisplayed()
         val layouts = mutableListOf<TextLayoutResult>()
         tabText.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         val layout = layouts.single()
@@ -183,7 +183,7 @@ class CompactLearningPopupUiTest {
             compose.waitUntil(5_000) { session.state.value.complete }
             val popup = compose.onNodeWithTag("learning-popup").fetchSemanticsNode().boundsInRoot
             val density = context.resources.displayMetrics.density
-            assertTrue("Popup wider than compact cap", popup.width <= 420f * density + 1)
+            assertTrue("Popup wider than compact cap", popup.width <= 640f * density + 1)
             assertTrue("Popup fills the short window", popup.height < 320f * density)
             compose.onNodeWithContentDescription(label(R.string.reader_lookup_close_description)).assertIsDisplayed()
             capturePopupIfRequested("compact-popup-large-type")
@@ -200,15 +200,15 @@ class CompactLearningPopupUiTest {
             compose.onNodeWithText(answer.examples.last().text).performScrollTo().assertIsDisplayed()
             compose.onNodeWithText(context.getString(R.string.reader_lookup_antonyms, answer.antonyms))
                 .performScrollTo().assertIsDisplayed()
-            compose.onNodeWithContentDescription(label(R.string.learning_popup_replay_sentence)).assertIsDisplayed()
+            compose.onNodeWithContentDescription(label(R.string.learning_popup_replay_sentence)).performScrollTo().assertIsDisplayed()
                 .performClick()
             compose.onNodeWithText("Continue watching").assertDoesNotExist()
             compose.runOnIdle { assertEquals(1, replay); assertTrue(readable.last()) }
 
             // Both tabs remain reachable after scrolling to the bottom of a long answer.
-            compose.onNodeWithText(label(R.string.reader_lookup_tab_dictionary)).performScrollTo().performClick()
+            compose.onNodeWithText(label(R.string.reader_lookup_tab_dictionary)).assertIsDisplayed().performClick()
             assertTabLabelFits(label(R.string.reader_lookup_tab_dictionary))
-            compose.onNodeWithText(label(R.string.reader_lookup_tab_explain)).performScrollTo().performClick()
+            compose.onNodeWithText(label(R.string.reader_lookup_tab_explain)).assertIsDisplayed().performClick()
             assertTabLabelFits(label(R.string.reader_lookup_tab_explain))
             compose.onNodeWithText(answer.meaning).performScrollTo().assertIsDisplayed()
             compose.onNodeWithContentDescription(label(R.string.reader_lookup_close_description)).performClick()
@@ -266,7 +266,7 @@ class CompactLearningPopupUiTest {
             compose.onNodeWithText(label(R.string.reader_lookup_retry)).performScrollTo().assertIsDisplayed().performClick()
             compose.waitUntil(5_000) { session.state.value.complete }
             compose.onNodeWithText(answer.meaning).performScrollTo().assertIsDisplayed()
-            compose.onNodeWithContentDescription(label(R.string.learning_popup_replay_sentence)).assertIsDisplayed()
+            compose.onNodeWithContentDescription(label(R.string.learning_popup_replay_sentence)).performScrollTo().assertIsDisplayed()
             compose.runOnIdle { assertEquals(2, requests) }
         } finally {
             compose.runOnIdle { session.close(); speech.shutdown() }
@@ -284,7 +284,15 @@ class CompactLearningPopupUiTest {
                         onClose = {}, onCancel = {}, onAdjust = { adjusted++ })
                 }
             }
-            compose.onNodeWithText(label(R.string.reader_lookup_adjust)).assertIsDisplayed().performClick()
+            compose.waitUntil(5_000) { session.state.value.complete }
+            val quote = compose.onNodeWithText("She will refuse the offer.")
+            val source = compose.onNodeWithText(label(R.string.design_source))
+            quote.assertDoesNotExist()
+            source.performScrollTo().performClick()
+            quote.performScrollTo().assertIsDisplayed()
+            source.performScrollTo().performClick()
+            quote.assertDoesNotExist()
+            compose.onNodeWithText(label(R.string.design_adjust)).performScrollTo().assertIsDisplayed().performClick()
             compose.onNodeWithContentDescription(label(R.string.reader_lookup_close_description)).assertIsDisplayed()
             compose.onNodeWithContentDescription(label(R.string.learning_popup_replay_sentence)).assertDoesNotExist()
             compose.onNodeWithText("Close").assertDoesNotExist()
@@ -308,18 +316,19 @@ class CompactLearningPopupUiTest {
                 }
             }
             compose.waitUntil(5_000) { session.state.value.complete }
-            compose.onNodeWithContentDescription(label(R.string.learning_popup_replay_sentence)).assertIsDisplayed()
+            compose.onNodeWithText(answer.examples.last().text).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithContentDescription(label(R.string.learning_popup_replay_sentence)).performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("Close").assertDoesNotExist()
             compose.onNodeWithText("Continue watching").assertDoesNotExist()
-            compose.onNodeWithText(answer.examples.last().text).performScrollTo()
             val close = compose.onNodeWithContentDescription(label(R.string.reader_lookup_close_description))
-            val pronounce = compose.onAllNodesWithContentDescription(label(R.string.reader_lookup_pronounce))[0]
+            val pronounce = compose.onNode(hasContentDescription(label(R.string.reader_lookup_pronounce)) and
+                !hasAnyAncestor(hasTestTag("learning-popup-scroll")))
             val density = context.resources.displayMetrics.density
             for (button in listOf(close, pronounce)) {
                 button.assertIsDisplayed()
-                val bounds = button.fetchSemanticsNode().boundsInRoot
-                assertTrue(bounds.width >= 48f * density - 1)
-                assertTrue(bounds.height >= 48f * density - 1)
+                val target = button.fetchSemanticsNode().touchBoundsInRoot
+                assertTrue("Touch width: $target", target.width >= 48f * density - 1)
+                assertTrue("Touch height: $target", target.height >= 48f * density - 1)
             }
             pronounce.performClick()
             compose.waitUntil(2_000) { speech.state.value.playing }

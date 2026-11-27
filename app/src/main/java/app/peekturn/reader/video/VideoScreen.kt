@@ -66,6 +66,7 @@ import app.peekturn.reader.ui.PeekturnIconButton
 import app.peekturn.reader.learning.LearningPopup
 import app.peekturn.reader.learning.LearningPopupPlacement
 import app.peekturn.reader.model.AppSettings
+import app.peekturn.reader.model.FullscreenCaptionSize
 import app.peekturn.reader.model.ReaderPreferences
 import app.peekturn.reader.reader.ReaderTypographySheet
 import app.peekturn.reader.reader.ReaderTextMetrics
@@ -158,6 +159,7 @@ internal fun VideoScreen(
         if (fullscreen) {
             FullscreenPlayer(
                 window = window,
+                captionSize = settings.fullscreenCaptionSize,
                 state = state,
                 player = vm.player,
                 vm = vm,
@@ -196,6 +198,7 @@ internal fun VideoScreen(
     if (settingsOpen) {
         VideoSettingsSheet(
             state = state,
+            captionSize = settings.fullscreenCaptionSize,
             vm = vm,
             onDismiss = { settingsOpen = false },
             downloadState = downloads[state.item?.id],
@@ -344,6 +347,7 @@ private fun PortraitPlayer(
 @Composable
 private fun FullscreenPlayer(
     window: Window,
+    captionSize: FullscreenCaptionSize,
     state: VideoPlaybackState,
     player: Player,
     vm: VideoViewModel,
@@ -372,7 +376,7 @@ private fun FullscreenPlayer(
                 PlayerSurface(player, Modifier.matchParentSize())
                 if (state.awaitingFirstFrame) OpeningPicture(state, Modifier.matchParentSize())
                 FullscreenPictureGestures(window, vm::toggleTools, Modifier.matchParentSize())
-                FullscreenCaptions(state, vm::playCue, vm::openLookup)
+                FullscreenCaptions(state, captionSize, vm::playCue, vm::openLookup)
                 if (state.toolsVisible) {
                     FullscreenChrome(
                         state = state,
@@ -1190,7 +1194,12 @@ private fun CaptionFailure(text: String, onRetry: () -> Unit, modifier: Modifier
 }
 
 @Composable
-internal fun FullscreenCaptions(state: VideoPlaybackState, onReplay: (Int) -> Unit, onLookup: (Int, CaptionSelection) -> Unit) {
+internal fun FullscreenCaptions(
+    state: VideoPlaybackState,
+    size: FullscreenCaptionSize = FullscreenCaptionSize.MEDIUM,
+    onReplay: (Int) -> Unit,
+    onLookup: (Int, CaptionSelection) -> Unit
+) {
     val cues = state.displayedCues
     val index = activeCueIndex(cues, state.positionMs) ?: return
     val cue = cues.getOrNull(index) ?: return
@@ -1200,25 +1209,41 @@ internal fun FullscreenCaptions(state: VideoPlaybackState, onReplay: (Int) -> Un
         val portrait = maxHeight > maxWidth
         val safeBottom = WindowInsets.safeDrawing.asPaddingValues().calculateBottomPadding()
         val footer = safeBottom + LandscapeFooterHeight + CaptionControlsGap
-        // PlayerView fits the picture without cropping. Keep portrait captions on that picture,
-        // even when a wide video leaves a large black band below it.
-        val bottom = if (portrait) {
-            val pictureHeight = minOf(maxHeight, maxWidth / state.aspectRatio)
-            val pictureMargin = (pictureHeight * 0.09f).coerceIn(12.dp, 64.dp)
-            val pictureBottom = (maxHeight - pictureHeight) / 2 + pictureMargin
-            maxOf(pictureBottom, if (state.toolsVisible) footer else safeBottom + 12.dp)
-        } else if (state.toolsVisible) footer
-            else safeBottom + ((maxHeight - safeBottom) * 0.09f).coerceIn(20.dp, 48.dp)
-        val belowControls = maxHeight / 2 - LandscapeTransportSize / 2 - CaptionControlsGap - bottom
-        val captionHeight = if (portrait && !state.toolsVisible) maxHeight * .26f
-            else belowControls.coerceAtLeast(1.dp)
         val compact = maxHeight < 360.dp
+        val fontSize = (if (compact) 16.sp else 19.sp) * size.scale
+        val lineHeight = (if (compact) 19.sp else 26.sp) * size.scale
+
+        // PlayerView uses FIT and centers the decoded picture in this same viewport.
+        val pictureHeight = minOf(maxHeight, maxWidth / state.aspectRatio)
+        val bottomBand = (maxHeight - pictureHeight) / 2
+        val bottomClearance = if (state.toolsVisible) footer else safeBottom + 12.dp
+        val transportEnd = maxHeight / 2 + LandscapeTransportSize / 2 + CaptionControlsGap
+        val bandStart = maxOf(maxHeight - bottomBand + 8.dp, if (state.toolsVisible) transportEnd else 0.dp)
+        val bandSpace = maxHeight - bandStart - bottomClearance
+        val line = with(LocalDensity.current) { lineHeight.toDp() }
+        val minimumBand = maxOf(line, if (state.toolsVisible) 40.dp else 0.dp) + 10.dp
+        val belowPicture = portrait && bandSpace >= minimumBand
+        val position: Modifier
+        val captionHeight: Dp
+        if (belowPicture) {
+            // Anchor the first line to the picture edge. Long captions scroll within the black band.
+            position = Modifier.align(Alignment.TopCenter).padding(top = bandStart)
+            captionHeight = bandSpace
+        } else {
+            val bottom = when {
+                portrait -> maxOf(bottomBand + (pictureHeight * .09f).coerceIn(12.dp, 64.dp), bottomClearance)
+                state.toolsVisible -> footer
+                else -> safeBottom + ((maxHeight - safeBottom) * .09f).coerceIn(20.dp, 48.dp)
+            }
+            position = Modifier.align(Alignment.BottomCenter).padding(bottom = bottom)
+            captionHeight = if (portrait && !state.toolsVisible) maxHeight * .26f
+                else (maxHeight / 2 - LandscapeTransportSize / 2 - CaptionControlsGap - bottom).coerceAtLeast(1.dp)
+        }
         Surface(
-            modifier = Modifier
+            modifier = position
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
                 .padding(horizontal = if (portrait) 16.dp else 24.dp)
                 .widthIn(max = 760.dp)
-                .padding(bottom = bottom)
                 .heightIn(max = captionHeight)
                 .clickable(interactionSource = tapBlocker, indication = null) { },
             shape = RoundedCornerShape(8.dp),
@@ -1232,6 +1257,7 @@ internal fun FullscreenCaptions(state: VideoPlaybackState, onReplay: (Int) -> Un
                         .verticalScroll(rememberScrollState()),
                     verticalAlignment = Alignment.Top
                 ) {
+                    if (portrait && state.toolsVisible) Spacer(Modifier.width(40.dp))
                     if (!portrait) {
                         Text(
                             formatClock(cue.startMs),
@@ -1246,10 +1272,11 @@ internal fun FullscreenCaptions(state: VideoPlaybackState, onReplay: (Int) -> Un
                         selected = selection,
                         highlight = Color.White.copy(alpha = 0.24f),
                         color = Color.White,
-                        fontSize = if (compact) 16.sp else 19.sp,
-                        lineHeight = if (compact) 19.sp else 26.sp,
+                        fontSize = fontSize,
+                        lineHeight = lineHeight,
                         textAlign = if (portrait) TextAlign.Center else TextAlign.Start,
-                        modifier = Modifier.weight(1f, fill = !portrait).align(Alignment.Bottom),
+                        modifier = Modifier.weight(1f, fill = !portrait)
+                            .align(if (belowPicture) Alignment.Top else Alignment.Bottom),
                         onLookup = { onLookup(cue.id, it) },
                         onBlankTap = null
                     )
@@ -1419,6 +1446,7 @@ private fun CaptionText(
 @Composable
 private fun VideoSettingsSheet(
     state: VideoPlaybackState,
+    captionSize: FullscreenCaptionSize,
     vm: VideoViewModel,
     onDismiss: () -> Unit,
     onReadingAppearance: (() -> Unit)? = null,
@@ -1446,6 +1474,28 @@ private fun VideoSettingsSheet(
                     stringResource(R.string.video_ui_shared_reading_appearance), onClick = onReadingAppearance)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
+            Text(stringResource(R.string.video_ui_fullscreen_caption_size), style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                FullscreenCaptionSize.entries.forEachIndexed { index, choice ->
+                    SegmentedButton(
+                        selected = choice == captionSize,
+                        onClick = { vm.setFullscreenCaptionSize(choice) },
+                        enabled = !state.captionSizeSaving,
+                        shape = SegmentedButtonDefaults.itemShape(index, FullscreenCaptionSize.entries.size)
+                    ) {
+                        Text(stringResource(when (choice) {
+                            FullscreenCaptionSize.SMALL -> R.string.reader_preset_small
+                            FullscreenCaptionSize.MEDIUM -> R.string.reader_preset_medium
+                            FullscreenCaptionSize.LARGE -> R.string.reader_preset_large
+                        }))
+                    }
+                }
+            }
+            if (state.captionSizeSaveFailed) Text(stringResource(R.string.video_ui_caption_size_save_failed),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             VideoDownloadControls(downloadState, vm::downloadCurrentVideo, vm::removeDownload, vm::downloadPicture)
             if (state.offlinePlayback) TextButton(onClick = { onDismiss(); vm.streamInstead() }) {
                 Text(stringResource(R.string.video_download_stream_instead))

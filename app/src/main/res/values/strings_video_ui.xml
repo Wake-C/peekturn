@@ -50,6 +50,8 @@
     <string name="video_ui_error_generic">Something went wrong. Try again.</string>
 
     <!-- Captions -->
+    <string name="video_ui_fullscreen_caption_size">Fullscreen subtitle size</string>
+    <string name="video_ui_caption_size_save_failed">Could not save subtitle size. Try again.</string>
     <string name="video_ui_cached_captions_notice">Saved subtitles</string>
     <string name="video_ui_resume_save_failed">Could not remember this video for the next launch. Please reopen it to retry.</string>
     <string name="video_ui_shared_reading_appearance">Shared with books</string>

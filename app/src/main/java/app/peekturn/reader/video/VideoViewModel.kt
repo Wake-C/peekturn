@@ -29,6 +29,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import app.peekturn.reader.AppGraph
 import app.peekturn.reader.data.OfflineDictionary
 import app.peekturn.reader.learning.LearningSession
+import app.peekturn.reader.model.FullscreenCaptionSize
 import app.peekturn.reader.model.DEFAULT_VIDEO_QUALITY_HEIGHT
 import app.peekturn.reader.model.LookupContext
 import app.peekturn.reader.model.ReaderPreferences
@@ -93,6 +94,8 @@ internal data class VideoPlaybackState(
     val audioAvailable: Boolean = false,
     val modeSaving: Boolean = false,
     val modeSaveFailed: Boolean = false,
+    val captionSizeSaving: Boolean = false,
+    val captionSizeSaveFailed: Boolean = false,
     val watchSwitchFailure: VideoFailureKind? = null,
     val resumeSaveFailed: Boolean = false,
     val preferredHeight: Int = DEFAULT_VIDEO_QUALITY_HEIGHT,
@@ -897,6 +900,23 @@ internal class VideoViewModel(
         player.prepare()
         player.playWhenReady = plan.resumeOnReady
         if (recovering) startTicker()
+    }
+
+    fun setFullscreenCaptionSize(size: FullscreenCaptionSize) {
+        if (_state.value.captionSizeSaving || size == graph.store.settings.value.fullscreenCaptionSize) return
+        _state.update { it.copy(captionSizeSaving = true, captionSizeSaveFailed = false) }
+        viewModelScope.launch {
+            try {
+                graph.store.updateSettings { it.copy(fullscreenCaptionSize = size) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                graph.developerLog.recordFailure("video", "fullscreen-caption-size", failure)
+                _state.update { it.copy(captionSizeSaveFailed = true) }
+            } finally {
+                _state.update { it.copy(captionSizeSaving = false) }
+            }
+        }
     }
 
     suspend fun saveReadingAppearance(reading: ReaderPreferences, theme: String): Boolean = try {
