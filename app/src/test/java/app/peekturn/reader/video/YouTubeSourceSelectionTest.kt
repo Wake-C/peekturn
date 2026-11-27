@@ -182,7 +182,7 @@ class YouTubeSourceSelectionTest {
             videoFailureFor(ReCaptchaException("challenge", "https://example.invalid")).kind
         )
         assertEquals(
-            VideoFailureKind.Verification,
+            VideoFailureKind.SignInRequired,
             videoFailureFor(SignInConfirmNotBotException("bot check")).kind
         )
         assertEquals(VideoFailureKind.Restricted, videoFailureFor(PrivateContentException("private")).kind)

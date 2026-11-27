@@ -2,6 +2,11 @@ package app.peekturn.reader.video
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -44,7 +49,6 @@ import app.peekturn.reader.ui.PeekturnTheme
  * No account login cookies, general browser profile, or signed stream URLs are transferred.
  */
 class VideoVerificationActivity : AppCompatActivity() {
-    companion object { const val EXTRA_VIDEO_ID = "verification_video_id" }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,9 +56,12 @@ class VideoVerificationActivity : AppCompatActivity() {
         val graph = (application as PeekturnApp).graph
         val appSettings = graph.store.settings.value
         AppLanguage.apply(this, appSettings.uiLanguage)
-        val videoId = intent.getStringExtra(EXTRA_VIDEO_ID)?.takeIf(YouTubeUrls::isVideoId)
-        val startUrl = videoId?.let { "https://www.youtube.com/watch?v=$it" }
-            ?: "https://www.youtube.com/"
+        val link = intent.dataString?.let(YouTubeUrls::parse)
+        if (link == null) {
+            finish()
+            return
+        }
+        val watch = link.watchUri()
 
         setContent {
             val webView = remember {
@@ -66,15 +73,17 @@ class VideoVerificationActivity : AppCompatActivity() {
                     settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                            // This experiment supports anonymous challenges, never Google login.
                             val url = request.url
-                            return url.scheme != "https" || url.host == "accounts.google.com"
+                            if (url.scheme != "https") return true
+                            if (url.host != "accounts.google.com") return false
+                            if (request.isForMainFrame) openYouTubePage(this@VideoVerificationActivity, url)
+                            return true
                         }
                     }
                     webChromeClient = WebChromeClient()
                     CookieManager.getInstance().setAcceptCookie(true)
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                    loadUrl(startUrl)
+                    loadUrl(watch.toString())
                 }
             }
             var noVerificationCookie by remember { mutableStateOf(false) }
@@ -105,8 +114,8 @@ class VideoVerificationActivity : AppCompatActivity() {
                         )
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = ::finish, modifier = Modifier.heightIn(min = 48.dp)) {
-                            Text(stringResource(R.string.video_ui_cancel))
+                        TextButton(onClick = { openYouTubePage(this@VideoVerificationActivity, watch) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.video_ui_open_youtube))
                         }
                         Spacer(Modifier.width(8.dp))
                         Button(
@@ -133,4 +142,22 @@ class VideoVerificationActivity : AppCompatActivity() {
             }
         }
     }
+}
+
+internal fun VideoLink.watchUri(): Uri = Uri.parse(canonicalUrl).buildUpon().apply {
+    startMs?.takeIf { it >= 1000L }?.let { appendQueryParameter("t", "${it / 1000}s") }
+}.build()
+
+/** Android opens the official app or browser using its own sign-in session. */
+internal fun openYouTubePage(context: Context, uri: Uri) {
+    val intent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
+    try {
+        context.startActivity(intent)
+        return
+    } catch (_: ActivityNotFoundException) {
+        // The device has no available link handler.
+    } catch (_: SecurityException) {
+        // The installed handler is blocked for this user.
+    }
+    Toast.makeText(context, R.string.video_ui_no_youtube_handler, Toast.LENGTH_LONG).show()
 }

@@ -17,6 +17,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.PlayerMessage
@@ -77,6 +78,7 @@ internal data class VideoLookupRequest(
 internal data class VideoPlaybackState(
     val phase: VideoPhase = VideoPhase.Idle,
     val item: VideoItem? = null,
+    val awaitingFirstFrame: Boolean = false,
     val tracks: List<CaptionTrack> = emptyList(),
     val selectedTrackId: String? = null,
     val qualities: List<VideoQuality> = emptyList(),
@@ -116,8 +118,17 @@ internal data class VideoPlaybackState(
     val lookup: VideoLookupRequest? = null
 ) {
     /** Late metadata must not rewind a session that already attached its real player state. */
-    internal fun withStoredMetadata(stored: VideoItem): VideoPlaybackState =
-        if (item == null) copy(item = stored, positionMs = stored.positionMs, durationMs = stored.durationMs) else this
+    internal fun withStoredMetadata(stored: VideoItem, defaultAudioOnly: Boolean = false): VideoPlaybackState {
+        if (phase != VideoPhase.Loading || (item != null && item.id != stored.id)) return this
+        return copy(item = stored, positionMs = stored.positionMs, durationMs = stored.durationMs,
+            selectedTrackId = stored.selectedTrackId, readMode = stored.readMode,
+            audioOnly = preferredAudioOnly(stored, defaultAudioOnly), aspectRatio = stored.aspectRatio ?: aspectRatio)
+    }
+
+    internal fun withOpeningCaptions(document: CaptionDocument, sentences: List<CaptionCue>?): VideoPlaybackState {
+        if (phase != VideoPhase.Loading || item?.videoId != document.videoId || selectedTrackId != document.trackId) return this
+        return copy(captions = document, captionStatus = VideoCaptionStatus.Ready, mergedCues = sentences)
+    }
 
     /** Merged cues replace the original lines; while a merge runs the original stays visible. */
     val displayedCues: List<CaptionCue> get() = mergedCues ?: captions?.cues.orEmpty()
@@ -206,7 +217,7 @@ internal class VideoViewModel(
     private var qualityGeneration = 0L
     private var activeQualitySwitch: ActiveQualitySwitch? = null
     private var openingStartedAt = 0L
-    private var firstFramePending = false
+    private var reusedOnlineSource = false
     private var ticker: Job? = null
     private var foreground = false
     private var lastSavedPosition = -1L
@@ -237,8 +248,8 @@ internal class VideoViewModel(
     init {
         player.addListener(object : Player.Listener {
             override fun onRenderedFirstFrame() {
-                if (firstFramePending) {
-                    firstFramePending = false
+                if (_state.value.awaitingFirstFrame) {
+                    _state.update { it.copy(awaitingFirstFrame = false) }
                     graph.developerLog.recordEvent("video", "first-frame-ms:${SystemClock.elapsedRealtime() - openingStartedAt}")
                 }
             }
@@ -246,8 +257,8 @@ internal class VideoViewModel(
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 observeProgress()
                 _state.update { it.copy(isPlaying = isPlaying) }
-                if (isPlaying && firstFramePending && _state.value.audioOnly) {
-                    firstFramePending = false
+                if (isPlaying && _state.value.awaitingFirstFrame && _state.value.audioOnly) {
+                    _state.update { it.copy(awaitingFirstFrame = false) }
                     graph.developerLog.recordEvent("video", "first-audio-ms:${SystemClock.elapsedRealtime() - openingStartedAt}")
                 }
                 track?.foreground(foreground || isPlaying)
@@ -296,13 +307,35 @@ internal class VideoViewModel(
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
+                val current = _state.value
+                val item = current.item ?: return
+                if (current.phase != VideoPhase.Ready || current.audioOnly || videoSize.width <= 0 ||
+                    videoSize.height <= 0 || !videoSize.pixelWidthHeightRatio.isFinite() || videoSize.pixelWidthHeightRatio <= 0f) return
                 val ratio = videoAspectRatio(videoSize.width, videoSize.height, videoSize.pixelWidthHeightRatio)
-                _state.update { it.copy(aspectRatio = ratio) }
+                if (ratio == item.aspectRatio) return
+                _state.update { it.copy(item = item.copy(aspectRatio = ratio), aspectRatio = ratio) }
+                graph.scope.launch {
+                    try { graph.store.saveVideoAspectRatio(item.id, ratio) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) { graph.developerLog.recordFailure("video", "aspect-ratio", failure) }
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 graph.developerLog.recordFailure("video", "playback", error)
+                val current = _state.value
+                val item = current.item
+                if (item != null && !current.offlinePlayback) graph.videos.forgetSource(item.videoId)
                 val switching = activeQualitySwitch
+                if (switching == null && item != null && current.awaitingFirstFrame && reusedOnlineSource &&
+                    rejectedMediaLink(error)) {
+                    // A valid timestamp cannot account for a revoked or IP-bound link. Renew once.
+                    reusedOnlineSource = false
+                    val position = player.currentPosition.takeIf { it > 0 } ?: current.positionMs
+                    start(item.id, null, force = true, autoPlay = player.playWhenReady && current.lookup == null,
+                        preferDownload = request?.preferDownload ?: true, startAtMs = position, newOpen = false)
+                    return
+                }
                 if (switching != null && switching.token == qualityGeneration) {
                     activeQualitySwitch = null
                     val previous = _state.value.qualities.find { it.id == switching.previousId }
@@ -326,6 +359,12 @@ internal class VideoViewModel(
         })
     }
 
+    private fun rejectedMediaLink(error: PlaybackException): Boolean {
+        val response = generateSequence(error.cause) { it.cause }
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
+        return response?.responseCode in setOf(401, 403, 410)
+    }
+
     private fun playbackStateEnded(): Boolean = player.playbackState == Player.STATE_ENDED
 
     /**
@@ -338,7 +377,8 @@ internal class VideoViewModel(
         val speed = _state.value.speed.takeIf { id != null && _state.value.item?.id == id } ?: 1f
         val current = _state.value
         val targetHeight = if (newOpen) DEFAULT_VIDEO_QUALITY_HEIGHT else current.preferredHeight
-        if (!force && (request == next || id != null && current.item?.id == id && current.phase is VideoPhase.Ready)) {
+        if (!force && current.phase !is VideoPhase.Failed &&
+            (request == next || id != null && current.item?.id == id && current.phase is VideoPhase.Ready)) {
             // Opening the same shelf item can reuse a live service and clock. Reset only the target;
             // an Activity being recreated within this viewing session retains the manual choice.
             if (newOpen) {
@@ -357,7 +397,7 @@ internal class VideoViewModel(
         request = next
         val token = ++sessionGeneration
         openingStartedAt = SystemClock.elapsedRealtime()
-        firstFramePending = true
+        reusedOnlineSource = false
         sessionJob?.cancel()
         qualityRefresh?.cancel()
         captionJob?.cancel()
@@ -381,13 +421,17 @@ internal class VideoViewModel(
         narrationStop = viewModelScope.launch { silenceNarration() }
         lastSavedPosition = -1L
         val mergeEnabled = graph.store.settings.value.videoMergeCaptions
-        _state.value = VideoPlaybackState(
+        val opening = VideoPlaybackState(
             phase = VideoPhase.Loading,
+            awaitingFirstFrame = true,
             mergeEnabled = mergeEnabled,
             toolsVisible = lastFullscreen == true || graph.store.settings.value.videoAudioOnly,
             preferredHeight = targetHeight,
             speed = speed
         )
+        val defaultAudioOnly = graph.store.settings.value.videoAudioOnly
+        val shelfItem = id?.let { rowId -> graph.store.videos.value.firstOrNull { it.id == rowId } }
+        _state.value = shelfItem?.let { opening.withStoredMetadata(it, defaultAudioOnly) } ?: opening
         metadataJob?.cancel()
         if (id != null) {
             metadataJob = viewModelScope.launch {
@@ -399,11 +443,14 @@ internal class VideoViewModel(
                     graph.developerLog.recordFailure("video", "metadata", failure)
                     null
                 }
-                // The title may appear while the source resolves; the phase stays Loading, so this
-                // is stored metadata only and never fakes a playable picture or subtitle.
                 if (stored != null && token == sessionGeneration) {
-                    _state.update { it.withStoredMetadata(stored) }
+                    _state.update { it.withStoredMetadata(stored, defaultAudioOnly) }
                     if (foreground) rememberForegroundVideo()
+                    if (_state.value.phase == VideoPhase.Loading) {
+                        val document = cachedDocument(stored) ?: return@launch
+                        val sentences = if (mergeEnabled) withContext(Dispatchers.Default) { sentenceCaptions(document) } else null
+                        if (token == sessionGeneration) _state.update { it.withOpeningCaptions(document, sentences) }
+                    }
                 }
             }
         }
@@ -416,7 +463,7 @@ internal class VideoViewModel(
                     graph.videos.`import`(link, preferDownload)
                 } else {
                     val videoId = id ?: throw VideoFailure(VideoFailureKind.InvalidLink)
-                    graph.videos.open(videoId, preferDownload)
+                    graph.videos.open(videoId, preferDownload, refreshSource = force)
                 }
                 if (token != sessionGeneration) return@launch
                 attachSession(data, linkStart, autoPlay = autoPlay, token = token)
@@ -436,10 +483,14 @@ internal class VideoViewModel(
         }
     }
 
-    /** One explicit retry for the visible failure. No background or unbounded retries exist. */
-    fun verificationVideoId(): String? = _state.value.item?.videoId
-        ?: request?.url?.let { YouTubeUrls.parse(it)?.videoId }
+    fun recoveryVideoLink(): VideoLink? {
+        val current = _state.value
+        val shared = request?.url?.let(YouTubeUrls::parse)
+        val item = current.item ?: return shared
+        return VideoLink(item.videoId, shared?.startMs ?: current.positionMs)
+    }
 
+    /** One explicit retry for the visible failure. No background or unbounded retries exist. */
     fun retryLoad() {
         val failed = _state.value.phase as? VideoPhase.Failed ?: return
         if (failed.kind == VideoFailureKind.InvalidLink) return
@@ -450,7 +501,7 @@ internal class VideoViewModel(
         }
         val token = ++sessionGeneration
         openingStartedAt = SystemClock.elapsedRealtime()
-        firstFramePending = true
+        reusedOnlineSource = false
         sessionJob?.cancel()
         qualityRefresh?.cancel()
         captionGeneration++
@@ -459,12 +510,12 @@ internal class VideoViewModel(
         val startAt = lastKnownPosition()
         narrationStop?.cancel()
         narrationStop = viewModelScope.launch { silenceNarration() }
-        _state.update { it.copy(phase = VideoPhase.Loading, qualityChanging = false, modeSaving = false, modeSaveFailed = false) }
+        _state.update { it.copy(phase = VideoPhase.Loading, awaitingFirstFrame = true, qualityChanging = false, modeSaving = false, modeSaveFailed = false) }
         sessionJob = viewModelScope.launch {
             try {
                 val preferDownload = request?.preferDownload ?: true
                 val link = request?.url?.let(YouTubeUrls::parse)
-                val data = if (link == null) graph.videos.open(item.id, preferDownload)
+                val data = if (link == null) graph.videos.open(item.id, preferDownload, refreshSource = true)
                     else graph.videos.`import`(link, preferDownload)
                 if (token != sessionGeneration) return@launch
                 attachSession(data, startAt, autoPlay = true, token = token)
@@ -493,6 +544,8 @@ internal class VideoViewModel(
     ) {
         val item = data.item
         val resolved = data.resolved
+        reusedOnlineSource = data.reusedOnlineSource
+        if (reusedOnlineSource) graph.developerLog.recordEvent("video", "source-memory-reused")
         val knownHeights = graph.store.rememberVideoQualityHeights(item.id, resolved.qualities.map { it.height })
         if (token != sessionGeneration) return
         val duration = resolved.metadata.durationMs
@@ -533,6 +586,11 @@ internal class VideoViewModel(
         val playback = if (audioOnly && audioSource != null) audioSource!!
             else resolved.qualities.firstOrNull { it.id == qualityId }?.source ?: resolved.playback
         graph.developerLog.recordEvent("video", "source-ready-ms:${SystemClock.elapsedRealtime() - openingStartedAt}")
+        val preview = _state.value
+        val previewSentences = preview.mergedCues?.takeIf {
+            preview.phase == VideoPhase.Loading && preview.mergeEnabled && sessionDocument != null &&
+                preview.captions?.trackId == sessionDocument.trackId && preview.captions.sourceHash == sessionDocument.sourceHash
+        }
         _state.update {
             it.copy(
                 phase = VideoPhase.Ready,
@@ -556,8 +614,8 @@ internal class VideoViewModel(
                 captions = sessionDocument,
                 captionStatus = status,
                 captionFailure = data.captionFailure,
-                mergedCues = null,
-                mergePhase = VideoMergePhase.Off,
+                mergedCues = previewSentences,
+                mergePhase = if (previewSentences == null) VideoMergePhase.Off else VideoMergePhase.Available,
                 mergeProgress = null,
                 mergeFailure = null,
                 positionMs = start,
@@ -565,7 +623,7 @@ internal class VideoViewModel(
                 isPlaying = false,
                 playRequested = false,
                 ended = false,
-                aspectRatio = videoAspectRatio(0, 0)
+                aspectRatio = item.aspectRatio ?: it.aspectRatio
             )
         }
         if (!preserveCheckpoint) {
@@ -577,7 +635,7 @@ internal class VideoViewModel(
         if (foreground) itemTracker.foreground(true)
         // Caption HTTP can start while the previous narration is being stopped.
         if (status == VideoCaptionStatus.Loading && selected != null) loadTrack(selected, force = false)
-        if (_state.value.mergeEnabled && sessionDocument != null && !mergeBlocked) startMerge(sessionDocument)
+        if (_state.value.mergeEnabled && sessionDocument != null && previewSentences == null && !mergeBlocked) startMerge(sessionDocument)
         narrationStop?.join()
         if (token != sessionGeneration) return
         if (audioOnly && audioSource == null) {

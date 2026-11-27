@@ -299,6 +299,13 @@ class PeekturnStore internal constructor(private val context: Context, private v
         }
     }
 
+    internal suspend fun saveVideoAspectRatio(id: Long, aspectRatio: Float) = withContext(Dispatchers.IO) {
+        writes.withLock {
+            val values = ContentValues().apply { put("aspect_ratio", aspectRatio) }
+            if (db.writableDatabase.update("videos", values, "id=?", arrayOf(id.toString())) > 0) refreshVideos()
+        }
+    }
+
     suspend fun saveVideoPosition(id: Long, positionMs: Long) = withContext(Dispatchers.IO) {
         writes.withLock {
             val database = db.writableDatabase
@@ -613,7 +620,8 @@ class PeekturnStore internal constructor(private val context: Context, private v
         trackExplicit = getInt(getColumnIndexOrThrow("track_explicit")) != 0,
         audioOnly = getColumnIndexOrThrow("audio_only").let { if (isNull(it)) null else getInt(it) != 0 },
         readMode = getInt(getColumnIndexOrThrow("read_mode")) != 0,
-        isStandalone = getInt(getColumnIndexOrThrow("standalone")) != 0
+        isStandalone = getInt(getColumnIndexOrThrow("standalone")) != 0,
+        aspectRatio = getColumnIndexOrThrow("aspect_ratio").let { if (isNull(it)) null else getFloat(it) }
     )
     private fun android.database.Cursor.book() = Book(
         id = getLong(getColumnIndexOrThrow("id")), title = getString(getColumnIndexOrThrow("title")),
@@ -621,7 +629,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
         coverPath = getString(getColumnIndexOrThrow("cover_path")), locatorJson = getString(getColumnIndexOrThrow("locator")),
         progression = getDouble(getColumnIndexOrThrow("progression")), lastReadAt = getLong(getColumnIndexOrThrow("last_read_at"))
     )
-    private class Database(context: Context) : SQLiteOpenHelper(context, "peekturn.db", null, 7) {
+    private class Database(context: Context) : SQLiteOpenHelper(context, "peekturn.db", null, 8) {
         override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE books(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,author TEXT NOT NULL,file_path TEXT NOT NULL,cover_path TEXT,locator TEXT,progression REAL NOT NULL DEFAULT 0,last_read_at INTEGER NOT NULL DEFAULT 0)")
@@ -631,13 +639,14 @@ class PeekturnStore internal constructor(private val context: Context, private v
             createQualityTable(db)
         }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            if (newVersion > 7) error("No migration from $oldVersion to $newVersion")
+            if (newVersion > 8) error("No migration from $oldVersion to $newVersion")
             if (oldVersion < 2) createVideoTables(db)
             else {
                 if (oldVersion < 3) db.execSQL("ALTER TABLE videos ADD COLUMN track_explicit INTEGER NOT NULL DEFAULT 0")
                 if (oldVersion < 4) db.execSQL("ALTER TABLE videos ADD COLUMN audio_only INTEGER")
                 if (oldVersion < 5) db.execSQL("ALTER TABLE videos ADD COLUMN read_mode INTEGER NOT NULL DEFAULT 0")
                 if (oldVersion < 6) db.execSQL("ALTER TABLE videos ADD COLUMN standalone INTEGER NOT NULL DEFAULT 1")
+                if (oldVersion < 8) db.execSQL("ALTER TABLE videos ADD COLUMN aspect_ratio REAL")
             }
             if (oldVersion < 6) createPlaylistTables(db)
             if (oldVersion < 7) createQualityTable(db)
@@ -656,7 +665,7 @@ class PeekturnStore internal constructor(private val context: Context, private v
                 PRIMARY KEY(playlist_id,position))""")
         }
         private fun createVideoTables(db: SQLiteDatabase) {
-            db.execSQL("CREATE TABLE IF NOT EXISTS videos(id INTEGER PRIMARY KEY AUTOINCREMENT,video_id TEXT NOT NULL UNIQUE,title TEXT NOT NULL,author TEXT NOT NULL,duration_ms INTEGER NOT NULL DEFAULT 0,thumbnail_url TEXT,position_ms INTEGER NOT NULL DEFAULT 0,last_watched_at INTEGER NOT NULL DEFAULT 0,selected_track_id TEXT,track_explicit INTEGER NOT NULL DEFAULT 0,audio_only INTEGER,read_mode INTEGER NOT NULL DEFAULT 0,standalone INTEGER NOT NULL DEFAULT 1)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS videos(id INTEGER PRIMARY KEY AUTOINCREMENT,video_id TEXT NOT NULL UNIQUE,title TEXT NOT NULL,author TEXT NOT NULL,duration_ms INTEGER NOT NULL DEFAULT 0,thumbnail_url TEXT,position_ms INTEGER NOT NULL DEFAULT 0,last_watched_at INTEGER NOT NULL DEFAULT 0,selected_track_id TEXT,track_explicit INTEGER NOT NULL DEFAULT 0,audio_only INTEGER,read_mode INTEGER NOT NULL DEFAULT 0,standalone INTEGER NOT NULL DEFAULT 1,aspect_ratio REAL)")
             db.execSQL("CREATE TABLE IF NOT EXISTS video_daily(video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,date TEXT NOT NULL,seconds INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(video_id,date))")
         }
     }

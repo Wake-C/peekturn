@@ -1,8 +1,10 @@
 package app.peekturn.reader.video
 
+import android.util.LruCache
 import app.peekturn.reader.data.PeekturnStore
 import app.peekturn.reader.model.ModelConfig
 import kotlinx.coroutines.CancellationException
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** English source captions first; unrelated languages are never an implicit fallback. */
 fun preferredTrack(tracks: List<CaptionTrack>): CaptionTrack? {
@@ -14,7 +16,7 @@ fun preferredTrack(tracks: List<CaptionTrack>): CaptionTrack? {
 
 /**
  * The one place that turns a YouTube identity into a library entry, a playable session and cached
- * captions. Resolved media URLs live only in the returned session and are never written here.
+ * captions. A few recent, explicitly expiring VOD sources can be reused in memory on a shelf open.
  *
  * The public constructor is the integration contract. The internal one is the deterministic seam
  * used by tests: resolving, fetching and merging are the only source/model dependencies, so every
@@ -26,6 +28,7 @@ class VideoRepository internal constructor(
     private val resolveSource: suspend (videoId: String) -> ResolvedVideo,
     private val fetchCaptions: suspend (videoId: String, track: CaptionTrack) -> CaptionDocument,
     private val mergeGroups: suspend (ModelConfig, CaptionDocument, (Int, Int) -> Unit) -> List<CaptionGroup>,
+    private val nowSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
     private val offlineSession: suspend (VideoItem) -> VideoSessionData? = { null }
 ) {
     constructor(
@@ -42,6 +45,9 @@ class VideoRepository internal constructor(
         mergeGroups = { config, document, progress -> merger.merge(config, document, progress) },
         offlineSession = offlineSession
     )
+
+    private data class RecentSource(val video: ResolvedVideo, val reuseUntilSeconds: Long)
+    private val recentSources = LruCache<String, RecentSource>(3)
 
     /**
      * Resolves the source, stores its public metadata and returns the session that plays right away.
@@ -76,8 +82,8 @@ class VideoRepository internal constructor(
         return cached.copy(item = cached.item.copy(isStandalone = true))
     }
 
-    /** Re-resolves the temporary media URLs and restores position, track choice and cached captions. */
-    suspend fun open(id: Long, preferDownload: Boolean = true): VideoSessionData {
+    /** A complete download wins; a recent source can skip extraction when reopening an online item. */
+    suspend fun open(id: Long, preferDownload: Boolean = true, refreshSource: Boolean = false): VideoSessionData {
         val stored = try {
             store.findVideo(id)
         } catch (cancelled: CancellationException) {
@@ -88,9 +94,11 @@ class VideoRepository internal constructor(
         val item = stored ?: throw VideoFailure(VideoFailureKind.Storage)
         val cached = if (preferDownload) offlineSession(item) else null
         if (cached != null && suppliesChosenView(item, cached)) return cached
-        val resolved = try { resolve(item.videoId) }
+        val recent = if (refreshSource) null else recentSources.get(item.videoId)
+            ?.takeIf { nowSeconds() < it.reuseUntilSeconds }
+        val resolved = try { recent?.video ?: resolve(item.videoId) }
         catch (failure: VideoFailure) { if (cached != null) return cached.copy(watchFallbackFailure = failure.kind) else throw failure }
-        return session(opened(item), resolved)
+        return session(opened(item), resolved).copy(reusedOnlineSource = recent != null)
     }
 
     private fun suppliesChosenView(item: VideoItem, cached: VideoSessionData): Boolean =
@@ -176,6 +184,7 @@ class VideoRepository internal constructor(
      * before the row, so a producer still running cannot repopulate a deleted video.
      */
     suspend fun delete(item: VideoItem) {
+        forgetSource(item.videoId)
         cache.clear(item.videoId, mergedOnly = false)
         try {
             store.deleteVideo(item.id)
@@ -226,7 +235,10 @@ class VideoRepository internal constructor(
         throw VideoFailure(VideoFailureKind.Storage, e)
     }
 
+    internal fun forgetSource(videoId: String) { recentSources.remove(videoId) }
+
     private suspend fun resolve(videoId: String): ResolvedVideo {
+        forgetSource(videoId)
         val resolved = try {
             resolveSource(videoId)
         } catch (cancelled: CancellationException) {
@@ -238,7 +250,31 @@ class VideoRepository internal constructor(
         }
         // A source answer for another identity would store the wrong video; treat it as a failure.
         if (resolved.metadata.videoId != videoId) throw VideoFailure(VideoFailureKind.Provider)
+        reuseUntil(resolved)?.let { recentSources.put(videoId, RecentSource(resolved, it)) }
         return resolved
+    }
+
+    private fun reuseUntil(video: ResolvedVideo): Long? {
+        if (video.metadata.durationMs <= 0 || video.captionFailure != null) return null
+        val urls = buildSet<String> {
+            fun addSource(source: VideoPlaybackSource) {
+                add(source.videoUrl)
+                source.audioUrl?.let(::add)
+            }
+            addSource(video.playback)
+            video.audioOnly?.let(::addSource)
+            video.qualities.forEach { addSource(it.source) }
+            video.tracks.forEach { add(it.url) }
+        }
+        val now = nowSeconds()
+        var deadline = now + 15 * 60
+        for (url in urls) {
+            val expiry = url.toHttpUrlOrNull()?.queryParameter("expire")?.toLongOrNull() ?: return null
+            // Leave time to open the stream before its provider-supplied deadline.
+            if (expiry <= now + 60) return null
+            deadline = minOf(deadline, expiry - 60)
+        }
+        return deadline
     }
 
     private fun usable(document: CaptionDocument, videoId: String, trackId: String): Boolean =

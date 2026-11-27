@@ -380,11 +380,7 @@ private fun VideoOptions(item: VideoItem, onRemove: () -> Unit,
 @Composable
 private fun VideoThumbnail(url: String?, durationMs: Long, modifier: Modifier) {
     val fallback = stringResource(R.string.video_ui_thumbnail)
-    val cached = remember(url) { url?.let { thumbnailCache.get(it) } }
-    val image by produceState<ImageBitmap?>(initialValue = cached, key1 = url) {
-        value = cached
-        if (cached == null && url != null) value = withContext(Dispatchers.IO) { loadThumbnail(url) }
-    }
+    val image = rememberVideoThumbnail(url)
     val shape = RoundedCornerShape(8.dp)
     Box(modifier.clip(shape).background(MaterialTheme.colorScheme.surfaceVariant)) {
         val bitmap = image
@@ -417,6 +413,16 @@ private fun VideoThumbnail(url: String?, durationMs: Long, modifier: Modifier) {
             )
         }
     }
+}
+
+@Composable
+internal fun rememberVideoThumbnail(url: String?): ImageBitmap? = key(url) {
+    val cached = remember(url) { url?.let { thumbnailCache.get(it) } }
+    val image by produceState<ImageBitmap?>(initialValue = cached, key1 = url) {
+        value = cached
+        if (cached == null && url != null) value = withContext(Dispatchers.IO) { loadThumbnail(url) }
+    }
+    image
 }
 
 /** In-memory only: thumbnails are never written to disk and are not video media. */

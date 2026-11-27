@@ -17,6 +17,8 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
@@ -33,6 +35,9 @@ class FullscreenCaptionsTest {
         val cue = CaptionCue(1, 0, 5_000, "A short sentence.")
         val state = VideoPlaybackState(positionMs = 500, captions = CaptionDocument(
             "video", "en", "en", false, "hash", listOf(cue)))
+        val replayLabel = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+            .targetContext.getString(app.peekturn.reader.R.string.learning_popup_replay_sentence)
+        var replayed: Int? = null
         var controls by mutableStateOf(false)
         var density = 1f
         var safeBottom = 0
@@ -41,7 +46,7 @@ class FullscreenCaptionsTest {
             safeBottom = WindowInsets.safeDrawing.getBottom(LocalDensity.current)
             PeekturnTheme {
                 Box(Modifier.height(320.dp).testTag("frame")) {
-                    FullscreenCaptions(state.copy(toolsVisible = controls)) { _, _ -> }
+                    FullscreenCaptions(state.copy(toolsVisible = controls), onReplay = { replayed = it }) { _, _ -> }
                 }
             }
         }
@@ -50,9 +55,13 @@ class FullscreenCaptionsTest {
             val text = compose.onNodeWithText(cue.text).fetchSemanticsNode().boundsInRoot
             return (frame.bottom - text.bottom - safeBottom) / density
         }
+        val replay = compose.onNodeWithContentDescription(replayLabel)
+        replay.assertDoesNotExist()
         val viewingGap = bottomGapDp()
         assertTrue("Viewing margin: $viewingGap dp", viewingGap in 22f..36f)
         compose.runOnIdle { controls = true }
+        replay.performClick()
+        compose.runOnIdle { assertEquals(0, replayed) }
         val controlsGap = bottomGapDp()
         assertTrue("Footer clearance: $controlsGap dp", controlsGap in 64f..70f)
         compose.runOnIdle { controls = false }
@@ -70,7 +79,7 @@ class FullscreenCaptionsTest {
             density = LocalDensity.current.density
             PeekturnTheme {
                 Box(Modifier.size(300.dp, 560.dp).testTag("portrait-frame")) {
-                    FullscreenCaptions(state.copy(aspectRatio = aspect)) { _, word -> selected = word }
+                    FullscreenCaptions(state.copy(aspectRatio = aspect), onReplay = {}) { _, word -> selected = word }
                 }
             }
         }

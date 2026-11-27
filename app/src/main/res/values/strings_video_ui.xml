@@ -37,17 +37,20 @@
     <string name="video_ui_error_unsupported">This video format is not supported on this device.</string>
     <string name="video_ui_error_captions">Subtitles could not be loaded.</string>
     <string name="video_ui_error_provider">The request failed. Try again.</string>
-    <string name="video_ui_error_verification">YouTube has restricted this request. You can try verification, but it may still require sign-in or a different network.</string>
+    <string name="video_ui_error_sign_in">YouTube requires sign-in. Open the video on YouTube to sign in and keep watching there.</string>
+    <string name="video_ui_open_youtube">Open in YouTube</string>
+    <string name="video_ui_no_youtube_handler">No app is available to open YouTube.</string>
+    <string name="video_ui_error_verification">YouTube needs you to complete a verification check before Peekturn can play this video.</string>
     <string name="video_ui_verify_youtube">Try YouTube verification</string>
     <string name="video_ui_verify_title">YouTube verification</string>
-    <string name="video_ui_verify_detail">If YouTube shows a verification challenge, complete it here. Then try again in Peekturn. Google sign-in cookies will not be imported.</string>
+    <string name="video_ui_verify_detail">Complete the check, then try again in Peekturn. If YouTube asks you to sign in, open the video on YouTube.</string>
     <string name="video_ui_verify_retry">Try again in Peekturn</string>
-    <string name="video_ui_verify_no_cookies">No anonymous verification cookies were found. This restriction may not be solvable here.</string>
+    <string name="video_ui_verify_no_cookies">YouTube hasn’t provided a verification result for Peekturn yet.</string>
     <string name="video_ui_error_storage">The video could not be saved. Try again.</string>
     <string name="video_ui_error_generic">Something went wrong. Try again.</string>
 
     <!-- Captions -->
-    <string name="video_ui_cached_captions_notice">The video cannot play now. Saved subtitles are shown.</string>
+    <string name="video_ui_cached_captions_notice">Saved subtitles</string>
     <string name="video_ui_resume_save_failed">Could not remember this video for the next launch. Please reopen it to retry.</string>
     <string name="video_ui_shared_reading_appearance">Shared with books</string>
     <string name="video_ui_appearance_save_failed">Could not save reading appearance. Please try again.</string>
@@ -119,4 +122,6 @@
     <string name="video_ui_cache_merged_cleared">Merged subtitle cache cleared.</string>
     <string name="video_ui_cache_all_cleared">Subtitle cache cleared.</string>
     <string name="video_ui_cache_clear_failed">The subtitle cache could not be cleared.</string>
+    <string name="video_ui_brightness">Brightness</string>
+    <string name="video_ui_media_volume">Media volume</string>
 </resources>

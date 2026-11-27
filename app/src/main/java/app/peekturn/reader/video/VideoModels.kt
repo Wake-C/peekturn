@@ -18,7 +18,8 @@ data class VideoItem(val id: Long, val videoId: String, val title: String, val a
     val audioOnly: Boolean? = null,
     val readMode: Boolean = false,
     /** Shown on the main shelf as well as in any playlists that contain it. */
-    val isStandalone: Boolean = true)
+    val isStandalone: Boolean = true,
+    val aspectRatio: Float? = null)
 
 /** Resolved URLs are session-only and must never be persisted or logged. */
 data class CaptionTrack(val id: String, val language: String, val automatic: Boolean, val url: String,
@@ -49,11 +50,12 @@ data class CaptionGroup(val firstCueId: Int, val lastCueId: Int)
 
 enum class VideoFailureKind {
     InvalidLink, Network, Unavailable, Restricted, Unsupported, Captions, Provider, Storage,
-    Verification
+    Verification, SignInRequired
 }
 
 class VideoFailure(val kind: VideoFailureKind, cause: Throwable? = null) : Exception(kind.name, cause)
 
 data class VideoSessionData(val item: VideoItem, val resolved: ResolvedVideo,
     val captions: CaptionDocument?, val captionFailure: VideoFailureKind? = null,
-    val watchFallbackFailure: VideoFailureKind? = null)
+    val watchFallbackFailure: VideoFailureKind? = null,
+    val reusedOnlineSource: Boolean = false)

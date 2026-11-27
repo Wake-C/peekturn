@@ -157,6 +157,7 @@ class VideoActivity : AppCompatActivity() {
             }
             PeekturnTheme(theme = settings.appTheme) {
                 VideoScreen(
+                    window = window,
                     vm = vm,
                     state = state,
                     fullscreen = fullscreen,

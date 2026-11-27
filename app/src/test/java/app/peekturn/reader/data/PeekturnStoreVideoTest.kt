@@ -119,6 +119,7 @@ class PeekturnStoreVideoTest {
         val upgraded = PeekturnStore(context)
         upgraded.load()
         val kept = upgraded.findVideo(1)!!
+        assertNull(kept.aspectRatio)
         assertNull(kept.audioOnly)
         assertEquals(12_345L, kept.positionMs)
         assertEquals("en", kept.selectedTrackId)
@@ -128,6 +129,20 @@ class PeekturnStoreVideoTest {
         assertEquals(120L, upgraded.stats.value.books.single().seconds)
         upgraded.selectVideoAudioMode(1, true)
         assertEquals(true, PeekturnStore(context).findVideo(1)!!.audioOnly)
+    }
+
+    @Test fun decodedPortraitAspectSurvivesReimportAndStoreRecreation() = runBlocking {
+        val metadata = VideoMetadata("portrait", "Drama", "Channel", 600_000, null)
+        val item = store.upsertVideo(metadata)
+        assertNull(item.aspectRatio)
+        store.saveVideoPosition(item.id, 300_000)
+        val ratio = 480f / 854f
+        store.saveVideoAspectRatio(item.id, ratio)
+        assertEquals(ratio, store.videos.value.single().aspectRatio!!, 0f)
+        store.upsertVideo(metadata.copy(title = "New title"))
+        val reopened = PeekturnStore(context).findVideo(item.id)!!
+        assertEquals(ratio, reopened.aspectRatio!!, 0f)
+        assertEquals(300_000L, reopened.positionMs)
     }
 
     @Test fun versionFourAddsReadModeWithoutChangingAudioIntentOrPosition() = runBlocking {

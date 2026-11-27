@@ -22,6 +22,30 @@ class VideoStoredMetadataTest {
         assertFalse(failed.isPlaying)
     }
 
+    @Test fun cachedTextRestoresAtSavedPositionOnlyWhileOpeningItsOwnVideoAndTrack() {
+        val item = stored.copy(selectedTrackId = "en", readMode = true, audioOnly = true)
+        val cue = CaptionCue(1, 182_000L, 184_000L, "Here again.")
+        val doc = CaptionDocument(item.videoId, "en", "en", false, "hash", listOf(cue))
+        val opening = VideoPlaybackState(phase = VideoPhase.Loading).withStoredMetadata(item)
+        val preview = opening.withOpeningCaptions(doc, listOf(cue))
+        assertTrue(preview.readMode && preview.audioOnly)
+        assertEquals(VideoPhase.Loading, preview.phase)
+        assertEquals(item.positionMs, preview.positionMs)
+        assertEquals(listOf(cue), preview.displayedCues)
+        assertFalse(preview.playRequested)
+        assertSame(opening, opening.withOpeningCaptions(doc.copy(trackId = "other"), null))
+        assertSame(opening, opening.withOpeningCaptions(doc.copy(videoId = "other"), null))
+        val ready = preview.copy(phase = VideoPhase.Ready, positionMs = 185_000)
+        assertSame(ready, ready.withOpeningCaptions(doc, null))
+    }
+
+    @Test fun openingUsesTheSavedPortraitGeometryBeforeThePlayerReportsItsSize() {
+        val opening = VideoPlaybackState(phase = VideoPhase.Loading)
+        val portraitRatio = 480f / 854f
+        assertEquals(portraitRatio, opening.withStoredMetadata(stored.copy(aspectRatio = portraitRatio)).aspectRatio, 0f)
+        assertEquals(16f / 9f, opening.withStoredMetadata(stored).aspectRatio, 0f)
+    }
+
     @Test fun lateMetadataNeverRewindsAnAttachedSession() {
         val ready = VideoPlaybackState(phase = VideoPhase.Ready, item = stored, positionMs = 190_000,
             durationMs = 610_000, isPlaying = true, playRequested = true)

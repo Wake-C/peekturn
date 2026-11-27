@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.os.SystemClock
 import android.view.ViewGroup
+import android.view.Window
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -14,7 +16,6 @@ import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +32,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -91,6 +93,7 @@ internal val ReadingToolsHeight = 56.dp
  */
 @Composable
 internal fun VideoScreen(
+    window: Window,
     vm: VideoViewModel,
     state: VideoPlaybackState,
     fullscreen: Boolean,
@@ -154,6 +157,7 @@ internal fun VideoScreen(
     Box(Modifier.fillMaxSize().background(if (fullscreen) Color.Black else MaterialTheme.colorScheme.background)) {
         if (fullscreen) {
             FullscreenPlayer(
+                window = window,
                 state = state,
                 player = vm.player,
                 vm = vm,
@@ -231,7 +235,8 @@ internal fun VideoScreen(
                 onClose = vm::dismissLookup,
                 onCancel = vm::dismissLookup,
                 onAdjust = null,
-                onReplay = vm::replayLookupCue,
+                initialDictionary = (state.phase as? VideoPhase.Failed)?.kind == VideoFailureKind.Network,
+                onReplay = if (state.phase == VideoPhase.Ready) vm::replayLookupCue else null,
                 onDictionaryFailure = vm::recordDictionaryFailure,
                 placement = if (landscape) LearningPopupPlacement.Center else LearningPopupPlacement.Bottom,
                 onReadableContent = { readable -> vm.onLookupReadable(lookup.context, readable) }
@@ -256,28 +261,29 @@ private fun PortraitPlayer(
     val previous = { vm.previousCue(); locateCaption() }
     val next = { vm.nextCue(); locateCaption() }
     Box(Modifier.fillMaxSize()) {
-        when (val phase = state.phase) {
-            VideoPhase.Idle, VideoPhase.Loading -> {
+        val ready = state.phase == VideoPhase.Ready
+        when {
+            state.phase is VideoPhase.Failed -> {
                 Column(Modifier.fillMaxSize()) {
                     VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true, onEpisodes = onEpisodes,
                         hasItem = state.item != null, landscape = false,
+                        trailingIcon = PeekturnIcons.Fullscreen,
+                        trailingDescription = stringResource(R.string.video_ui_fullscreen),
+                        onTrailing = onFullscreen)
+                    FailureContent(state, state.phase.kind, vm, landscape = false, Modifier.weight(1f).fillMaxWidth())
+                }
+            }
+            !ready && state.item == null -> {
+                Column(Modifier.fillMaxSize()) {
+                    VideoTopBar("", onBack, onSettings, true, onEpisodes = onEpisodes,
+                        hasItem = false, landscape = false,
                         trailingIcon = PeekturnIcons.Fullscreen,
                         trailingDescription = stringResource(R.string.video_ui_fullscreen),
                         onTrailing = onFullscreen)
                     LoadingPanel(Modifier.weight(1f).fillMaxWidth())
                 }
             }
-            is VideoPhase.Failed -> {
-                Column(Modifier.fillMaxSize()) {
-                    VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true, onEpisodes = onEpisodes,
-                        hasItem = state.item != null, landscape = false,
-                        trailingIcon = PeekturnIcons.Fullscreen,
-                        trailingDescription = stringResource(R.string.video_ui_fullscreen),
-                        onTrailing = onFullscreen)
-                    FailureContent(state, phase.kind, vm, landscape = false, Modifier.weight(1f).fillMaxWidth())
-                }
-            }
-            VideoPhase.Ready -> {
+            else -> {
                 val configuration = LocalConfiguration.current
                 val videoHeight = minOf(
                     configuration.screenWidthDp.dp / state.aspectRatio.coerceAtLeast(0.2f),
@@ -285,11 +291,11 @@ private fun PortraitPlayer(
                 )
                 val topBar: @Composable (Boolean) -> Unit = { applyInsets ->
                     VideoTopBar(state.item?.title.orEmpty(), onBack, onSettings, true, onEpisodes = onEpisodes,
-                        hasItem = state.item != null, landscape = false,
+                        hasItem = ready, landscape = false,
                         trailingIcon = if (state.readMode) PeekturnIcons.Watch else PeekturnIcons.Fullscreen,
                         trailingDescription = stringResource(if (state.readMode) R.string.video_ui_watch_video else R.string.video_ui_fullscreen),
                         onTrailing = if (state.readMode) { { vm.setReadMode(false) } } else onFullscreen,
-                        trailingEnabled = !state.modeSaving, trailingBusy = state.modeSaving,
+                        trailingEnabled = !state.modeSaving && (!state.readMode || ready), trailingBusy = state.modeSaving,
                         applySystemInsets = applyInsets)
                 }
                 val captions: @Composable (Modifier) -> Unit = { modifier ->
@@ -304,25 +310,29 @@ private fun PortraitPlayer(
                 if (state.readMode) {
                     VideoReadingLayout(
                         immersive = reading.immersive,
-                        toolsVisible = state.toolsVisible,
+                        toolsVisible = !ready || state.toolsVisible,
                         onToggleTools = vm::toggleTools,
                         content = { captions(Modifier.fillMaxSize()) },
                         topBar = { topBar(false) },
-                        expandedTransport = { transport(false) },
-                        compactTransport = { VideoCompactTransport(state, previous, vm::togglePlay, next) }
+                        expandedTransport = {
+                            if (ready) transport(false) else LinearProgressIndicator(Modifier.fillMaxWidth())
+                        },
+                        compactTransport = { if (ready) VideoCompactTransport(state, previous, vm::togglePlay, next) }
                     )
                 } else {
                     Column(Modifier.fillMaxSize()) {
                         topBar(true)
                         if (!state.audioOnly) {
                             Box(Modifier.fillMaxWidth().height(videoHeight).background(Color.Black)) {
-                                PlayerSurface(player, Modifier.matchParentSize())
-                                PictureTapLayer(vm, Modifier.matchParentSize())
+                                if (ready) PlayerSurface(player, Modifier.matchParentSize())
+                                if (!ready || state.awaitingFirstFrame) OpeningPicture(state, Modifier.matchParentSize())
+                                if (ready) PictureTapLayer(vm, Modifier.matchParentSize())
                             }
                         }
+                        if (state.audioOnly && !ready) LinearProgressIndicator(Modifier.fillMaxWidth())
                         captions(Modifier.weight(1f).fillMaxWidth())
                     }
-                    if (state.toolsVisible || state.audioOnly) {
+                    if (ready && (state.toolsVisible || state.audioOnly)) {
                         Box(Modifier.align(Alignment.BottomCenter)) { transport(true) }
                     }
                 }
@@ -333,6 +343,7 @@ private fun PortraitPlayer(
 
 @Composable
 private fun FullscreenPlayer(
+    window: Window,
     state: VideoPlaybackState,
     player: Player,
     vm: VideoViewModel,
@@ -340,18 +351,28 @@ private fun FullscreenPlayer(
     onEpisodes: (() -> Unit)?,
     onExitFullscreen: () -> Unit
 ) {
+    DisposableEffect(window) {
+        val original = window.attributes.screenBrightness
+        onDispose {
+            if (window.attributes.screenBrightness != original) {
+                window.attributes = window.attributes.apply { screenBrightness = original }
+            }
+        }
+    }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         when (val phase = state.phase) {
             VideoPhase.Idle, VideoPhase.Loading -> {
-                LoadingPanel(Modifier.fillMaxSize(), onBlack = true)
+                if (state.item == null) LoadingPanel(Modifier.fillMaxSize(), onBlack = true)
+                else OpeningPicture(state, Modifier.fillMaxSize())
             }
             is VideoPhase.Failed -> {
                 FailureContent(state, phase.kind, vm, landscape = true, Modifier.fillMaxSize())
             }
             VideoPhase.Ready -> {
                 PlayerSurface(player, Modifier.matchParentSize())
-                PictureTapLayer(vm, Modifier.matchParentSize())
-                FullscreenCaptions(state, vm::openLookup)
+                if (state.awaitingFirstFrame) OpeningPicture(state, Modifier.matchParentSize())
+                FullscreenPictureGestures(window, vm::toggleTools, Modifier.matchParentSize())
+                FullscreenCaptions(state, vm::playCue, vm::openLookup)
                 if (state.toolsVisible) {
                     FullscreenChrome(
                         state = state,
@@ -499,6 +520,27 @@ private fun PlayerSurface(player: Player, modifier: Modifier) {
 }
 
 @Composable
+private fun OpeningPicture(state: VideoPlaybackState, modifier: Modifier) {
+    val poster = rememberVideoThumbnail(state.item?.thumbnailUrl)
+    val loading = stringResource(R.string.video_ui_loading)
+    Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
+        if (poster != null) {
+            Image(poster, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            Spacer(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.25f)))
+        }
+        CircularProgressIndicator(Modifier.size(24.dp).semantics { contentDescription = loading },
+            color = Color.White, strokeWidth = 2.dp)
+        if (state.positionMs > 0) {
+            Surface(Modifier.align(Alignment.BottomStart).padding(8.dp),
+                shape = RoundedCornerShape(4.dp), color = VideoScrim, contentColor = Color.White) {
+                Text(formatClock(state.positionMs), Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+@Composable
 private fun LoadingPanel(modifier: Modifier, onBlack: Boolean = false) {
     val color = if (onBlack) Color.White else MaterialTheme.colorScheme.onBackground
     Column(
@@ -524,7 +566,7 @@ private fun FailureContent(
     landscape: Boolean,
     modifier: Modifier
 ) {
-    val cues = state.captions?.cues.orEmpty()
+    val cues = state.displayedCues
     val frame = if (landscape) {
         modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
@@ -534,62 +576,39 @@ private fun FailureContent(
         modifier.fillMaxWidth().padding(24.dp)
     }
     Column(frame, horizontalAlignment = Alignment.CenterHorizontally) {
-        if (state.audioOnly && !state.audioAvailable) {
-            Spacer(Modifier.weight(1f))
+        if (cues.isEmpty()) Spacer(Modifier.weight(1f))
+        if (state.audioOnly && !state.audioAvailable && kind == VideoFailureKind.Unsupported) {
             Text(stringResource(R.string.video_ui_audio_unavailable))
             TextButton(onClick = { vm.setAudioOnly(false) }) { Text(stringResource(R.string.video_ui_watch_video)) }
-            Spacer(Modifier.weight(1f))
-            return@Column
+        } else {
+            FailureMessage(kind, vm.recoveryVideoLink(), vm::retryLoad)
         }
         if (cues.isEmpty()) {
             Spacer(Modifier.weight(1f))
-            FailureMessage(kind, vm)
-            Spacer(Modifier.weight(1f))
         } else {
-            FailureMessage(kind, vm)
-            Spacer(Modifier.height(20.dp))
-            Text(
-                stringResource(R.string.video_ui_cached_captions_notice),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth()
-            )
-            state.captions?.let { document ->
-                val uiLocale = LocalConfiguration.current.locales[0]
-                Text(
-                    stringResource(
-                        R.string.video_ui_track_label,
-                        localizedLanguageName(document.language, uiLocale)
+            val document = state.captions
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(stringResource(R.string.video_ui_cached_captions_notice),
+                    style = MaterialTheme.typography.labelMedium)
+                if (document != null) Text(
+                    stringResource(R.string.video_ui_track_label,
+                        localizedLanguageName(document.language, LocalConfiguration.current.locales[0])
                             ?: stringResource(R.string.video_ui_unknown_language),
-                        stringResource(
-                            if (document.automatic) R.string.video_ui_track_auto else R.string.video_ui_track_manual
-                        )
-                    ),
+                        stringResource(if (document.automatic) R.string.video_ui_track_auto else R.string.video_ui_track_manual)),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 6.dp)
-                )
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                items(cues, key = { it.id }) { cue ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Text(
-                            formatClock(cue.startMs),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.width(52.dp).padding(top = 2.dp)
-                        )
-                        Text(
-                            cue.text,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+            val active = activeCueIndex(cues, state.positionMs)
+            val list = key(state.item?.id, state.selectedTrackId) {
+                rememberCaptionListState(active ?: navigationCueIndex(cues, state.positionMs) ?: 0,
+                    playRequested = false, lookupOpen = state.lookup != null, locateRequest = 0)
+            }
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list) {
+                itemsIndexed(cues, key = { _, cue -> cue.id }) { index, cue ->
+                    VideoTranscriptRow(cue, state.lookup?.takeIf { it.cueId == cue.id }?.selection,
+                        current = active == index, onPlay = null, onLookup = { vm.openLookup(cue.id, it) })
                 }
             }
         }
@@ -597,10 +616,10 @@ private fun FailureContent(
 }
 
 @Composable
-private fun FailureMessage(kind: VideoFailureKind, vm: VideoViewModel) {
+internal fun FailureMessage(kind: VideoFailureKind, link: VideoLink?, onRetry: () -> Unit) {
     val context = LocalContext.current
     val verify = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) vm.retryLoad()
+        if (result.resultCode == Activity.RESULT_OK) onRetry()
     }
     Text(
         stringResource(videoFailureMessage(kind)),
@@ -608,19 +627,26 @@ private fun FailureMessage(kind: VideoFailureKind, vm: VideoViewModel) {
         color = MaterialTheme.colorScheme.onBackground
     )
     if (kind != VideoFailureKind.InvalidLink) {
-        Spacer(Modifier.height(16.dp))
-        if (kind == VideoFailureKind.Verification) {
-            TextButton(
-                onClick = {
-                    verify.launch(Intent(context, VideoVerificationActivity::class.java).apply {
-                        putExtra(VideoVerificationActivity.EXTRA_VIDEO_ID, vm.verificationVideoId())
-                    })
-                },
-                modifier = Modifier.heightIn(min = 48.dp)
-            ) { Text(stringResource(R.string.video_ui_verify_youtube)) }
-        }
-        TextButton(onClick = vm::retryLoad, modifier = Modifier.heightIn(min = 48.dp)) {
-            Text(stringResource(R.string.video_ui_retry))
+        Spacer(Modifier.height(8.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (kind == VideoFailureKind.SignInRequired && link != null) {
+                Button(onClick = { openYouTubePage(context, link.watchUri()) },
+                    modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(stringResource(R.string.video_ui_open_youtube))
+                }
+            } else if (kind == VideoFailureKind.Verification && link != null) {
+                TextButton(
+                    onClick = {
+                        verify.launch(Intent(context, VideoVerificationActivity::class.java).apply {
+                            data = link.watchUri()
+                        })
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) { Text(stringResource(R.string.video_ui_verify_youtube)) }
+            }
+            TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.video_ui_retry))
+            }
         }
     }
 }
@@ -634,6 +660,7 @@ internal fun videoFailureMessage(kind: VideoFailureKind): Int = when (kind) {
     VideoFailureKind.Captions -> R.string.video_ui_error_captions
     VideoFailureKind.Provider -> R.string.video_ui_error_provider
     VideoFailureKind.Storage -> R.string.video_ui_error_storage
+    VideoFailureKind.SignInRequired -> R.string.video_ui_error_sign_in
     VideoFailureKind.Verification -> R.string.video_ui_error_verification
 }
 
@@ -940,6 +967,7 @@ internal fun rememberCaptionListState(currentIndex: Int?, playRequested: Boolean
     locateRequest: Int): LazyListState {
     val list = rememberLazyListState()
     var browsing by rememberSaveable(locateRequest) { mutableStateOf(false) }
+    var initiallyLocated by remember(list) { mutableStateOf(false) }
     val dragging by list.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(dragging) { if (dragging) browsing = true }
     // Returning from fullscreen restores a browsed transcript unless playback actually resumed.
@@ -954,7 +982,10 @@ internal fun rememberCaptionListState(currentIndex: Int?, playRequested: Boolean
     val tracking = !browsing && !dragging && !lookupOpen
     LaunchedEffect(currentIndex, tracking, locateRequest, height, count) {
         if (tracking && currentIndex != null && currentIndex in 0 until count && height > 0) {
-            list.animateScrollToItem(currentIndex, scrollOffset = -(height * 0.26f).toInt())
+            val offset = -(height * 0.26f).toInt()
+            if (initiallyLocated) list.animateScrollToItem(currentIndex, scrollOffset = offset)
+            else list.scrollToItem(currentIndex, scrollOffset = offset)
+            initiallyLocated = true
         }
     }
     return list
@@ -971,6 +1002,7 @@ private fun CaptionPanel(
 ) {
     val cues = state.displayedCues
     val configuration = LocalConfiguration.current
+    val actionsEnabled = state.phase is VideoPhase.Ready
     val density = LocalDensity.current
     val metrics = readerTextMetrics(reading, configuration.screenWidthDp.toFloat())
     val readingFamily = rememberReaderFontFamily(reading.fontFamily)
@@ -1004,6 +1036,7 @@ private fun CaptionPanel(
         }
         if (!state.readMode) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         when {
+            state.phase == VideoPhase.Loading && cues.isEmpty() -> Spacer(Modifier.weight(1f))
             state.captionStatus == VideoCaptionStatus.Loading -> CaptionNotice(
                 text = stringResource(R.string.video_ui_caption_loading),
                 loading = true,
@@ -1050,47 +1083,73 @@ private fun CaptionPanel(
                     if (state.readMode) {
                         VideoReadingParagraph(
                             cue = cue, selected = selection, current = current,
+                            gesturesEnabled = actionsEnabled,
                             onLookup = { vm.openLookup(cue.id, it) },
                             preferences = reading, fontFamily = readingFamily, metrics = metrics,
                             onBlankTap = vm::toggleTools
                         )
-                    } else Row(
-                        Modifier.fillMaxWidth()
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                            .background(
-                                if (current) MaterialTheme.colorScheme.activeSentenceBackground else Color.Transparent,
-                                RoundedCornerShape(8.dp)
-                            )
-                            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.video_ui_seek)) {
-                                onPlayCue(index)
-                            }
-                            .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Box(
-                            Modifier.width(52.dp)
-                                .heightIn(min = 48.dp)
-                                .padding(top = 1.dp)
-                        ) {
-                            Text(
-                                (if (cue.timingApproximate) "~ " else "") + formatClock(cue.startMs),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (current) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        CaptionText(
+                    } else {
+                        VideoTranscriptRow(
                             cue = cue,
                             selected = selection,
-                            highlight = MaterialTheme.colorScheme.primaryContainer,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f),
-                            onLookup = { vm.openLookup(cue.id, it) },
-                            onBlankTap = null
+                            current = current,
+                            enabled = actionsEnabled,
+                            onPlay = { onPlayCue(index) },
+                            onLookup = { vm.openLookup(cue.id, it) }
                         )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun VideoTranscriptRow(
+    cue: CaptionCue,
+    selected: CaptionSelection?,
+    current: Boolean,
+    enabled: Boolean = true,
+    onPlay: (() -> Unit)?,
+    onLookup: (CaptionSelection) -> Unit
+) {
+    val replay = current && enabled && onPlay != null
+    val playLabel = stringResource(if (replay) R.string.learning_popup_replay_sentence else R.string.video_ui_seek)
+    Row(
+        Modifier.fillMaxWidth()
+            .padding(horizontal = 4.dp)
+            .background(
+                if (current) MaterialTheme.colorScheme.activeSentenceBackground else Color.Transparent,
+                RoundedCornerShape(8.dp)
+            )
+            .then(if (onPlay == null) Modifier else Modifier.clickable(enabled = enabled,
+                role = Role.Button, onClickLabel = playLabel, onClick = onPlay))
+            .heightIn(min = 48.dp)
+            .wrapContentHeight(Alignment.CenterVertically)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Row(Modifier.widthIn(min = 52.dp).alignByBaseline(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                (if (cue.timingApproximate) "~ " else "") + formatClock(cue.startMs),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (current) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            // Reserve the glyph width on every row so text keeps its wrapping when the active cue changes.
+            Box(Modifier.width(20.dp), contentAlignment = Alignment.Center) {
+                if (replay) Icon(PeekturnIcons.Replay, playLabel, Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+        CaptionText(
+            cue = cue,
+            selected = selected,
+            highlight = MaterialTheme.colorScheme.primaryContainer,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f).alignByBaseline(),
+            gesturesEnabled = enabled,
+            onLookup = onLookup,
+            onBlankTap = null
+        )
     }
 }
 
@@ -1125,7 +1184,7 @@ private fun CaptionFailure(text: String, onRetry: () -> Unit, modifier: Modifier
 }
 
 @Composable
-internal fun FullscreenCaptions(state: VideoPlaybackState, onLookup: (Int, CaptionSelection) -> Unit) {
+internal fun FullscreenCaptions(state: VideoPlaybackState, onReplay: (Int) -> Unit, onLookup: (Int, CaptionSelection) -> Unit) {
     val cues = state.displayedCues
     val index = activeCueIndex(cues, state.positionMs) ?: return
     val cue = cues.getOrNull(index) ?: return
@@ -1184,10 +1243,16 @@ internal fun FullscreenCaptions(state: VideoPlaybackState, onLookup: (Int, Capti
                         fontSize = if (compact) 16.sp else 19.sp,
                         lineHeight = if (compact) 19.sp else 26.sp,
                         textAlign = if (portrait) TextAlign.Center else TextAlign.Start,
-                        modifier = Modifier.weight(1f, fill = !portrait),
+                        modifier = Modifier.weight(1f, fill = !portrait).align(Alignment.Bottom),
                         onLookup = { onLookup(cue.id, it) },
                         onBlankTap = null
                     )
+                    if (state.toolsVisible) {
+                        IconButton(onClick = { onReplay(index) }, modifier = Modifier.size(40.dp)) {
+                            Icon(PeekturnIcons.Replay, stringResource(R.string.learning_popup_replay_sentence),
+                                Modifier.size(20.dp))
+                        }
+                    }
                 }
             }
         }
@@ -1205,6 +1270,7 @@ internal fun VideoReadingParagraph(
     selected: CaptionSelection? = null,
     current: Boolean,
     onLookup: (CaptionSelection) -> Unit,
+    gesturesEnabled: Boolean = true,
     preferences: ReaderPreferences = ReaderPreferences(),
     fontFamily: FontFamily = rememberReaderFontFamily(preferences.fontFamily),
     metrics: ReaderTextMetrics = readerTextMetrics(preferences, LocalConfiguration.current.screenWidthDp.toFloat()),
@@ -1223,6 +1289,7 @@ internal fun VideoReadingParagraph(
         letterSpacing = metrics.letterSpacingEm.em,
         activeBackground = if (current) MaterialTheme.colorScheme.activeSentenceBackground else Color.Unspecified,
         modifier = Modifier.fillMaxWidth(),
+        gesturesEnabled = gesturesEnabled,
         onLookup = { flowing.toSource(it)?.let(onLookup) },
         onBlankTap = onBlankTap
     )
@@ -1243,6 +1310,7 @@ private fun CaptionText(
     activeBackground: Color = Color.Unspecified,
     maxLines: Int = Int.MAX_VALUE,
     modifier: Modifier = Modifier,
+    gesturesEnabled: Boolean = true,
     onLookup: (CaptionSelection) -> Unit,
     onBlankTap: (() -> Unit)?
 ) {
@@ -1262,7 +1330,8 @@ private fun CaptionText(
     }
     Text(
         text,
-        modifier = modifier.pointerInput(cue.id, layout) {
+        modifier = modifier.pointerInput(cue.id, layout, gesturesEnabled) {
+            if (!gesturesEnabled) return@pointerInput
             val layoutResult = layout ?: return@pointerInput
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)

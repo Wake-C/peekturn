@@ -29,6 +29,8 @@ class VideoRepositoryTest {
     private val documents = mutableMapOf<String, CaptionDocument>()
     private var resolveFailure: VideoFailure? = null
     private var captionFailure: VideoFailure? = null
+    private var sourceUrl = "https://media.invalid/video.mp4"
+    private var nowSeconds = 1_800_000_000L
     private var resolveCalls = 0
     private var fetchCalls = 0
     private var mergeCalls = 0
@@ -44,12 +46,13 @@ class VideoRepositoryTest {
         repository = VideoRepository(
             store = store,
             cache = cache,
+            nowSeconds = { nowSeconds },
             resolveSource = { videoId ->
                 resolveCalls++
                 resolveFailure?.let { throw it }
                 ResolvedVideo(
                     metadata.copy(videoId = videoId),
-                    VideoPlaybackSource("https://media.invalid/video.mp4", "video/mp4"),
+                    VideoPlaybackSource(sourceUrl, "video/mp4"),
                     tracks,
                     captionFailure = trackListingFailure
                 )
@@ -262,7 +265,7 @@ class VideoRepositoryTest {
         assertEquals(0, resolveCalls)
     }
 
-    @Test fun openingResolvesFreshMediaEachTimeAndReusesCachedCaptions() = runBlocking {
+    @Test fun unknownExpiryResolvesFreshMediaEachTimeAndReusesCachedCaptions() = runBlocking {
         tracks = listOf(CaptionTrack("en-manual", "en", false, "https://captions.invalid/en"))
         documents["en-manual"] = document("en-manual")
         val item = store.upsertVideo(metadata)
@@ -278,6 +281,40 @@ class VideoRepositoryTest {
         assertEquals("The chosen track is remembered for later offline reads", "en-manual", second.item.selectedTrackId)
         assertEquals(2, resolveCalls)
         assertEquals("The parsed track is fetched once and then served from the cache", 1, fetchCalls)
+    }
+
+    @Test fun recentShelfOpenReusesOnlyTheSourceAndReadsTheLatestPositionAndCaptions() = runBlocking {
+        sourceUrl += "?expire=${nowSeconds + 3600}"
+        val track = CaptionTrack("en", "en", false, "https://captions.invalid/en?expire=${nowSeconds + 3600}")
+        tracks = listOf(track)
+        documents[track.id] = document(track.id)
+        val first = repository.`import`(VideoLink(VIDEO))
+        repository.loadCaptions(first.item, track)
+        store.saveVideoPosition(first.item.id, 302_000)
+        nowSeconds += 6 * 60
+
+        val reopened = repository.open(first.item.id)
+        assertTrue(reopened.reusedOnlineSource)
+        assertEquals(302_000L, reopened.item.positionMs)
+        assertEquals(track.id, reopened.captions?.trackId)
+        assertEquals(1, resolveCalls)
+        assertEquals(1, fetchCalls)
+        assertFalse(repository.open(first.item.id, refreshSource = true).reusedOnlineSource)
+        assertEquals(2, resolveCalls)
+    }
+
+    @Test fun theEarliestTrackExpiryOrTheMemoryLifetimeEndsReuse() = runBlocking {
+        sourceUrl += "?expire=${nowSeconds + 7200}"
+        tracks = listOf(CaptionTrack("en", "en", false, "https://captions.invalid/en?expire=${nowSeconds + 300}"))
+        val item = repository.`import`(VideoLink(VIDEO)).item
+        nowSeconds += 241
+        tracks = emptyList()
+        assertFalse(repository.open(item.id).reusedOnlineSource)
+        assertEquals(2, resolveCalls)
+        assertTrue(repository.open(item.id).reusedOnlineSource)
+        nowSeconds += 16 * 60
+        assertFalse(repository.open(item.id).reusedOnlineSource)
+        assertEquals(3, resolveCalls)
     }
 
     @Test fun loadCaptionsReusesTheCacheUnlessARegenerationIsRequested() = runBlocking {
