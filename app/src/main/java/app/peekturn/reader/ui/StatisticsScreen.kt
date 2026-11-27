@@ -133,6 +133,8 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, videos: List<VideoI
     val videoTotals = remember(stats.videos) { videoSeconds(stats) }
     val recentVideos = remember(videos, videoTotals) { recentlyWatchedVideos(videos, videoTotals) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 24.dp)) {
+        item { Text(stringResource(R.string.shell_statistics_title), style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(bottom = 8.dp)) }
         item {
             BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
                 val horizontal = maxWidth / LocalDensity.current.fontScale >= 300.dp

@@ -272,21 +272,13 @@ private const val SELECTION_ALPHA = 0.32f
             .clickable(role = Role.Button, onClickLabel = label, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // A's active rail is a short accent rule at the top of the entry, not a second icon colour.
-        Box(
-            Modifier.fillMaxWidth(0.44f).height(2.dp).background(
-                if (active) ink else Color.Transparent,
-                RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp)
-            )
-        )
         Spacer(Modifier.height(6.dp))
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = ink,
-            modifier = Modifier.size(21.dp)
-        )
-        Spacer(Modifier.height(3.dp))
+        Box(Modifier.size(48.dp, 29.dp)
+            .background(if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, RoundedCornerShape(15.dp)),
+            contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = ink, modifier = Modifier.size(21.dp))
+        }
+        Spacer(Modifier.height(2.dp))
         Text(
             label,
             color = ink,
@@ -298,6 +290,6 @@ private const val SELECTION_ALPHA = 0.32f
             textAlign = TextAlign.Center,
             maxLines = 2
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
     }
 }

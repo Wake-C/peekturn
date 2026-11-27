@@ -92,6 +92,12 @@ internal fun VideoLibraryScreen(
     LazyColumn(Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 48.dp)
     ) {
+        item {
+            Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.video_shell_title), Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
+                VideoImportButton(onImport)
+            }
+        }
         if (ordered.isEmpty()) {
             item {
                 Column(
@@ -108,6 +114,8 @@ internal fun VideoLibraryScreen(
         } else {
             if (focus != null) {
                 item(key = "continue-${focus.key}") {
+                    Text(stringResource(R.string.design_continue_video), style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(bottom = 8.dp))
                     when (focus) {
                         is ShelfEntry.Single -> ContinueRow(focus.item, onOpen = { onOpen(focus.item) })
                         is ShelfEntry.Playlist -> focus.resumeVideo?.let { episode ->
@@ -127,8 +135,7 @@ internal fun VideoLibraryScreen(
                     Text(if (playlists.isEmpty()) stringResource(R.string.video_ui_video_count, ordered.size)
                         else pluralStringResource(R.plurals.playlist_library_count, ordered.size, ordered.size),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.width(8.dp))
-                    VideoImportButton(onImport)
+
                 }
             }
             items(ordered, key = ShelfEntry::key) { entry ->
@@ -235,11 +242,11 @@ private fun VideoImportButton(onImport: () -> Unit) {
 @Composable
 private fun ContinueRow(item: VideoItem, title: String = item.title, subtitle: String = item.author, onOpen: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth()
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp))
             .clickable(role = Role.Button, onClickLabel = stringResource(R.string.video_ui_open_video, title)) {
                 onOpen()
             }
-            .padding(vertical = 4.dp),
+            .padding(horizontal = 12.dp, vertical = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

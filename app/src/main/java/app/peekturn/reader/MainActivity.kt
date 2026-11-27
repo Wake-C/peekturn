@@ -213,7 +213,7 @@ private fun PeekturnHome(
                         NavigationBarItem(selected = state.tab == index, onClick = { vm.tab(index) },
                             icon = { Icon(when(index) { 0 -> PeekturnIcons.BookOpen; 1 -> PeekturnIcons.Video; 2 -> PeekturnIcons.Statistics; else -> PeekturnIcons.Settings }, label) },
                             label = { Text(label) },
-                            colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.surfaceVariant,
+                            colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primaryContainer,
                                 selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary))
                     }
                 }
@@ -296,7 +296,7 @@ private fun PeekturnHome(
             title = { Text(stringResource(if (videoUrlDialog) R.string.video_shell_import_title else R.string.shell_import_from_url)) },
             text = {
                 OutlinedTextField(
-                    value = urlText,
+                    value = urlText, modifier = Modifier.fillMaxWidth(),
                     onValueChange = { urlText = it; urlInvalid = false },
                     singleLine = true,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
@@ -311,7 +311,7 @@ private fun PeekturnHome(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                Button(onClick = {
                     val isVideo = videoUrlDialog || YouTubeUrls.isYouTubeUrl(urlText)
                     val isPlaylist = YouTubeUrls.playlistId(urlText) != null
                     val url = if (isVideo) urlText.trim().takeIf { isPlaylist || YouTubeUrls.parse(it) != null }

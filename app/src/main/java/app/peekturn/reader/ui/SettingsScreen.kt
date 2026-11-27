@@ -80,6 +80,7 @@ fun SettingsScreen(
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
         .widthIn(max = 640.dp).padding(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(bottom = 12.dp))
         Text(stringResource(R.string.settings_interface_section), style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         SettingsGroup {
@@ -88,6 +89,23 @@ fun SettingsScreen(
             LanguagePreference(settings.uiLanguage) { value -> onSave { latest -> latest.copy(uiLanguage = value) } }
         }
         Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(16.dp))
+        Text(stringResource(R.string.design_lookup_group), style = MaterialTheme.typography.titleSmall)
+        SettingsGroup {
+            SettingsDisclosure(
+                stringResource(R.string.floating_lookup_title),
+                stringResource(if (floatingLookupActive) R.string.floating_lookup_on else R.string.floating_lookup_off),
+                icon = PeekturnIcons.Search,
+                onClick = { if (floatingLookupActive) onFloatingLookup() else floatingLookupConsent = true }
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SettingsDisclosure(
+                stringResource(R.string.settings_pronunciation),
+                stringResource(if (settings.accent == "US") R.string.settings_us_english else R.string.settings_uk_english),
+                icon = PeekturnIcons.Headphones
+            ) { pronunciationOpen = true }
+        }
+        Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.settings_ai_profiles), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             TextButton(onClick = {
@@ -120,21 +138,9 @@ fun SettingsScreen(
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
+        Text(stringResource(R.string.design_storage_group), style = MaterialTheme.typography.titleSmall)
         SettingsGroup {
-            SettingsDisclosure(
-                stringResource(R.string.floating_lookup_title),
-                stringResource(if (floatingLookupActive) R.string.floating_lookup_on else R.string.floating_lookup_off),
-                icon = PeekturnIcons.Search,
-                onClick = { if (floatingLookupActive) onFloatingLookup() else floatingLookupConsent = true }
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            SettingsDisclosure(
-                stringResource(R.string.settings_pronunciation),
-                stringResource(if (settings.accent == "US") R.string.settings_us_english else R.string.settings_uk_english),
-                icon = PeekturnIcons.Headphones
-            ) { pronunciationOpen = true }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SettingsDisclosure(
                 stringResource(R.string.settings_explanation_cache),
                 stringResource(R.string.settings_explanation_cache_summary),
@@ -241,7 +247,7 @@ private fun SettingsGroup(
     content: @Composable ColumnScope.() -> Unit
 ) {
     Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        color = MaterialTheme.colorScheme.surface) {
         Column(content = content)
     }
 }

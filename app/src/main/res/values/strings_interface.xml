@@ -1,0 +1,10 @@
+<resources>
+    <string name="design_expand">Expand explanation</string>
+    <string name="design_collapse">Collapse explanation</string>
+    <string name="design_source">Original sentence</string>
+    <string name="design_adjust">Adjust selection</string>
+    <string name="design_continue_book">Continue reading</string>
+    <string name="design_continue_video">Continue watching</string>
+    <string name="design_lookup_group">Playback and lookup</string>
+    <string name="design_storage_group">Storage and diagnostics</string>
+</resources>

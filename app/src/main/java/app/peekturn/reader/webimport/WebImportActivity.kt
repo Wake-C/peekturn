@@ -559,7 +559,8 @@ private fun WebImportScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(ui.title.ifBlank { stringResource(R.string.web_import_title) }, maxLines = 1) },
+                title = { Text(ui.title.ifBlank { stringResource(R.string.web_import_title) }, maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
                         Icon(PeekturnIcons.Close, contentDescription = stringResource(R.string.web_import_close))
@@ -568,14 +569,14 @@ private fun WebImportScreen(
             )
         },
         bottomBar = {
-            Surface(tonalElevation = 3.dp) {
+            Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         stringResource(ui.status),
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(Modifier.width(12.dp))

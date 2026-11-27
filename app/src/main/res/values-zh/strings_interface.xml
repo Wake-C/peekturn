@@ -1,0 +1,10 @@
+<resources>
+    <string name="design_expand">展开解释</string>
+    <string name="design_collapse">收起解释</string>
+    <string name="design_source">原句</string>
+    <string name="design_adjust">调整选词</string>
+    <string name="design_continue_book">继续阅读</string>
+    <string name="design_continue_video">继续观看</string>
+    <string name="design_lookup_group">播放与查词</string>
+    <string name="design_storage_group">存储与诊断</string>
+</resources>

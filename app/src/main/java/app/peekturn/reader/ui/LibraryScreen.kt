@@ -45,6 +45,8 @@ fun LibraryScreen(
     onImportUrl: () -> Unit,
     onDelete: (Book) -> Unit
 ) {
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    val serif = app.peekturn.reader.reader.rememberReaderFontFamily("source-serif-4")
     var query by rememberSaveable { mutableStateOf("") }
     var filterName by rememberSaveable { mutableStateOf(ShelfFilter.All.name) }
     var deletingId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -70,6 +72,18 @@ fun LibraryScreen(
         // last row keeps it, and the row's own options button, off that boundary at the end of the scroll.
         contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 48.dp)
     ) {
+        item {
+            Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.shell_library_title), Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
+                IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) query = "" }) {
+                    Icon(if (searchOpen) PeekturnIcons.Close else PeekturnIcons.Search,
+                        stringResource(R.string.shell_search_books_description), Modifier.size(21.dp))
+                }
+                ImportSourceMenu(onImportFile, onImportUrl) { openMenu ->
+                    IconButton(onClick = openMenu) { Icon(PeekturnIcons.Add, stringResource(R.string.shell_add_book)) }
+                }
+            }
+        }
         if (books.isEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(top = 40.dp, bottom = 48.dp), horizontalAlignment = Alignment.CenterHorizontally,
@@ -91,7 +105,10 @@ fun LibraryScreen(
             }
         } else {
             if (focus != null) item(key = "focus-${focus.id}") {
-                Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 20.dp),
+                Text(stringResource(R.string.design_continue_book), style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(bottom = 8.dp))
+                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Row(Modifier.weight(1f).clickable(role = Role.Button,
                         onClickLabel = stringResource(R.string.shell_open_book, focus.title)) { onOpen(focus) },
@@ -99,7 +116,7 @@ fun LibraryScreen(
                         BookCover(focus, Modifier.width(92.dp))
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(focus.title,
-                                style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp, lineHeight = 27.sp),
+                                style = MaterialTheme.typography.titleLarge.copy(fontFamily = serif, fontSize = 25.sp, lineHeight = 30.sp),
                                 maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(focus.author.ifBlank { stringResource(R.string.shell_unknown_author) },
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -111,20 +128,15 @@ fun LibraryScreen(
                 }
             }
             item {
-                if (focus != null) HorizontalDivider(Modifier.padding(bottom = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                if (focus != null) Spacer(Modifier.height(22.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.shell_shelf_heading),
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.weight(1f))
-                    ImportSourceMenu(onImportFile, onImportUrl) { openMenu ->
-                        IconButton(onClick = openMenu, modifier = Modifier.size(48.dp)) {
-                            Icon(PeekturnIcons.Add,
-                                contentDescription = stringResource(R.string.shell_add_book))
-                        }
-                    }
+
                 }
             }
-            item {
+            if (searchOpen) item {
                 TextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 14.dp),
                     placeholder = { Text(stringResource(R.string.shell_search_books_hint), style = MaterialTheme.typography.bodyMedium) },
                     singleLine = true, shape = RoundedCornerShape(10.dp),
@@ -180,7 +192,7 @@ fun LibraryScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         BookCover(book, Modifier.width(54.dp))
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(book.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                            Text(book.title, style = MaterialTheme.typography.titleMedium.copy(fontFamily = serif, fontSize = 20.sp), color = MaterialTheme.colorScheme.onSurface)
                             Text(book.author.ifBlank { stringResource(R.string.shell_unknown_author) }, style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(bookProgressText(book), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -204,34 +216,27 @@ fun LibraryScreen(
     }
 }
 
-/**
- * The source chooser is a menu belonging to whichever add control opened it, so it opens under that
- * control instead of covering the screen. Both choices close it before they act: From a file hands
- * straight to the system picker, From a link to the URL entry dialog.
- */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ImportSourceMenu(
-    onImportFile: () -> Unit,
-    onImportUrl: () -> Unit,
-    anchor: @Composable (openMenu: () -> Unit) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        anchor { expanded = true }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier.widthIn(min = 208.dp)
-        ) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.shell_import_from_file), maxLines = 1) },
-                onClick = { expanded = false; onImportFile() }
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.shell_import_from_url), maxLines = 1) },
-                onClick = { expanded = false; onImportUrl() }
-            )
+private fun ImportSourceMenu(onImportFile: () -> Unit, onImportUrl: () -> Unit,
+    anchor: @Composable (openMenu: () -> Unit) -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    anchor { expanded = true }
+    if (expanded) ModalBottomSheet(onDismissRequest = { expanded = false },
+        containerColor = MaterialTheme.colorScheme.surface) {
+        Text(stringResource(R.string.shell_add_book), Modifier.padding(start = 22.dp, bottom = 12.dp),
+            style = MaterialTheme.typography.headlineSmall)
+        listOf(Triple(R.string.shell_import_from_file, PeekturnIcons.BookOpen, onImportFile),
+            Triple(R.string.shell_import_from_url, PeekturnIcons.Contents, onImportUrl)).forEach { (name, icon, action) ->
+            Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { expanded = false; action() }
+                .heightIn(min = 62.dp).padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Icon(icon, null, Modifier.size(21.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(name), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                Icon(PeekturnIcons.ChevronRight, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
+        Spacer(Modifier.height(16.dp))
     }
 }
 

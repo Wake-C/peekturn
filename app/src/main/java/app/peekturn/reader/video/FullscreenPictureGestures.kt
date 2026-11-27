@@ -124,18 +124,22 @@ internal fun FullscreenPictureGestures(window: Window, onToggleTools: () -> Unit
         }
     ) {
         feedback?.let { level ->
-            Row(
-                Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 68.dp)
-                    .background(Color.Black.copy(alpha = .72f), RoundedCornerShape(24.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            val brightness = level == PictureLevel.Brightness
+            val side = if (brightness) Alignment.CenterStart else Alignment.CenterEnd
+            Column(
+                Modifier.align(side).padding(horizontal = 18.dp).offset(y = (-48).dp)
+                    .background(Color.Black.copy(alpha = .74f), RoundedCornerShape(18.dp))
+                    .padding(horizontal = 7.dp, vertical = 9.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                val brightness = level == PictureLevel.Brightness
                 Icon(if (brightness) PeekturnIcons.Appearance else PeekturnIcons.Speaker,
                     stringResource(if (brightness) R.string.video_ui_brightness else R.string.video_ui_media_volume),
-                    Modifier.size(18.dp), tint = Color.White)
-                Text("$percent%", color = Color.White, style = MaterialTheme.typography.labelLarge)
+                    Modifier.size(17.dp), tint = Color.White)
+                Box(Modifier.width(4.dp).height(44.dp).background(Color.White.copy(alpha = .34f), RoundedCornerShape(2.dp)),
+                    contentAlignment = Alignment.BottomCenter) {
+                    Box(Modifier.fillMaxWidth().fillMaxHeight(percent / 100f).background(Color.White, RoundedCornerShape(2.dp)))
+                }
+                Text("$percent%", color = Color.White, style = MaterialTheme.typography.labelSmall)
             }
         }
     }
