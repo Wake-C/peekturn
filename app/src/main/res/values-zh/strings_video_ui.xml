@@ -39,6 +39,7 @@
     <string name="video_ui_error_provider">请求失败，请重试。</string>
     <string name="video_ui_error_sign_in">YouTube 要求登录。请前往 YouTube 登录并继续观看此视频。</string>
     <string name="video_ui_open_youtube">在 YouTube 中打开</string>
+    <string name="video_ui_open_source">在 YouTube 中打开《%1$s》</string>
     <string name="video_ui_no_youtube_handler">没有可用于打开 YouTube 的应用。</string>
     <string name="video_ui_error_verification">YouTube 要求先完成验证，才能在 Peekturn 播放此视频。</string>
     <string name="video_ui_verify_youtube">尝试 YouTube 验证</string>

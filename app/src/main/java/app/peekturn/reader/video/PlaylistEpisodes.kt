@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.pluralStringResource
@@ -68,6 +69,7 @@ internal fun EpisodeSheet(
     onSort: suspend (PlaylistSortOrder) -> Boolean,
     onRefreshDates: suspend (String) -> Boolean,
     onDismiss: () -> Unit,
+    onOpenSource: (VideoItem) -> Unit = rememberOpenYouTubeVideo(),
     onSelect: (Long) -> Unit
 ) {
     val order = playlist.sortOrder
@@ -151,7 +153,7 @@ internal fun EpisodeSheet(
             LazyColumn(state = rememberLazyListState(initialFirstVisibleItemIndex = start),
                 contentPadding = PaddingValues(bottom = 12.dp), modifier = Modifier.fillMaxWidth().selectableGroup()) {
                 items(ordered, key = { it.value.id }) { (index, episode) ->
-                    EpisodeRow(index + 1, episode, episode.id == selectedId, date) { onSelect(episode.id) }
+                    EpisodeRow(index + 1, episode, episode.id == selectedId, date, onOpenSource) { onSelect(episode.id) }
                 }
             }
         }
@@ -159,7 +161,8 @@ internal fun EpisodeSheet(
 }
 
 @Composable
-private fun EpisodeRow(number: Int, episode: VideoItem, selected: Boolean, date: DateTimeFormatter, onSelect: () -> Unit) {
+private fun EpisodeRow(number: Int, episode: VideoItem, selected: Boolean, date: DateTimeFormatter,
+    onOpenSource: (VideoItem) -> Unit, onSelect: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val status = if (episode.watchState == VideoWatchState.IN_PROGRESS && episode.positionMs > 0)
         stringResource(R.string.playlist_progress_position, formatClock(episode.positionMs)) else stringResource(episode.watchState.label)
@@ -170,19 +173,22 @@ private fun EpisodeRow(number: Int, episode: VideoItem, selected: Boolean, date:
             instant.atOffset(ZoneOffset.UTC).year.toString()) else date.format(instant)
         stringResource(R.string.playlist_episode_date_detail, progress, published)
     } ?: progress
-    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)
-        .background(if (selected) colors.primaryContainer else Color.Transparent, RoundedCornerShape(8.dp))
-        .selectable(selected, role = Role.RadioButton, onClick = onSelect).heightIn(min = 64.dp)
-        .padding(horizontal = 12.dp, vertical = 7.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        VideoThumbnail(videoThumbnailUrls(episode.videoId, episode.thumbnailUrl), episode.durationMs,
-            Modifier.width(80.dp).aspectRatio(16f / 9f))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(episode.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                color = if (selected) colors.primary else colors.onSurface)
-            Text(metadata, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp).clip(RoundedCornerShape(8.dp))
+        .background(if (selected) colors.primaryContainer else Color.Transparent),
+        verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).selectable(selected, role = Role.RadioButton, onClick = onSelect)
+            .heightIn(min = 64.dp).padding(start = 12.dp, top = 7.dp, bottom = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            VideoThumbnail(videoThumbnailUrls(episode.videoId, episode.thumbnailUrl), episode.durationMs,
+                Modifier.width(80.dp).aspectRatio(16f / 9f))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(episode.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    color = if (selected) colors.primary else colors.onSurface)
+                Text(metadata, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+            }
+            if (selected) Icon(PeekturnIcons.Play, stringResource(R.string.playlist_current_episode),
+                Modifier.size(16.dp), tint = colors.primary)
         }
-        if (selected) Icon(PeekturnIcons.Play, stringResource(R.string.playlist_current_episode),
-            Modifier.size(16.dp), tint = colors.primary)
+        YouTubeSourceButton(episode, onOpenSource)
     }
 }

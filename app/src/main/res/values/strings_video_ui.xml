@@ -39,6 +39,7 @@
     <string name="video_ui_error_provider">The request failed. Try again.</string>
     <string name="video_ui_error_sign_in">YouTube requires sign-in. Open the video on YouTube to sign in and keep watching there.</string>
     <string name="video_ui_open_youtube">Open in YouTube</string>
+    <string name="video_ui_open_source">Open %1$s on YouTube</string>
     <string name="video_ui_no_youtube_handler">No app is available to open YouTube.</string>
     <string name="video_ui_error_verification">YouTube needs you to complete a verification check before Peekturn can play this video.</string>
     <string name="video_ui_verify_youtube">Try YouTube verification</string>

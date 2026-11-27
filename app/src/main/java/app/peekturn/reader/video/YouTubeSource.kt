@@ -127,7 +127,7 @@ class YouTubeSource(private val http: OkHttpClient = defaultVideoHttpClient()) {
     suspend fun playlist(id: String, enrichDates: Boolean = false): YouTubePlaylist {
         if (!YouTubeUrls.isPlaylistId(id)) throw VideoFailure(VideoFailureKind.InvalidLink)
         val playlist = runExtraction {
-            val extractor = ServiceList.YouTube.getPlaylistExtractor("https://www.youtube.com/playlist?list=$id")
+            val extractor = ServiceList.YouTube.getPlaylistExtractor(YouTubeUrls.playlistUrl(id))
             extractor.fetchPage()
             val title = extractor.name.trim().ifEmpty { throw VideoFailure(VideoFailureKind.Provider) }
             val videos = playlistVideos(extractor.initialPage, extractor::getPage)

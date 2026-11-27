@@ -13,12 +13,17 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import app.peekturn.reader.R
 import app.peekturn.reader.ui.PeekturnIcons
 
@@ -79,6 +84,7 @@ internal fun VideoLibraryScreen(
                 ?: recent.first()
         }
     }
+    val narrow = LocalWindowInfo.current.containerDpSize.width / LocalDensity.current.fontScale < 340.dp
 
     LazyColumn(Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 48.dp)
@@ -108,10 +114,10 @@ internal fun VideoLibraryScreen(
                     Text(stringResource(R.string.design_continue_video), style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.padding(bottom = 8.dp))
                     when (focus) {
-                        is ShelfEntry.Single -> ContinueRow(focus.item, onOpen = { onOpen(focus.item) })
+                        is ShelfEntry.Single -> ContinueRow(focus.item, narrow, onOpen = { onOpen(focus.item) })
                         is ShelfEntry.Playlist -> focus.resumeVideo?.let { episode ->
                             val index = focus.playlist.videoIds.indexOf(episode.id) + 1
-                            ContinueRow(episode, focus.title, stringResource(R.string.playlist_library_episode, index, episode.title)) {
+                            ContinueRow(episode, narrow, focus.title, stringResource(R.string.playlist_library_episode, index, episode.title)) {
                                 onOpenPlaylist(focus.playlist, episode)
                             }
                         }
@@ -133,11 +139,11 @@ internal fun VideoLibraryScreen(
                 when (entry) {
                     is ShelfEntry.Single -> {
                         val item = entry.item
-                        VideoRow(item, onOpen = { onOpen(item) }, onRemove = { deleting = entry.key },
+                        VideoRow(item, narrow, onOpen = { onOpen(item) }, onRemove = { deleting = entry.key },
                             download = downloads[item.id], onDownload = { onDownload(item) },
                             onRemoveDownload = { onRemoveDownload(item) }, onDownloadVideo = { onDownloadVideo(item) })
                     }
-                    is ShelfEntry.Playlist -> PlaylistRow(entry, onOpen = { episode -> onOpenPlaylist(entry.playlist, episode) },
+                    is ShelfEntry.Playlist -> PlaylistRow(entry, narrow, onOpen = { episode -> onOpenPlaylist(entry.playlist, episode) },
                         onRemove = { deleting = entry.key })
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -185,18 +191,19 @@ internal fun VideoLibraryScreen(
 }
 
 @Composable
-private fun PlaylistRow(entry: ShelfEntry.Playlist, onOpen: (VideoItem) -> Unit, onRemove: () -> Unit) {
+private fun PlaylistRow(entry: ShelfEntry.Playlist, narrow: Boolean, onOpen: (VideoItem) -> Unit, onRemove: () -> Unit) {
     val playlist = entry.playlist
+    val context = LocalContext.current
     var menuOpen by remember(playlist.id) { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Row(
             Modifier.weight(1f)
                 .clickable(enabled = entry.resumeVideo != null, role = Role.Button) { entry.resumeVideo?.let(onOpen) }
                 .padding(vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            VideoThumbnail(entry.covers, 0L, Modifier.width(96.dp).aspectRatio(16f / 9f))
+            VideoThumbnail(entry.covers, 0L, Modifier.width(84.dp).aspectRatio(16f / 9f))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(playlist.title, style = MaterialTheme.typography.titleMedium,
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -211,14 +218,19 @@ private fun PlaylistRow(entry: ShelfEntry.Playlist, onOpen: (VideoItem) -> Unit,
                 }
             }
         }
-        Box {
-            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
-                Icon(PeekturnIcons.More, stringResource(R.string.playlist_library_options, playlist.title),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        ShelfActions(narrow) {
+            YouTubeSourceButton(playlist.title) {
+                openYouTubePage(context, YouTubeUrls.playlistUrl(playlist.id).toUri())
             }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(text = { Text(stringResource(R.string.playlist_library_remove)) },
-                    onClick = { menuOpen = false; onRemove() })
+            Box {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
+                    Icon(PeekturnIcons.More, stringResource(R.string.playlist_library_options, playlist.title),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.playlist_library_remove)) },
+                        onClick = { menuOpen = false; onRemove() })
+                }
             }
         }
     }
@@ -233,42 +245,46 @@ private fun VideoImportButton(onImport: () -> Unit) {
 }
 
 @Composable
-private fun ContinueRow(item: VideoItem, title: String = item.title, subtitle: String = item.author, onOpen: () -> Unit) {
+private fun ContinueRow(item: VideoItem, narrow: Boolean, title: String = item.title, subtitle: String = item.author, onOpen: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp))
-            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.video_ui_open_video, title)) {
-                onOpen()
-            }
-            .padding(horizontal = 12.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerLow),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        VideoThumbnail(
-            urls = videoThumbnailUrls(item.videoId, item.thumbnailUrl),
-            durationMs = item.durationMs,
-            modifier = Modifier.width(112.dp).aspectRatio(16f / 9f)
-        )
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp, lineHeight = 25.sp),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+        Row(
+            Modifier.weight(1f)
+                .clickable(role = Role.Button, onClickLabel = stringResource(R.string.video_ui_open_video, title), onClick = onOpen)
+                .padding(start = 12.dp, top = 14.dp, bottom = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            VideoThumbnail(
+                urls = videoThumbnailUrls(item.videoId, item.thumbnailUrl),
+                durationMs = item.durationMs,
+                modifier = Modifier.width(if (narrow) 76.dp else 96.dp).aspectRatio(16f / 9f)
             )
-            Text(
-                subtitle.ifBlank { stringResource(R.string.video_ui_unknown_channel) },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            ProgressLine(item)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp, lineHeight = 25.sp),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    subtitle.ifBlank { stringResource(R.string.video_ui_unknown_channel) },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                ProgressLine(item)
+            }
         }
+        YouTubeSourceButton(item)
     }
 }
 
 @Composable
-private fun VideoRow(item: VideoItem, onOpen: () -> Unit, onRemove: () -> Unit,
+private fun VideoRow(item: VideoItem, narrow: Boolean, onOpen: () -> Unit, onRemove: () -> Unit,
     download: VideoDownloadState?, onDownload: () -> Unit, onRemoveDownload: () -> Unit, onDownloadVideo: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Row(
@@ -277,13 +293,13 @@ private fun VideoRow(item: VideoItem, onOpen: () -> Unit, onRemove: () -> Unit,
                     onOpen()
                 }
                 .padding(vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             VideoThumbnail(
                 urls = videoThumbnailUrls(item.videoId, item.thumbnailUrl),
                 durationMs = item.durationMs,
-                modifier = Modifier.width(96.dp).aspectRatio(16f / 9f)
+                modifier = Modifier.width(84.dp).aspectRatio(16f / 9f)
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
@@ -308,8 +324,16 @@ private fun VideoRow(item: VideoItem, onOpen: () -> Unit, onRemove: () -> Unit,
                     color = if (download.phase == VideoDownloadPhase.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        VideoOptions(item, onRemove, download, onDownload, onRemoveDownload, onDownloadVideo)
+        ShelfActions(narrow) {
+            YouTubeSourceButton(item)
+            VideoOptions(item, onRemove, download, onDownload, onRemoveDownload, onDownloadVideo)
+        }
     }
+}
+
+@Composable
+private fun ShelfActions(stacked: Boolean, content: @Composable () -> Unit) {
+    if (stacked) Column { content() } else Row { content() }
 }
 
 @Composable

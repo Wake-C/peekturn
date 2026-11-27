@@ -190,8 +190,13 @@ internal fun VideoScreen(
     }
 
     if (choosingEpisode && playlist != null) {
+        val context = LocalContext.current
         EpisodeSheet(playlist, episodes, state.item?.id, onSort = { vm.saveEpisodeSort(playlist.id, it) },
-            onRefreshDates = vm::refreshEpisodeDates, onDismiss = { choosingEpisode = false }) { id ->
+            onRefreshDates = vm::refreshEpisodeDates, onDismiss = { choosingEpisode = false },
+            onOpenSource = { episode ->
+                val position = if (episode.id == state.item?.id) state.positionMs else episode.positionMs
+                if (openYouTubePage(context, episode.watchUri(position))) vm.pauseForYouTube()
+            }) { id ->
             choosingEpisode = false
             if (id != state.item?.id) onEpisode(id)
         }

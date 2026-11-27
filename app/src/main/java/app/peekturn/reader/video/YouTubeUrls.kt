@@ -48,6 +48,8 @@ object YouTubeUrls {
         return VideoLink(id, startMs)
     }
 
+    internal fun playlistUrl(id: String): String = "https://www.youtube.com/playlist?list=$id"
+
     /** A finite YouTube playlist, either shared on its own or alongside a video. */
     fun playlistId(text: String): String? {
         val uri = importUri(text) ?: return null

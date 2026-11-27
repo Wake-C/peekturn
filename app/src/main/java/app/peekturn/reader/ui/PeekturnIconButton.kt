@@ -31,11 +31,13 @@ internal fun PeekturnIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     selected: Boolean? = null,
-    stateDescription: String? = null
+    stateDescription: String? = null,
+    tooltipText: String = description,
+    contentColor: Color = if (selected == false) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
 ) {
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
-        tooltip = { PlainTooltip { Text(description) } },
+        tooltip = { PlainTooltip { Text(tooltipText) } },
         state = rememberTooltipState(),
         modifier = modifier
     ) {
@@ -48,7 +50,7 @@ internal fun PeekturnIconButton(
             },
             colors = IconButtonDefaults.iconButtonColors(
                 containerColor = if (selected == true) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                contentColor = if (selected == false) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
+                contentColor = contentColor
             )
         ) {
             Icon(icon, contentDescription = description, modifier = Modifier.size(24.dp))

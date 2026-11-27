@@ -72,6 +72,14 @@ internal object PeekturnIcons {
         )
     }
 
+    val ExternalLink: ImageVector by lazy {
+        outline("ExternalLink",
+            "M 15,3 h 6 v 6",
+            "M 10,14 L 21,3",
+            "M 18,13 v 6 a 2,2 0 0,1 -2,2 H 5 a 2,2 0 0,1 -2,-2 V 8 a 2,2 0 0,1 2,-2 h 6"
+        )
+    }
+
     val ChevronRight: ImageVector by lazy {
         outline("ChevronRight",
             "m 9,18 l 6,-6 l -6,-6",

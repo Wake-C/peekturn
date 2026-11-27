@@ -33,6 +33,7 @@ import app.peekturn.reader.R
 import app.peekturn.reader.model.Book
 import app.peekturn.reader.model.ReadingStats
 import app.peekturn.reader.video.VideoItem
+import app.peekturn.reader.video.YouTubeSourceButton
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
@@ -220,17 +221,20 @@ fun StatisticsScreen(stats: ReadingStats, books: List<Book>, videos: List<VideoI
                 modifier = Modifier.padding(top = 28.dp, bottom = 2.dp))
         }
         items(recentVideos, key = { "video-${it.id}" }) { video ->
-            Row(Modifier.fillMaxWidth().clickable(role = Role.Button,
-                    onClickLabel = stringResource(R.string.video_data_open_video, video.title)) { onOpenVideo(video) }
-                    .padding(vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(video.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                    Text(video.author.ifBlank { stringResource(R.string.shell_unknown_author) }, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).clickable(role = Role.Button,
+                        onClickLabel = stringResource(R.string.video_data_open_video, video.title)) { onOpenVideo(video) }
+                        .padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(video.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                        Text(video.author.ifBlank { stringResource(R.string.shell_unknown_author) }, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text(compactDurationText(videoTotals[video.id] ?: 0L), color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false)
                 }
-                Text(compactDurationText(videoTotals[video.id] ?: 0L), color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false)
+                YouTubeSourceButton(video)
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }

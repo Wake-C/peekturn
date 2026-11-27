@@ -2,11 +2,6 @@ package app.peekturn.reader.video
 
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.widget.Toast
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -142,22 +137,4 @@ class VideoVerificationActivity : AppCompatActivity() {
             }
         }
     }
-}
-
-internal fun VideoLink.watchUri(): Uri = Uri.parse(canonicalUrl).buildUpon().apply {
-    startMs?.takeIf { it >= 1000L }?.let { appendQueryParameter("t", "${it / 1000}s") }
-}.build()
-
-/** Android opens the official app or browser using its own sign-in session. */
-internal fun openYouTubePage(context: Context, uri: Uri) {
-    val intent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
-    try {
-        context.startActivity(intent)
-        return
-    } catch (_: ActivityNotFoundException) {
-        // The device has no available link handler.
-    } catch (_: SecurityException) {
-        // The installed handler is blocked for this user.
-    }
-    Toast.makeText(context, R.string.video_ui_no_youtube_handler, Toast.LENGTH_LONG).show()
 }

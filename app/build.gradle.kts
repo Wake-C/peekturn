@@ -17,8 +17,8 @@ android {
         applicationId = "app.peekturn.reader"
         minSdk = 26
         targetSdk = 35
-        versionCode = 37
-        versionName = "2.7.0"
+        versionCode = 38
+        versionName = "2.7.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["applicationLabel"] = "@string/shell_app_name"
     }

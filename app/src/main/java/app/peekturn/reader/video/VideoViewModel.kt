@@ -250,6 +250,7 @@ internal class VideoViewModel(
     private var reusedOnlineSource = false
     private var ticker: Job? = null
     private var foreground = false
+    private var handedOffToYouTube = false
     private var lastSavedPosition = -1L
     private val progress = VideoProgressCheckpoint()
     private var positionWrite: Job? = null
@@ -699,7 +700,7 @@ internal class VideoViewModel(
         disableEmbeddedText()
         player.prepare()
         // A lookup opened while the previous narration was being silenced owns the pause.
-        player.playWhenReady = autoPlay && _state.value.lookup == null
+        player.playWhenReady = autoPlay && _state.value.lookup == null && !handedOffToYouTube
     }
 
     /** The app renders the selected caption track itself; embedded subtitles must not appear twice. */
@@ -775,6 +776,7 @@ internal class VideoViewModel(
 
     fun onForeground() {
         foreground = true
+        handedOffToYouTube = false
         rememberForegroundVideo()
         track?.foreground(true)
         track?.playing(player.isPlaying)
@@ -806,6 +808,12 @@ internal class VideoViewModel(
             active.playing(player.isPlaying)
             graph.scope.launch { active.flush() }
         }
+    }
+
+    /** An in-flight source can finish preparing after Android has opened YouTube. */
+    fun pauseForYouTube() {
+        handedOffToYouTube = true
+        player.pause()
     }
 
     fun togglePlay() {
