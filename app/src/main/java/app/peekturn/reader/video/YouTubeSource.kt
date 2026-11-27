@@ -9,6 +9,8 @@ import java.io.IOException
 import java.io.InputStream
 import java.net.URI
 import java.nio.charset.StandardCharsets
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -25,6 +27,9 @@ import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import org.jsoup.Jsoup
+import org.jsoup.parser.Parser
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.schabi.newpipe.extractor.Image
 import org.schabi.newpipe.extractor.ListExtractor.InfoItemsPage
@@ -47,6 +52,7 @@ import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
 import org.schabi.newpipe.extractor.exceptions.SignInConfirmNotBotException
 import org.schabi.newpipe.extractor.exceptions.UnsupportedContentInCountryException
 import org.schabi.newpipe.extractor.exceptions.YoutubeMusicPremiumContentException
+import org.schabi.newpipe.extractor.localization.DateWrapper
 import org.schabi.newpipe.extractor.localization.ContentCountry
 import org.schabi.newpipe.extractor.localization.Localization
 import org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper
@@ -65,6 +71,7 @@ private const val ENGLISH_LANGUAGE_CODE = "en"
 
 /** Response cap for a caption body: 20 MiB, checked while reading and by Content-Length. */
 private const val MAX_CAPTION_BYTES = 20 * 1024 * 1024
+private const val MAX_PLAYLIST_FEED_BYTES = 512L * 1024
 
 private const val DESKTOP_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0"
@@ -117,14 +124,38 @@ class YouTubeSource(private val http: OkHttpClient = defaultVideoHttpClient()) {
     }
 
     /** Fetch listing metadata only. Playback sources and captions are resolved when a member opens. */
-    suspend fun playlist(id: String): YouTubePlaylist {
+    suspend fun playlist(id: String, enrichDates: Boolean = false): YouTubePlaylist {
         if (!YouTubeUrls.isPlaylistId(id)) throw VideoFailure(VideoFailureKind.InvalidLink)
-        return runExtraction {
+        val playlist = runExtraction {
             val extractor = ServiceList.YouTube.getPlaylistExtractor("https://www.youtube.com/playlist?list=$id")
             extractor.fetchPage()
             val title = extractor.name.trim().ifEmpty { throw VideoFailure(VideoFailureKind.Provider) }
             val videos = playlistVideos(extractor.initialPage, extractor::getPage)
-            YouTubePlaylist(id, title, videos)
+            YouTubePlaylist(id, title, videos, thumbnailUrl(optional { extractor.thumbnails }.orEmpty()))
+        }
+        return if (enrichDates) withFeedDates(playlist) else playlist
+    }
+
+    /** The public Atom feed contains exact dates for recent entries. It need not cover a whole collection. */
+    private suspend fun withFeedDates(playlist: YouTubePlaylist): YouTubePlaylist {
+        val request = Request.Builder().url("https://www.youtube.com/feeds/videos.xml?playlist_id=${playlist.id}")
+            .header("User-Agent", DESKTOP_USER_AGENT)
+            .header("Accept", "application/atom+xml, application/xml")
+            .build()
+        val call = http.newCall(request)
+        call.timeout().timeout(8, TimeUnit.SECONDS)
+        return try {
+            readCall(call) { response ->
+                val body = response.body
+                // A missing Content-Length is ordinary for a compressed response; bound decoded bytes too.
+                if (!response.isSuccessful || body == null || body.contentLength() > MAX_PLAYLIST_FEED_BYTES ||
+                    body.source().request(MAX_PLAYLIST_FEED_BYTES + 1)) playlist
+                else playlist.withPublishedDates(body.string())
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: IOException) {
+            playlist
         }
     }
 
@@ -169,46 +200,44 @@ class YouTubeSource(private val http: OkHttpClient = defaultVideoHttpClient()) {
      * this is called right after [resolve]; a stale URL is a caption failure, not a media failure.
      * Cancelling the caller cancels the blocking response read.
      */
-    @OptIn(InternalCoroutinesApi::class)
     suspend fun captions(videoId: String, track: CaptionTrack): CaptionDocument {
         if (!YouTubeUrls.isVideoId(videoId)) throw VideoFailure(VideoFailureKind.InvalidLink)
         if (!isRemoteUrl(track.url)) throw VideoFailure(VideoFailureKind.Captions)
-        return withContext(Dispatchers.IO) {
-            val request = Request.Builder()
-                .url(track.url)
-                .header("User-Agent", DESKTOP_USER_AGENT)
-                .header("Accept", "text/vtt,text/plain;q=0.9,*/*;q=0.1")
-                .build()
-            val call = http.newCall(request)
-            val job = currentCoroutineContext()[Job]!!
-            val cancellation = job.invokeOnCompletion(
-                onCancelling = true,
-                invokeImmediately = true
-            ) { cause -> if (cause != null) call.cancel() }
-            try {
-                call.execute().use { response ->
-                    currentCoroutineContext().ensureActive()
-                    if (!response.isSuccessful) throw VideoFailure(VideoFailureKind.Captions)
-                    val body = response.body ?: throw VideoFailure(VideoFailureKind.Captions)
-                    if (body.contentLength() > MAX_CAPTION_BYTES) {
-                        throw VideoFailure(VideoFailureKind.Captions)
-                    }
-                    val bytes = body.byteStream().use { input ->
-                        readAtMost(input, MAX_CAPTION_BYTES)
-                    }
-                    parseVideoCaptions(videoId, track, String(bytes, StandardCharsets.UTF_8))
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: VideoFailure) {
-                throw failure
-            } catch (error: IOException) {
-                currentCoroutineContext().ensureActive()
-                throw VideoFailure(VideoFailureKind.Captions, error)
-            } finally {
-                cancellation.dispose()
-                call.cancel()
+        val request = Request.Builder()
+            .url(track.url)
+            .header("User-Agent", DESKTOP_USER_AGENT)
+            .header("Accept", "text/vtt,text/plain;q=0.9,*/*;q=0.1")
+            .build()
+        return try {
+            readCall(http.newCall(request)) { response ->
+                if (!response.isSuccessful) throw VideoFailure(VideoFailureKind.Captions)
+                val body = response.body ?: throw VideoFailure(VideoFailureKind.Captions)
+                if (body.contentLength() > MAX_CAPTION_BYTES) throw VideoFailure(VideoFailureKind.Captions)
+                val bytes = body.byteStream().use { readAtMost(it, MAX_CAPTION_BYTES) }
+                parseVideoCaptions(videoId, track, String(bytes, StandardCharsets.UTF_8))
             }
+        } catch (error: IOException) {
+            throw VideoFailure(VideoFailureKind.Captions, error)
+        }
+    }
+
+    @OptIn(InternalCoroutinesApi::class)
+    private suspend fun <T> readCall(call: Call, read: (Response) -> T): T = withContext(Dispatchers.IO) {
+        val context = currentCoroutineContext()
+        val cancellation = context[Job]!!.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { cause ->
+            if (cause != null) call.cancel()
+        }
+        try {
+            call.execute().use { response ->
+                context.ensureActive()
+                read(response)
+            }
+        } catch (error: IOException) {
+            context.ensureActive()
+            throw error
+        } finally {
+            cancellation.dispose()
+            call.cancel()
         }
     }
 
@@ -224,6 +253,8 @@ class YouTubeSource(private val http: OkHttpClient = defaultVideoHttpClient()) {
         val author = optional { extractor.uploaderName }?.trim().orEmpty()
         val durationSeconds = optional { extractor.length } ?: 0L
         val thumbnailUrl = thumbnailUrl(optional { extractor.thumbnails }.orEmpty())
+        val uploadDate = optional { extractor.uploadDate }
+        val approximateDate = uploadDate != null && (uploadDate.isApproximation || relativeDate(optional { extractor.textualUploadDate }))
         val audioChoices = extractor.audioStreams.mapNotNull { audioChoice(it, videoId) }
         val renditions = playbackRenditions(
             muxed = extractor.videoStreams.mapNotNull { videoChoice(it, videoId) },
@@ -239,7 +270,9 @@ class YouTubeSource(private val http: OkHttpClient = defaultVideoHttpClient()) {
                 title = title,
                 author = author,
                 durationMs = durationMillis(durationSeconds),
-                thumbnailUrl = thumbnailUrl
+                thumbnailUrl = thumbnailUrl,
+                publishedAtMs = publicationTime(uploadDate, approximateDate),
+                publishedAtApproximate = approximateDate
             ),
             playback = playbackSource(selected),
             tracks = captions.tracks,
@@ -497,7 +530,30 @@ private fun thumbnailUrl(images: List<Image>): String? = images
     .filter { it.url.startsWith("https://", ignoreCase = true) && isRemoteUrl(it.url) }
     .maxByOrNull { it.width.toLong() * it.height }?.url
 
-data class YouTubePlaylist(val id: String, val title: String, val videos: List<VideoMetadata>)
+data class YouTubePlaylist(val id: String, val title: String, val videos: List<VideoMetadata>,
+    val thumbnailUrl: String? = null)
+
+internal fun YouTubePlaylist.withPublishedDates(feed: String): YouTubePlaylist {
+    val dates = buildMap {
+        for (entry in Jsoup.parse(feed, "", Parser.xmlParser()).select("feed > entry")) {
+            val id = entry.children().firstOrNull { it.tagName() == "yt:videoId" }?.text() ?: continue
+            val published = entry.children().firstOrNull { it.tagName() == "published" }?.text() ?: continue
+            val date = runCatching { Instant.parse(published).toEpochMilli() }.getOrNull() ?: continue
+            put(id, date)
+        }
+    }
+    if (dates.isEmpty()) return this
+    return copy(videos = videos.map { video ->
+        dates[video.videoId]?.let { video.copy(publishedAtMs = it, publishedAtApproximate = false) } ?: video
+    })
+}
+
+// NewPipe marks sub-day relative times as exact. Its English "ago" text still describes an estimate.
+private fun relativeDate(text: String?): Boolean = text?.endsWith(" ago", ignoreCase = true) == true
+
+private fun publicationTime(date: DateWrapper?, approximate: Boolean): Long? = date?.instant?.let {
+    if (approximate) it.truncatedTo(ChronoUnit.DAYS).toEpochMilli() else it.toEpochMilli()
+}
 
 /** Keep the first appearance of each playable member, in the order returned across all pages. */
 internal fun playlistVideos(
@@ -515,8 +571,10 @@ internal fun playlistVideos(
             val id = YouTubeUrls.parse(item.url)?.videoId ?: continue
             val title = item.name.trim()
             if (title.isEmpty() || id in videos) continue
+            val date = item.uploadDate
+            val approximate = date != null && (date.isApproximation || relativeDate(item.textualUploadDate))
             videos[id] = VideoMetadata(id, title, item.uploaderName.orEmpty().trim(),
-                durationMillis(item.duration), thumbnailUrl(item.thumbnails.orEmpty()))
+                durationMillis(item.duration), thumbnailUrl(item.thumbnails.orEmpty()), publicationTime(date, approximate), approximate)
         }
         if (!page.hasNextPage()) return videos.values.toList()
         page = nextPage(checkNotNull(page.nextPage))

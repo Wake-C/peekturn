@@ -1,8 +1,5 @@
 package app.peekturn.reader.video
 
-import android.graphics.BitmapFactory
-import android.util.LruCache
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,24 +13,14 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.peekturn.reader.R
 import app.peekturn.reader.ui.PeekturnIcons
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.TimeUnit
 
 private sealed interface ShelfEntry {
     val title: String
@@ -46,7 +33,7 @@ private sealed interface ShelfEntry {
         override val resumeVideo get() = item
     }
 
-    data class Playlist(val playlist: VideoPlaylist, val coverUrl: String?, override val resumeVideo: VideoItem?) : ShelfEntry {
+    data class Playlist(val playlist: VideoPlaylist, val covers: List<String>, val completed: Int, override val resumeVideo: VideoItem?) : ShelfEntry {
         override val title get() = playlist.title
         override val key get() = "playlist-${playlist.id}"
     }
@@ -72,7 +59,11 @@ internal fun VideoLibraryScreen(
         buildList {
             playlists.forEach { playlist ->
                 val members = playlist.videoIds.mapNotNull(byId::get)
-                add(ShelfEntry.Playlist(playlist, members.firstOrNull()?.thumbnailUrl, members.maxByOrNull { it.lastWatchedAt }))
+                val representative = members.firstOrNull { !it.thumbnailUrl.isNullOrBlank() } ?: members.firstOrNull()
+                val covers = videoThumbnailUrls(representative?.videoId, playlist.thumbnailUrl, representative?.thumbnailUrl)
+                val recent = members.maxByOrNull { it.lastWatchedAt }?.takeIf { it.lastWatchedAt > 0 }
+                val resume = recent ?: orderedEpisodes(members, playlist.sortOrder).firstOrNull()?.value
+                add(ShelfEntry.Playlist(playlist, covers, members.count { it.watchState == VideoWatchState.COMPLETED }, resume))
             }
             items.filter(VideoItem::isStandalone).forEach { add(ShelfEntry.Single(it)) }
         }.sortedWith(compareByDescending<ShelfEntry> { it.resumeVideo?.lastWatchedAt ?: 0 }
@@ -205,11 +196,13 @@ private fun PlaylistRow(entry: ShelfEntry.Playlist, onOpen: (VideoItem) -> Unit,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            VideoThumbnail(entry.coverUrl, 0L, Modifier.width(96.dp).aspectRatio(16f / 9f))
+            VideoThumbnail(entry.covers, 0L, Modifier.width(96.dp).aspectRatio(16f / 9f))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(playlist.title, style = MaterialTheme.typography.titleMedium,
                     maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(pluralStringResource(R.plurals.playlist_library_episodes, playlist.videoIds.size, playlist.videoIds.size),
+                Text(if (entry.completed == 0)
+                    pluralStringResource(R.plurals.playlist_library_episodes, playlist.videoIds.size, playlist.videoIds.size)
+                    else stringResource(R.string.playlist_completed_count, entry.completed, playlist.videoIds.size),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 entry.resumeVideo?.takeIf { it.lastWatchedAt > 0 }?.let { episode ->
                     Text(stringResource(R.string.playlist_library_episode, playlist.videoIds.indexOf(episode.id) + 1,
@@ -251,7 +244,7 @@ private fun ContinueRow(item: VideoItem, title: String = item.title, subtitle: S
         verticalAlignment = Alignment.CenterVertically
     ) {
         VideoThumbnail(
-            url = item.thumbnailUrl,
+            urls = videoThumbnailUrls(item.videoId, item.thumbnailUrl),
             durationMs = item.durationMs,
             modifier = Modifier.width(112.dp).aspectRatio(16f / 9f)
         )
@@ -288,7 +281,7 @@ private fun VideoRow(item: VideoItem, onOpen: () -> Unit, onRemove: () -> Unit,
             verticalAlignment = Alignment.CenterVertically
         ) {
             VideoThumbnail(
-                url = item.thumbnailUrl,
+                urls = videoThumbnailUrls(item.videoId, item.thumbnailUrl),
                 durationMs = item.durationMs,
                 modifier = Modifier.width(96.dp).aspectRatio(16f / 9f)
             )
@@ -345,7 +338,9 @@ private fun ProgressLine(item: VideoItem) {
 
 @Composable
 private fun positionText(item: VideoItem): String {
-    if (item.positionMs <= 0L) return stringResource(R.string.video_ui_not_started)
+    if (item.watchState == VideoWatchState.COMPLETED) return stringResource(R.string.playlist_watched)
+    if (item.positionMs <= 0L) return stringResource(
+        if (item.watchState == VideoWatchState.IN_PROGRESS) R.string.playlist_in_progress else R.string.video_ui_not_started)
     if (item.durationMs <= 0L) return formatClock(item.positionMs)
     return stringResource(
         R.string.video_ui_watched_position,
@@ -381,82 +376,5 @@ private fun VideoOptions(item: VideoItem, onRemove: () -> Unit,
                 onClick = { expanded = false; onRemove() }
             )
         }
-    }
-}
-
-@Composable
-private fun VideoThumbnail(url: String?, durationMs: Long, modifier: Modifier) {
-    val fallback = stringResource(R.string.video_ui_thumbnail)
-    val image = rememberVideoThumbnail(url)
-    val shape = RoundedCornerShape(8.dp)
-    Box(modifier.clip(shape).background(MaterialTheme.colorScheme.surfaceVariant)) {
-        val bitmap = image
-        if (bitmap != null) {
-            Image(
-                bitmap,
-                contentDescription = fallback,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(
-                    PeekturnIcons.Play,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        if (durationMs > 0L) {
-            Text(
-                formatClock(durationMs),
-                modifier = Modifier.align(Alignment.BottomEnd)
-                    .padding(4.dp)
-                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.72f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 5.dp, vertical = 1.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = androidx.compose.ui.graphics.Color.White,
-                fontWeight = FontWeight.Medium
-            )
-        }
-    }
-}
-
-@Composable
-internal fun rememberVideoThumbnail(url: String?): ImageBitmap? = key(url) {
-    val cached = remember(url) { url?.let { thumbnailCache.get(it) } }
-    val image by produceState<ImageBitmap?>(initialValue = cached, key1 = url) {
-        value = cached
-        if (cached == null && url != null) value = withContext(Dispatchers.IO) { loadThumbnail(url) }
-    }
-    image
-}
-
-/** In-memory only: thumbnails are never written to disk and are not video media. */
-private val thumbnailCache = object : LruCache<String, ImageBitmap>(8 * 1024 * 1024) {
-    override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
-}
-
-private val thumbnailClient by lazy {
-    OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
-}
-
-private fun loadThumbnail(url: String): ImageBitmap? {
-    if (!url.startsWith("https://") && !url.startsWith("http://")) return null
-    return try {
-        val request = Request.Builder().url(url).build()
-        thumbnailClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return null
-            val body = response.body ?: return null
-            val bytes = body.byteStream().use { BitmapFactory.decodeStream(it) } ?: return null
-            val bitmap = bytes.asImageBitmap()
-            thumbnailCache.put(url, bitmap)
-            bitmap
-        }
-    } catch (_: Exception) {
-        null
     }
 }

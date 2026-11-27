@@ -14,4 +14,21 @@
     <string name="playlist_library_remove_title">Remove playlist?</string>
     <string name="playlist_library_remove_message">Remove “%1$s” from your video library? Videos you added separately will stay.</string>
     <string name="playlist_library_remove_single">Remove the separate entry for “%1$s”? You can still open the video in your playlists with its progress and downloads.</string>
+    <string name="playlist_order_original">Playlist order</string>
+    <string name="playlist_order_reversed">Reverse playlist order</string>
+    <string name="playlist_order_oldest">Oldest first</string>
+    <string name="playlist_order_newest">Newest first</string>
+    <string name="playlist_unwatched">Unwatched</string>
+    <string name="playlist_in_progress">In progress</string>
+    <string name="playlist_watched">Watched</string>
+    <string name="playlist_current_episode">Current episode</string>
+    <string name="playlist_progress_position">In progress · %1$s</string>
+    <string name="playlist_completed_count">Playlist · %1$d of %2$d watched</string>
+    <string name="playlist_approx_year">Around %1$s</string>
+    <string name="playlist_episode_date_detail">%1$s · %2$s</string>
+    <string name="playlist_loading_dates">Updating publication dates…</string>
+    <string name="playlist_date_refresh_failed">Could not update publication dates.</string>
+    <string name="playlist_no_dates">No publication dates available. Showing playlist order.</string>
+    <string name="playlist_undated_last">Episodes without a date appear last.</string>
+    <string name="playlist_sort_save_failed">Could not save the playlist order.</string>
 </resources>

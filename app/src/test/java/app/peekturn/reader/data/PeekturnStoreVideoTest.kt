@@ -9,6 +9,8 @@ import app.peekturn.reader.model.BookReadingTime
 import app.peekturn.reader.model.ReadingDay
 import app.peekturn.reader.model.ReadingStats
 import app.peekturn.reader.model.VideoReadingTime
+import app.peekturn.reader.video.PlaylistSortOrder
+import app.peekturn.reader.video.VideoWatchState
 import app.peekturn.reader.video.VideoItem
 import app.peekturn.reader.video.VideoMetadata
 import app.peekturn.reader.video.VideoPlaylist
@@ -361,6 +363,78 @@ class PeekturnStoreVideoTest {
         assertEquals(listOf(kept.id), reopened.playlists.value.single().videoIds)
         reopened.deleteVideo(kept.id)
         assertEquals(VideoPlaylist("shared", "Other", emptyList()), reopened.playlists.value.single())
+    }
+
+    @Test fun versionEightMigratesCollectionsAndOnlyUsesDurablePlaybackToRestoreWatchState() = runBlocking {
+        createVersionOneDatabase()
+        SQLiteDatabase.openDatabase(context.getDatabasePath("peekturn.db").path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("""CREATE TABLE videos(id INTEGER PRIMARY KEY AUTOINCREMENT,video_id TEXT NOT NULL UNIQUE,title TEXT NOT NULL,
+                author TEXT NOT NULL,duration_ms INTEGER NOT NULL DEFAULT 0,thumbnail_url TEXT,position_ms INTEGER NOT NULL DEFAULT 0,
+                last_watched_at INTEGER NOT NULL DEFAULT 0,selected_track_id TEXT,track_explicit INTEGER NOT NULL DEFAULT 0,audio_only INTEGER,
+                read_mode INTEGER NOT NULL DEFAULT 0,standalone INTEGER NOT NULL DEFAULT 1,aspect_ratio REAL)""")
+            db.execSQL("CREATE TABLE video_daily(video_id INTEGER NOT NULL REFERENCES videos(id),date TEXT NOT NULL,seconds INTEGER NOT NULL,PRIMARY KEY(video_id,date))")
+            db.execSQL("CREATE TABLE video_playlists(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL)")
+            db.execSQL("CREATE TABLE video_playlist_items(playlist_id TEXT, position INTEGER, video_id INTEGER, PRIMARY KEY(playlist_id,position))")
+            db.execSQL("CREATE TABLE video_quality_heights(video_id INTEGER,height INTEGER, PRIMARY KEY(video_id,height))")
+            db.execSQL("""INSERT INTO videos(video_id,title,author,duration_ms,position_ms,last_watched_at,standalone)
+                VALUES('finished','First','Channel',30000,30000,12,0),('started','Second','Channel',30000,12000,13,0),
+                ('opened','Third','Channel',30000,0,14,0)""")
+            db.execSQL("INSERT INTO video_daily VALUES(3,'2026-11-24',7)")
+            db.execSQL("INSERT INTO video_playlists VALUES('series','Series')")
+            db.execSQL("INSERT INTO video_playlist_items VALUES('series',0,1),('series',1,2),('series',2,3)")
+            db.version = 8
+        }
+        store.load()
+        assertEquals(listOf(VideoPlaylist("series", "Series", listOf(1L, 2L, 3L))), store.playlists.value)
+        assertEquals(VideoWatchState.COMPLETED, store.findVideo(1)!!.watchState)
+        assertEquals(VideoWatchState.IN_PROGRESS, store.findVideo(2)!!.watchState)
+        assertEquals(VideoWatchState.UNWATCHED, store.findVideo(3)!!.watchState)
+        assertEquals(12_000L, store.findVideo(2)!!.positionMs)
+    }
+
+    @Test fun sourceRefreshKeepsSortArtworkAndMonotonicWatchHistory() = runBlocking {
+        val first = VideoMetadata("one", "First", "Channel", 60_000, "https://img.example/one", 1_000, true)
+        val second = VideoMetadata("two", "Second", "Channel", 60_000, null)
+        val original = YouTubePlaylist("series", "Series", listOf(first, second), "https://img.example/series")
+        store.savePlaylist(original)
+        val id = store.findVideoBySource("one")!!.id
+        val secondId = store.findVideoBySource("two")!!.id
+        store.setPlaylistSortOrder("series", PlaylistSortOrder.OLDEST)
+        store.advanceVideoWatchState(id, VideoWatchState.IN_PROGRESS)
+        assertEquals(VideoWatchState.IN_PROGRESS, store.videos.value.single { it.id == id }.watchState)
+        store.advanceVideoWatchState(id, VideoWatchState.COMPLETED)
+        store.advanceVideoWatchState(id, VideoWatchState.IN_PROGRESS)
+        store.saveVideoPosition(id, 2_000)
+        store.savePlaylist(original.copy(videos = listOf(second, first.copy(thumbnailUrl = null, publishedAtMs = 2_000)),
+            thumbnailUrl = null))
+        val refreshed = store.findVideo(id)!!
+        assertEquals(VideoWatchState.COMPLETED, refreshed.watchState)
+        assertEquals(first.thumbnailUrl, refreshed.thumbnailUrl)
+        assertEquals(1_000L, refreshed.publishedAtMs)
+        assertEquals(original.thumbnailUrl, store.playlists.value.single().thumbnailUrl)
+
+        val newThumbnail = "https://img.example/two"
+        store.refreshPlaylistMetadata(original.copy(videos = listOf(first.copy(thumbnailUrl = "https://img.example/different",
+            publishedAtMs = 3_000, publishedAtApproximate = false), second.copy(thumbnailUrl = newThumbnail),
+            second.copy(videoId = "never-imported")), thumbnailUrl = "https://img.example/new-cover"))
+        val saved = store.findVideo(id)!!
+        assertEquals(first.thumbnailUrl, saved.thumbnailUrl)
+        assertEquals(3_000L, saved.publishedAtMs)
+        assertFalse(saved.publishedAtApproximate)
+        assertEquals(2_000L, saved.positionMs)
+        assertEquals(VideoWatchState.COMPLETED, saved.watchState)
+        assertFalse(saved.isStandalone)
+        assertNull(store.findVideoBySource("never-imported"))
+        assertEquals(newThumbnail, store.findVideo(secondId)!!.thumbnailUrl)
+        store.refreshPlaylistMetadata(original.copy(videos = listOf(first.copy(publishedAtMs = 4_000)), thumbnailUrl = null))
+        val reopened = PeekturnStore(context)
+        reopened.load()
+        assertEquals(saved, reopened.findVideo(id))
+        assertEquals(VideoPlaylist("series", "Series", listOf(secondId, id), "https://img.example/new-cover",
+            PlaylistSortOrder.OLDEST), reopened.playlists.value.single())
+        reopened.removePlaylist("series")
+        reopened.refreshPlaylistMetadata(original)
+        assertTrue(reopened.playlists.value.isEmpty())
     }
 
     @Test fun rememberedVideoKeepsItsPlaylistUntilOpenedFromAnotherEntry() = runBlocking {

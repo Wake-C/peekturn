@@ -12,4 +12,21 @@
     <string name="playlist_library_remove_title">移除合集？</string>
     <string name="playlist_library_remove_message">从视频库移除“%1$s”？单独添加过的视频会保留。</string>
     <string name="playlist_library_remove_single">移除“%1$s”的独立条目？你仍可在合集中打开这个视频，观看进度和下载会保留。</string>
+    <string name="playlist_order_original">合集顺序</string>
+    <string name="playlist_order_reversed">合集倒序</string>
+    <string name="playlist_order_oldest">最早发布</string>
+    <string name="playlist_order_newest">最新发布</string>
+    <string name="playlist_unwatched">未观看</string>
+    <string name="playlist_in_progress">观看中</string>
+    <string name="playlist_watched">已看完</string>
+    <string name="playlist_current_episode">当前选集</string>
+    <string name="playlist_progress_position">观看中 · %1$s</string>
+    <string name="playlist_completed_count">合集 · 已看完 %1$d/%2$d 集</string>
+    <string name="playlist_approx_year">约 %1$s 年</string>
+    <string name="playlist_episode_date_detail">%1$s · %2$s</string>
+    <string name="playlist_loading_dates">正在更新发布时间…</string>
+    <string name="playlist_date_refresh_failed">未能更新发布时间。</string>
+    <string name="playlist_no_dates">暂无发布时间，按合集顺序显示。</string>
+    <string name="playlist_undated_last">没有发布时间的分集排在末尾。</string>
+    <string name="playlist_sort_save_failed">未能保存合集排序。</string>
 </resources>

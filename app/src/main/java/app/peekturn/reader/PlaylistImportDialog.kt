@@ -2,6 +2,14 @@ package app.peekturn.reader
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Alignment
+import app.peekturn.reader.video.VideoThumbnail
+import app.peekturn.reader.video.videoThumbnailUrls
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
@@ -43,8 +51,13 @@ internal fun PlaylistImportDialog(
                 is PlaylistImport.Failed -> Text(stringResource(state.messageRes))
                 is PlaylistImport.Preview -> {
                     val videos = state.playlist.videos
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(pluralStringResource(R.plurals.playlist_available, videos.size, videos.size))
+                    val cover = videos.firstOrNull { !it.thumbnailUrl.isNullOrBlank() } ?: videos.firstOrNull()
+                    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            VideoThumbnail(videoThumbnailUrls(cover?.videoId, state.playlist.thumbnailUrl, cover?.thumbnailUrl),
+                                0L, Modifier.width(88.dp).aspectRatio(16f / 9f))
+                            Text(pluralStringResource(R.plurals.playlist_available, videos.size, videos.size))
+                        }
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             videos.take(3).forEach { video ->
                                 Text(video.title, maxLines = 1, overflow = TextOverflow.Ellipsis,

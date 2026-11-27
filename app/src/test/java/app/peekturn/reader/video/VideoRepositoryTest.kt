@@ -70,6 +70,19 @@ class VideoRepositoryTest {
         )
     }
 
+    @Test fun openingAnEpisodeRefinesItsDateAndImageWithoutCreatingAShelfEntry() = runBlocking {
+        val approximate = metadata.copy(publishedAtMs = 1_000, publishedAtApproximate = true)
+        store.savePlaylist(YouTubePlaylist("series", "Series", listOf(approximate)))
+        val item = store.videos.value.single()
+        metadata = metadata.copy(publishedAtMs = 2_000, thumbnailUrl = "https://img.example/one")
+        val session = repository.open(item.id)
+        assertEquals(2_000L, session.item.publishedAtMs)
+        assertFalse(session.item.publishedAtApproximate)
+        assertEquals(metadata.thumbnailUrl, session.item.thumbnailUrl)
+        assertFalse(session.item.isStandalone)
+        assertEquals(session.item, store.findVideo(item.id))
+    }
+
     @Test fun completedOfflineEntryOpensAndReimportsWithoutResolvingOrFetching() = runBlocking {
         store.savePlaylist(YouTubePlaylist("list", "List", listOf(metadata)))
         val item = store.videos.value.single()

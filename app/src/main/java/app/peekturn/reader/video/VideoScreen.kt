@@ -190,7 +190,8 @@ internal fun VideoScreen(
     }
 
     if (choosingEpisode && playlist != null) {
-        EpisodeSheet(playlist.title, episodes, state.item?.id, onDismiss = { choosingEpisode = false }) { id ->
+        EpisodeSheet(playlist, episodes, state.item?.id, onSort = { vm.saveEpisodeSort(playlist.id, it) },
+            onRefreshDates = vm::refreshEpisodeDates, onDismiss = { choosingEpisode = false }) { id ->
             choosingEpisode = false
             if (id != state.item?.id) onEpisode(id)
         }
@@ -458,40 +459,6 @@ internal fun VideoTopBar(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun EpisodeSheet(title: String, episodes: List<VideoItem>, selectedId: Long?,
-    onDismiss: () -> Unit, onSelect: (Long) -> Unit) {
-    val current = episodes.indexOfFirst { it.id == selectedId }
-    ModalBottomSheet(onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Text(title, Modifier.padding(horizontal = 22.dp),
-            style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Text(androidx.compose.ui.res.pluralStringResource(R.plurals.playlist_library_episodes, episodes.size, episodes.size),
-            Modifier.padding(start = 22.dp, end = 22.dp, top = 4.dp, bottom = 14.dp),
-            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        LazyColumn(state = rememberLazyListState(initialFirstVisibleItemIndex = current.coerceAtLeast(0)),
-            contentPadding = PaddingValues(bottom = 12.dp), modifier = Modifier.fillMaxWidth().selectableGroup()) {
-            itemsIndexed(episodes, key = { _, episode -> episode.id }) { index, episode ->
-                val selected = episode.id == selectedId
-                val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)
-                    .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, RoundedCornerShape(8.dp))
-                    .selectable(selected, role = Role.RadioButton,
-                        onClick = { onSelect(episode.id) }).heightIn(min = 54.dp).padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text((index + 1).toString(), style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.widthIn(min = 24.dp), color = color)
-                    Text(episode.title, Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis, color = color)
-                    if (selected) Icon(PeekturnIcons.Check, null, Modifier.size(16.dp), tint = color)
-                    if (episode.durationMs > 0) Text(formatClock(episode.durationMs),
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-    }
-}
-
 @Composable
 private fun PictureTapLayer(vm: VideoViewModel, modifier: Modifier) {
     val interaction = remember { MutableInteractionSource() }
@@ -531,7 +498,7 @@ private fun PlayerSurface(player: Player, modifier: Modifier) {
 
 @Composable
 private fun OpeningPicture(state: VideoPlaybackState, modifier: Modifier) {
-    val poster = rememberVideoThumbnail(state.item?.thumbnailUrl)
+    val poster = rememberVideoThumbnail(videoThumbnailUrls(state.item?.videoId, state.item?.thumbnailUrl))
     val loading = stringResource(R.string.video_ui_loading)
     Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
         if (poster != null) {

@@ -98,7 +98,7 @@ class VideoRepository internal constructor(
             ?.takeIf { nowSeconds() < it.reuseUntilSeconds }
         val resolved = try { recent?.video ?: resolve(item.videoId) }
         catch (failure: VideoFailure) { if (cached != null) return cached.copy(watchFallbackFailure = failure.kind) else throw failure }
-        return session(opened(item), resolved).copy(reusedOnlineSource = recent != null)
+        return session(opened(item, resolved.metadata), resolved).copy(reusedOnlineSource = recent != null)
     }
 
     private fun suppliesChosenView(item: VideoItem, cached: VideoSessionData): Boolean =
@@ -226,8 +226,8 @@ class VideoRepository internal constructor(
         item.selectedTrackId?.takeIf { item.trackExplicit }
             ?.let { id -> tracks.firstOrNull { it.id == id } } ?: preferredTrack(tracks)
 
-    private suspend fun opened(item: VideoItem): VideoItem = try {
-        store.markVideoOpened(item.id, remember = false)
+    private suspend fun opened(item: VideoItem, metadata: VideoMetadata? = null): VideoItem = try {
+        store.markVideoOpened(item.id, remember = false, metadata = metadata)
         store.findVideo(item.id) ?: item
     } catch (cancelled: CancellationException) {
         throw cancelled

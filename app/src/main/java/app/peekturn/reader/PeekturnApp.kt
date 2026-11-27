@@ -17,6 +17,7 @@ import java.io.File
 import app.peekturn.reader.speech.PronunciationPlayer
 import app.peekturn.reader.video.CaptionMergeClient
 import app.peekturn.reader.video.VideoCaptionCache
+import app.peekturn.reader.video.VideoThumbnails
 import app.peekturn.reader.video.VideoMediaCache
 import app.peekturn.reader.video.VideoRepository
 import app.peekturn.reader.video.VideoDownloads
@@ -74,6 +75,7 @@ class AppGraph(
         developerLog.recordEvent("video-http", event)
     })
     val videoCaptions = VideoCaptionCache(File(context.applicationContext.noBackupFilesDir, "video-captions"))
+    internal val videoThumbnails by lazy { VideoThumbnails(File(context.cacheDir, "video-thumbnails")) }
     internal val videoMediaCache by lazy {
         VideoMediaCache(context.applicationContext,
             onFailure = { failure -> developerLog.recordFailure("video", "media-cache", failure) },

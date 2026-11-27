@@ -35,6 +35,7 @@ import app.peekturn.reader.model.LookupContext
 import app.peekturn.reader.model.ReaderPreferences
 import app.peekturn.reader.reader.withTypography
 import app.peekturn.reader.narration.NarrationService
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -165,6 +166,32 @@ internal class VideoViewModel(
     private val _playlistId = MutableStateFlow<String?>(null)
     val playlistId = _playlistId.asStateFlow()
 
+    private val refreshedEpisodeDates = mutableSetOf<String>()
+
+    suspend fun saveEpisodeSort(id: String, order: PlaylistSortOrder): Boolean = graph.scope.async {
+        try {
+            graph.store.setPlaylistSortOrder(id, order)
+            true
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            graph.developerLog.recordFailure("video", "playlist-sort", failure)
+            false
+        }
+    }.await()
+
+    suspend fun refreshEpisodeDates(id: String): Boolean {
+        if (id in refreshedEpisodeDates) return true
+        return try {
+            graph.store.refreshPlaylistMetadata(graph.videoSource.playlist(id, enrichDates = true))
+            refreshedEpisodeDates.add(id)
+            true
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            graph.developerLog.recordFailure("video", "playlist-dates", failure)
+            false
+        }
+    }
+
     fun openFromIntent(id: Long?, url: String?, playlistId: String?, autoPlay: Boolean, newOpen: Boolean) {
         _playlistId.value = playlistId
         start(id, url, autoPlay = autoPlay, newOpen = newOpen)
@@ -283,6 +310,13 @@ internal class VideoViewModel(
                     _state.update { it.copy(lookup = it.lookup?.copy(resumeOnDismiss = false)) }
                     persistPosition()
                 }
+            }
+
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                val current = _state.value
+                progress.reposition(newPosition.positionMs.takeIf {
+                    current.phase is VideoPhase.Ready && current.lookup == null && player.isPlaying
+                })
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -631,7 +665,7 @@ internal class VideoViewModel(
         }
         if (!preserveCheckpoint) {
             lastSavedPosition = item.positionMs
-            progress.begin(item.id)
+            progress.begin(item.id, item.watchState)
         }
         if (foreground) rememberForegroundVideo()
         val itemTracker = trackerFor(item)
@@ -1767,8 +1801,23 @@ internal class VideoViewModel(
         val current = _state.value
         val item = current.item ?: return null
         if (current.lookup != null) return null
-        return progress.observe(item.id, player.currentPosition, SystemClock.elapsedRealtime(),
-            current.phase is VideoPhase.Ready && player.playbackState == Player.STATE_READY && player.isPlaying)
+        val previous = progress.watchState
+        val ready = current.phase is VideoPhase.Ready
+        val eligible = progress.observe(item.id, player.currentPosition, SystemClock.elapsedRealtime(),
+            playing = ready && player.isPlaying,
+            endedWhilePlaying = ready && player.playWhenReady && player.playbackState == Player.STATE_ENDED)
+        val observed = progress.watchState
+        if (observed != previous) graph.scope.launch {
+            try {
+                graph.store.advanceVideoWatchState(item.id, observed)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                graph.developerLog.recordFailure("video", "watch-state", failure)
+                progress.watchWriteFailed(item.id, observed, previous)
+            }
+        }
+        return eligible
     }
 
     private fun persistPosition() {

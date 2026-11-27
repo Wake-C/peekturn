@@ -5,10 +5,18 @@ data class VideoLink(val videoId: String, val startMs: Long? = null) {
 }
 
 data class VideoMetadata(val videoId: String, val title: String, val author: String,
-    val durationMs: Long, val thumbnailUrl: String?)
+    val durationMs: Long, val thumbnailUrl: String?, val publishedAtMs: Long? = null,
+    val publishedAtApproximate: Boolean = false)
 
-/** A saved YouTube playlist. Members refer to local video rows in source order. */
-data class VideoPlaylist(val id: String, val title: String, val videoIds: List<Long>)
+enum class PlaylistSortOrder { ORIGINAL, REVERSED, OLDEST, NEWEST }
+
+enum class VideoWatchState(internal val rank: Int) {
+    UNWATCHED(0), IN_PROGRESS(1), COMPLETED(2)
+}
+
+/** Membership is stored in source order, independent of the chosen presentation. */
+data class VideoPlaylist(val id: String, val title: String, val videoIds: List<Long>,
+    val thumbnailUrl: String? = null, val sortOrder: PlaylistSortOrder = PlaylistSortOrder.ORIGINAL)
 
 data class VideoItem(val id: Long, val videoId: String, val title: String, val author: String,
     val durationMs: Long, val thumbnailUrl: String?, val positionMs: Long = 0,
@@ -19,7 +27,9 @@ data class VideoItem(val id: Long, val videoId: String, val title: String, val a
     val readMode: Boolean = false,
     /** Shown on the main shelf as well as in any playlists that contain it. */
     val isStandalone: Boolean = true,
-    val aspectRatio: Float? = null)
+    val aspectRatio: Float? = null,
+    val publishedAtMs: Long? = null, val publishedAtApproximate: Boolean = false,
+    val watchState: VideoWatchState = VideoWatchState.UNWATCHED)
 
 /** Resolved URLs are session-only and must never be persisted or logged. */
 data class CaptionTrack(val id: String, val language: String, val automatic: Boolean, val url: String,
